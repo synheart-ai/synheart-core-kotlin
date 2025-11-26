@@ -5,6 +5,7 @@ import com.synheart.hsi.models.MetaState
 import com.synheart.hsi.models.DeviceInfo
 import com.synheart.hsi.models.BehaviorState
 import com.synheart.hsi.models.ContextState
+import com.synheart.hsi.models.SignalType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.filter
@@ -60,13 +61,13 @@ class FusionEngine(
      */
     private fun extractBehaviorMetrics(processed: ProcessedSignal): BehaviorState? {
         val typingSignals = processed.rawSignals.filter { 
-            it.type == com.synheart.hsi.models.SignalData.SignalType.TYPING 
+            it.type == SignalType.TYPING 
         }
         val scrollingSignals = processed.rawSignals.filter { 
-            it.type == com.synheart.hsi.models.SignalData.SignalType.SCROLLING 
+            it.type == SignalType.SCROLLING 
         }
         val appSwitchSignals = processed.rawSignals.filter { 
-            it.type == com.synheart.hsi.models.SignalData.SignalType.APP_SWITCH 
+            it.type == SignalType.APP_SWITCH 
         }
         
         if (typingSignals.isEmpty() && scrollingSignals.isEmpty() && appSwitchSignals.isEmpty()) {

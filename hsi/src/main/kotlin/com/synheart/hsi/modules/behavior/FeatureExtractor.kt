@@ -1,6 +1,8 @@
 package com.synheart.hsi.modules.behavior
 
 import com.synheart.hsi.modules.interfaces.BehaviorWindowFeatures
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 /// Extracts behavioral features from events
 class BehaviorFeatureExtractor {
@@ -128,9 +130,9 @@ class BehaviorFeatureExtractor {
         if (intervals.isEmpty()) return 0.0
         
         val mean = intervals.average()
-        val variance = intervals.map { kotlin.math.pow(it - mean, 2.0) }.average()
+        val variance = intervals.map { (it - mean).pow(2.0) }.average()
         
-        return (kotlin.math.sqrt(variance) / (mean + 0.001)).coerceIn(0.0, 1.0) // Normalize
+        return (sqrt(variance) / (mean + 0.001)).coerceIn(0.0, 1.0) // Normalize
     }
     
     private fun calculateFragmentation(events: List<BehaviorEvent>): Double {

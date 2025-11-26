@@ -1,6 +1,7 @@
 package com.synheart.hsi.core
 
 import com.synheart.hsi.models.SignalData
+import com.synheart.hsi.models.SignalType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.math.pow
@@ -11,7 +12,7 @@ import kotlin.math.sqrt
  */
 class SignalProcessor {
     
-    private val signalBuffer = mutableMapOf<SignalData.SignalType, MutableList<SignalData>>()
+    private val signalBuffer = mutableMapOf<SignalType, MutableList<SignalData>>()
     private val baselineValues = mutableMapOf<String, Float>()
     
     /**
@@ -95,15 +96,15 @@ class SignalProcessor {
     /**
      * Normalize a single value based on its type and baseline
      */
-    private fun normalizeValue(key: String, value: Float, type: SignalData.SignalType): Float {
+    private fun normalizeValue(key: String, value: Float, type: SignalType): Float {
         val baseline = baselineValues.getOrPut(key) { value }
         
         return when (type) {
-            SignalData.SignalType.HEART_RATE -> {
+            SignalType.HEART_RATE -> {
                 // Normalize HR: (value - baseline) / baseline
                 (value - baseline) / baseline
             }
-            SignalData.SignalType.HRV -> {
+            SignalType.HRV -> {
                 // Normalize HRV: (value - baseline) / baseline
                 (value - baseline) / baseline
             }
@@ -119,11 +120,11 @@ class SignalProcessor {
      */
     private fun calculateDerivedMetrics(signals: List<SignalData>): ProcessedSignal {
         val heartRateValues = signals
-            .filter { it.type == SignalData.SignalType.HEART_RATE }
+            .filter { it.type == SignalType.HEART_RATE }
             .flatMap { it.values.values }
         
         val hrvValues = signals
-            .filter { it.type == SignalData.SignalType.HRV }
+            .filter { it.type == SignalType.HRV }
             .flatMap { it.values.values }
         
         val rmssd = calculateRMSSD(hrvValues)
@@ -165,7 +166,7 @@ class SignalProcessor {
      * Calculate burstiness index for behavioral signals
      */
     private fun calculateBurstiness(signals: List<SignalData>): Float {
-        val typingSignals = signals.filter { it.type == SignalData.SignalType.TYPING }
+        val typingSignals = signals.filter { it.type == SignalType.TYPING }
         if (typingSignals.size < 2) return 0f
         
         val intervals = typingSignals.zipWithNext { a, b -> 
@@ -179,7 +180,7 @@ class SignalProcessor {
         
         // Burstiness = (stdDev - mean) / (stdDev + mean)
         return if (mean > 0 && stdDev + mean > 0) {
-            (stdDev - mean) / (stdDev + mean)
+            ((stdDev - mean) / (stdDev + mean)).toFloat()
         } else 0f
     }
     

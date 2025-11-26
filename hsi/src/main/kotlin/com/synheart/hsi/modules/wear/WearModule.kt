@@ -4,10 +4,10 @@ import com.synheart.hsi.modules.base.BaseSynheartModule
 import com.synheart.hsi.modules.interfaces.CapabilityLevel
 import com.synheart.hsi.modules.interfaces.CapabilityProvider
 import com.synheart.hsi.modules.interfaces.ConsentProvider
-import com.synheart.hsi.modules.interfaces.FeatureProviders
 import com.synheart.hsi.modules.interfaces.Module
 import com.synheart.hsi.modules.interfaces.SleepStage
 import com.synheart.hsi.modules.interfaces.WearFeatureProvider
+import com.synheart.hsi.modules.interfaces.WearWindowFeatures
 import com.synheart.hsi.modules.interfaces.WindowType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow

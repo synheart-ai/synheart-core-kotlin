@@ -49,7 +49,7 @@ class MockWearSourceHandler : WearSourceHandler {
         scope.cancel()
     }
     
-    private fun generateSample() {
+    private suspend fun generateSample() {
         sampleCount++
         
         // Simulate HR variation (±5 bpm)
