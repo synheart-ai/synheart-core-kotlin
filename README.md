@@ -1,6 +1,23 @@
 # Synheart Core SDK - Android
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+
 **Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, generate focus/emotion signals, and integrate with Syni.
+
+> **📦 SDK Implementations**: This is the Android/Kotlin implementation. For documentation and other platforms, see the repositories below.
+
+## 📦 Repository Structure
+
+The Synheart Core SDK is organized across multiple repositories:
+
+| Repository | Purpose |
+|------------|---------|
+| **[synheart-core](https://github.com/synheart-ai/synheart-core)** | Main repository (source of truth for documentation) |
+| **[synheart-core-dart](https://github.com/synheart-ai/synheart-core-dart)** | Flutter/Dart implementation |
+| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin implementation (this repository) |
+| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift implementation |
 
 ## Overview
 
@@ -20,21 +37,44 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 
 ## Architecture
 
-The Core SDK consists of **7 core modules** working together:
+### Core Principle
+
+> **HSI represents human state.**
+>
+> **Interpretation is downstream and optional.**
+
+The Core SDK strictly separates:
+- **Representation (HSI)** - State axes, indices, embeddings
+- **Interpretation (Focus, Emotion)** - Optional, explicit modules
+- **Application logic** - Your app
+
+### Core Modules
 
 1. **Capabilities Module** - Feature gating (core/extended/research)
 2. **Consent Module** - User permission management
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (produces Human State Vector)
+6. **HSI Runtime** - Signal fusion and state representation
 7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
 
-The **HSI Runtime** module:
-- Ingests signals from Wear, Phone, and Behavior modules
-- Fuses them into a unified **Human State Vector (HSV)**
-- Feeds higher-level models (Emotion Engine, Focus Engine)
-- Powers Syni's LLM layer for human-aware AI
+### Optional Interpretation Modules
+
+- **Synheart Focus** - Focus/engagement estimation (optional, explicit enable)
+- **Synheart Emotion** - Affect modeling (optional, explicit enable)
+
+### Data Flow
+
+```
+Wear, Phone, Behavior Modules
+    ↓
+HSI Runtime
+    ↓
+HSI (State Representation)
+    ↓
+Optional: Focus Module → Focus Estimates
+Optional: Emotion Module → Emotion Estimates
+```
 
 ## Setup
 
@@ -44,9 +84,9 @@ Add the library to your `build.gradle`:
 
 ```gradle
 dependencies {
-    implementation project(':hsi')
+    implementation project(':synheart-core')
     // Or if published to Maven:
-    // implementation 'com.synheart:hsi:1.0.0'
+    // implementation 'ai.synheart:core-sdk:1.0.0'
 }
 ```
 
@@ -68,58 +108,63 @@ Add required permissions to your `AndroidManifest.xml`:
 
 ### Basic Usage
 
+The Core SDK provides HSI (Human State Interface) as the core state representation, with optional interpretation modules for Focus and Emotion:
+
 ```kotlin
-import com.synheart.hsi.HSI
-import com.synheart.hsi.models.HumanStateVector
-import kotlinx.coroutines.flow.collect
+import com.synheart.core.Synheart
+import com.synheart.core.models.SynheartConfig
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Configure Core SDK with your app key
-        HSI.configure("your-app-key")
-        
-        // Start HSI
-        HSI.start(this)
-        
-        // Observe state updates
+
         lifecycleScope.launch {
-            HSI.stateFlow.collect { hsv ->
-                hsv?.let { updateUI(it) }
+            // Initialize the Core SDK
+            Synheart.initialize(
+                context = this@MainActivity,
+                userId = "anon_user_123",
+                config = SynheartConfig(
+                    enableWear = true,
+                    enablePhone = true,
+                    enableBehavior = true
+                )
+            )
+
+            // Subscribe to HSI updates (core state representation)
+            launch {
+                Synheart.onHSIUpdate.collect { hsi ->
+                    println("Arousal Index: ${hsi.affect?.arousalIndex}")
+                    println("Engagement Stability: ${hsi.engagement?.engagementStability}")
+                }
             }
+
+            // Optional: Enable interpretation modules
+            Synheart.enableFocus()
+            launch {
+                Synheart.onFocusUpdate.collect { focus ->
+                    println("Focus Score: ${focus.score}")
+                }
+            }
+
+            Synheart.enableEmotion()
+            launch {
+                Synheart.onEmotionUpdate.collect { emotion ->
+                    println("Stress Index: ${emotion.stress}")
+                }
+            }
+
+            // Optional: Enable cloud sync (requires consent)
+            // Synheart.enableCloud()
         }
     }
-    
-    private fun updateUI(hsv: HumanStateVector) {
-        // Access emotion state
-        hsv.emotion?.let { emotion ->
-            val stress = emotion.stress
-            val engagement = emotion.engagement
-            // Update UI...
-        }
-        
-        // Access focus state
-        hsv.focus?.let { focus ->
-            val score = focus.score
-            val cognitiveLoad = focus.cognitiveLoad
-            // Update UI...
-        }
-        
-        // Access behavior
-        hsv.behavior?.let { behavior ->
-            val typingSpeed = behavior.typingSpeed
-            val engagementLevel = behavior.engagementLevel
-            // Update UI...
-        }
-    }
-    
+
     override fun onDestroy() {
         super.onDestroy()
-        // Stop HSI when done
-        HSI.stop()
+        lifecycleScope.launch {
+            Synheart.stop()
+        }
     }
 }
 ```
@@ -129,8 +174,8 @@ class MainActivity : AppCompatActivity() {
 The SDK also provides a modular architecture for windowed feature collection:
 
 ```kotlin
-import com.synheart.hsi.modules.*
-import com.synheart.hsi.modules.consent.ConsentStorage
+import com.synheart.core.modules.*
+import com.synheart.core.modules.consent.ConsentStorage
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
@@ -346,10 +391,12 @@ All three implementations share the same modular architecture. See the Flutter r
 3. **Integrate model packages**: Connect synheart_emotion and synheart_focus modules
 4. **Cloud sync**: Implement cloud sync functionality (optional, with consent)
 
-## License
+## 📄 License
 
-[Add your license here]
+Apache 2.0 License - see [LICENSE](LICENSE) for details.
+
+Copyright 2025 Synheart AI Inc.
 
 ## Author
 
-Israel Goytom
+Synheart AI Team

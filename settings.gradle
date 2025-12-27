@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "hsi-android"
-include ':hsi'
+rootProject.name = "synheart-core-android"
+include ':synheart-core'
 
