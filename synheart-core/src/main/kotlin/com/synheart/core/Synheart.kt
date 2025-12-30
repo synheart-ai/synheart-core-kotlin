@@ -1,6 +1,7 @@
 package com.synheart.core
 
 import android.content.Context
+import com.synheart.core.config.SynheartConfig
 import com.synheart.core.models.*
 import com.synheart.core.modules.base.ModuleManager
 import com.synheart.core.modules.capabilities.CapabilityModule
@@ -11,6 +12,8 @@ import com.synheart.core.modules.phone.PhoneModule
 import com.synheart.core.modules.behavior.BehaviorModule
 import com.synheart.core.modules.hsi_runtime.HSIRuntimeModule
 import com.synheart.core.modules.hsi_runtime.ChannelCollector
+import com.synheart.core.modules.cloud.CloudConnectorModule
+import com.synheart.core.modules.cloud.ConsentRequiredError
 import com.synheart.core.heads.EmotionHead
 import com.synheart.core.heads.FocusHead
 import kotlinx.coroutines.CoroutineScope
@@ -90,7 +93,7 @@ object Synheart {
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
     private var hsiRuntimeModule: HSIRuntimeModule? = null
-    // TODO: CloudConnectorModule
+    private var cloudConnector: CloudConnectorModule? = null
     // TODO: SyniHooksModule
 
     // Optional interpretation modules
@@ -213,18 +216,34 @@ object Synheart {
                 dependsOn = listOf("wear", "phone", "behavior")
             )
 
-            // 6. Initialize all modules
+            // 6. Initialize Cloud Connector (optional, depends on config)
+            if (config?.cloudConfig != null) {
+                println("[Synheart] Initializing Cloud Connector...")
+                cloudConnector = CloudConnectorModule(
+                    context = this.context,
+                    capabilities = capabilityModule!!,
+                    consent = consentModule!!,
+                    hsiRuntime = hsiRuntimeModule!!,
+                    config = config.cloudConfig!!
+                )
+                moduleManager.registerModule(
+                    cloudConnector!!,
+                    dependsOn = listOf("capabilities", "consent", "hsi_runtime")
+                )
+            }
+
+            // 7. Initialize all modules
             println("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
-            // 7. Subscribe to HSI stream (core state only)
+            // 8. Subscribe to HSI stream (core state only)
             scope.launch {
                 hsiRuntimeModule?.hsiFlow?.collect { hsi ->
                     _hsiFlow.value = hsi
                 }
             }
 
-            // 8. Start modules
+            // 9. Start modules
             println("[Synheart] Starting all modules...")
             moduleManager.startAll()
 
@@ -341,8 +360,64 @@ object Synheart {
      * ```
      */
     suspend fun enableCloud() {
-        // TODO: Implement cloud sync
-        throw NotImplementedError("Cloud sync not yet implemented")
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before enabling cloud")
+        }
+
+        if (!consentModule!!.current().cloudUpload) {
+            throw ConsentRequiredError("cloudUpload consent required")
+        }
+
+        if (cloudConnector == null) {
+            throw IllegalStateException("Cloud connector not configured. Provide cloudConfig during initialization")
+        }
+
+        cloudConnector?.start()
+    }
+
+    /**
+     * Force upload of queued snapshots now
+     *
+     * @throws ConsentRequiredError if cloudUpload consent not granted
+     */
+    suspend fun uploadNow() {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before uploading")
+        }
+
+        if (cloudConnector == null) {
+            throw IllegalStateException("Cloud connector not enabled")
+        }
+
+        cloudConnector?.uploadNow()
+    }
+
+    /**
+     * Flush entire upload queue
+     *
+     * Attempts to upload all queued snapshots while online.
+     */
+    suspend fun flushUploadQueue() {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before flushing queue")
+        }
+
+        if (cloudConnector == null) {
+            throw IllegalStateException("Cloud connector not enabled")
+        }
+
+        cloudConnector?.flushQueue()
+    }
+
+    /**
+     * Disable cloud uploads
+     */
+    suspend fun disableCloud() {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before disabling cloud")
+        }
+
+        cloudConnector?.stop()
     }
 
     /**
@@ -475,6 +550,7 @@ object Synheart {
             phoneModule = null
             behaviorModule = null
             hsiRuntimeModule = null
+            cloudConnector = null
             emotionHead = null
             focusHead = null
             isConfigured = false
