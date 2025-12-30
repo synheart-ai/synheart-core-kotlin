@@ -1,4 +1,4 @@
-# Synheart Core SDK - Android
+# Synheart Core SDK - Kotlin
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
@@ -26,7 +26,7 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSI Runtime** → Signal fusion + state computation
+- **HSV Runtime** → Signal fusion + on-device state computation (HSV is internal; HSI is export)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
 - **Cloud Connector** → Secure HSI snapshot uploads (planned)
@@ -55,7 +55,7 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state representation
+6. **HSV Runtime** - Signal fusion and internal state representation (HSV)
 7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
 
 ### Optional Interpretation Modules
@@ -68,7 +68,7 @@ The Core SDK strictly separates:
 ```
 Wear, Phone, Behavior Modules
     ↓
-HSI Runtime
+HSV Runtime
     ↓
 HSI (State Representation)
     ↓
@@ -132,11 +132,11 @@ class MainActivity : AppCompatActivity() {
                 )
             )
 
-            // Subscribe to HSI updates (core state representation)
+            // Subscribe to HSV updates (internal state representation)
             launch {
-                Synheart.onHSIUpdate.collect { hsi ->
-                    println("Arousal Index: ${hsi.affect?.arousalIndex}")
-                    println("Engagement Stability: ${hsi.engagement?.engagementStability}")
+                Synheart.onHSVUpdate.collect { hsv ->
+                    println("Arousal Index: ${hsv.affect?.arousalIndex}")
+                    println("Engagement Stability: ${hsv.engagement?.engagementStability}")
                 }
             }
 
@@ -197,8 +197,8 @@ val collector = ChannelCollector(
     behavior = behaviorModule
 )
 
-// Create HSI Runtime
-val runtime = HSIRuntimeModule(collector = collector)
+// Create HSV Runtime
+val runtime = HSVRuntimeModule(collector = collector)
 
 // Initialize and start modules
 lifecycleScope.launch {
@@ -233,7 +233,7 @@ lifecycleScope.launch {
 ### Access Current State
 
 ```kotlin
-val currentState = HSI.currentState
+val currentState = Synheart.currentState
 currentState?.emotion?.stress?.let { stressLevel ->
     // Handle stress level
 }
@@ -241,7 +241,7 @@ currentState?.emotion?.stress?.let { stressLevel ->
 
 ### Lifecycle Integration
 
-HSI integrates with Android lifecycle. The service will continue running in the background even when your activity is paused.
+Synheart integrates with Android lifecycle. When using the Cloud Connector and/or background collectors, modules may continue running beyond a single Activity lifecycle depending on your integration.
 
 ## Data Models
 

@@ -3,11 +3,13 @@ package com.synheart.core.modules.cloud
 import android.content.Context
 import com.synheart.core.config.CloudConfig
 import com.synheart.core.models.HumanStateVector
+import com.synheart.core.models.HSIExportAccessContext
 import com.synheart.core.models.toHSI10
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.consent.ConsentModule
-import com.synheart.core.modules.hsi_runtime.HSIRuntimeModule
+import com.synheart.core.modules.hsv_runtime.HSVRuntimeModule
 import com.synheart.core.modules.interfaces.CapabilityProvider
+import com.synheart.core.modules.interfaces.Module
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +43,7 @@ class CloudConnectorModule(
     private val context: Context?,
     private val capabilities: CapabilityProvider,
     private val consent: ConsentModule,
-    private val hsiRuntime: HSIRuntimeModule,
+    private val hsvRuntime: HSVRuntimeModule,
     private val config: CloudConfig
 ) : BaseSynheartModule("cloud") {
 
@@ -79,7 +81,7 @@ class CloudConnectorModule(
 
         // 1. Subscribe to HSV stream
         hsvSubscription = scope.launch {
-            hsiRuntime.hsiFlow.collect { hsv ->
+            hsvRuntime.hsvFlow.collect { hsv ->
                 hsv?.let { handleHSVUpdate(it) }
             }
         }
@@ -132,6 +134,11 @@ class CloudConnectorModule(
             return // Silent return - no upload
         }
 
+        // Check capability
+        if (capabilities.capability(Module.CLOUD) == com.synheart.core.modules.interfaces.CapabilityLevel.NONE) {
+            return // Silent return - no upload
+        }
+
         // Check rate limit (based on window type, defaulting to "micro")
         val windowType = "micro" // TODO: Extract from HSV when available
         if (!rateLimiter.canUpload(windowType)) {
@@ -168,10 +175,21 @@ class CloudConnectorModule(
         try {
             // Convert HSV → HSI 1.0
             val hsi10Snapshots = batch.map { hsv ->
+                val c = consent.current()
                 hsv.toHSI10(
                     producerName = "Synheart Core SDK",
                     producerVersion = "1.0.0",
-                    instanceId = config.instanceId
+                    instanceId = config.instanceId,
+                    access = HSIExportAccessContext(
+                        capabilityHsi = capabilities.capability(Module.HSV_RUNTIME).name,
+                        capabilityCloud = capabilities.capability(Module.CLOUD).name,
+                        consentBiosignals = c.biosignals,
+                        consentPhoneContext = c.phoneContext,
+                        consentBehavior = c.behavior,
+                        consentCloudUpload = c.cloudUpload,
+                        consentEmotionEstimation = c.emotionEstimation,
+                        consentFocusEstimation = c.focusEstimation
+                    )
                 )
             }
 
@@ -224,6 +242,9 @@ class CloudConnectorModule(
     suspend fun uploadNow() {
         if (!consent.current().cloudUpload) {
             throw ConsentRequiredError("cloudUpload consent required")
+        }
+        if (capabilities.capability(Module.CLOUD) == com.synheart.core.modules.interfaces.CapabilityLevel.NONE) {
+            throw CapabilityRequiredError("cloud capability required")
         }
         attemptUpload()
     }

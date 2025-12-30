@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.synheart.hsi">
+    package="com.synheart.core">
 
     <!-- Permissions for signal collection -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -19,12 +19,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
-        <!-- HSI Ingestion Service -->
-        <service
-            android:name=".core.IngestionService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="health" />
+        <!-- No services required for the v0 module-based runtime -->
     </application>
 
 </manifest>

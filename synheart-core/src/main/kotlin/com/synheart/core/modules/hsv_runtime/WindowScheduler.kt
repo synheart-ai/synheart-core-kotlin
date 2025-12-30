@@ -1,4 +1,4 @@
-package com.synheart.core.modules.hsi_runtime
+package com.synheart.core.modules.hsv_runtime
 
 import com.synheart.core.modules.interfaces.WindowType
 import kotlinx.coroutines.delay
@@ -18,12 +18,12 @@ class WindowScheduler(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var isScheduling = false
-    
+
     /// Start scheduling windows
     fun start() {
         if (isScheduling) return
         isScheduling = true
-        
+
         // 30-second window
         scope.launch {
             while (isActive && isScheduling) {
@@ -31,7 +31,7 @@ class WindowScheduler(
                 onWindow(WindowType.WINDOW_30S)
             }
         }
-        
+
         // 5-minute window
         scope.launch {
             while (isActive && isScheduling) {
@@ -39,7 +39,7 @@ class WindowScheduler(
                 onWindow(WindowType.WINDOW_5M)
             }
         }
-        
+
         // 1-hour window
         scope.launch {
             while (isActive && isScheduling) {
@@ -47,7 +47,7 @@ class WindowScheduler(
                 onWindow(WindowType.WINDOW_1H)
             }
         }
-        
+
         // 24-hour window
         scope.launch {
             while (isActive && isScheduling) {
@@ -55,7 +55,7 @@ class WindowScheduler(
                 onWindow(WindowType.WINDOW_24H)
             }
         }
-        
+
         // Trigger initial computation immediately
         scope.launch {
             onWindow(WindowType.WINDOW_30S)
@@ -64,11 +64,12 @@ class WindowScheduler(
             onWindow(WindowType.WINDOW_24H)
         }
     }
-    
+
     /// Stop scheduling
     suspend fun stop() {
         isScheduling = false
         scope.cancel()
     }
 }
+
 

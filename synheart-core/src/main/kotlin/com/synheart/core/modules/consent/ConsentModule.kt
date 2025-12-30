@@ -13,7 +13,7 @@ import java.time.Instant
 /// Consent Module
 ///
 /// Single source of truth for user consent on the device.
-/// Gates collection and export of biosignals, behavior, motion/context,
+/// Gates collection and export of biosignals, behavior, phone context,
 /// cloud upload, and Syni personalization.
 class ConsentModule(
     private val storage: ConsentStorage
@@ -96,9 +96,11 @@ class ConsentModule(
 
         val updated = current.copyWith(
             biosignals = if (type == ConsentType.BIOSIGNALS) granted else current.biosignals,
+            phoneContext = if (type == ConsentType.PHONE_CONTEXT) granted else current.phoneContext,
             behavior = if (type == ConsentType.BEHAVIOR) granted else current.behavior,
-            motion = if (type == ConsentType.MOTION) granted else current.motion,
             cloudUpload = if (type == ConsentType.CLOUD_UPLOAD) granted else current.cloudUpload,
+            focusEstimation = if (type == ConsentType.FOCUS_ESTIMATION) granted else current.focusEstimation,
+            emotionEstimation = if (type == ConsentType.EMOTION_ESTIMATION) granted else current.emotionEstimation,
             syni = if (type == ConsentType.SYNI) granted else current.syni,
             timestamp = Instant.now()
         )
@@ -127,22 +129,34 @@ class ConsentModule(
                 "Consent changed: biosignals ${if (newConsent.biosignals) "granted" else "revoked"}"
             )
         }
+        if (oldConsent.phoneContext != newConsent.phoneContext) {
+            android.util.Log.d(
+                "ConsentModule",
+                "Consent changed: phoneContext ${if (newConsent.phoneContext) "granted" else "revoked"}"
+            )
+        }
         if (oldConsent.behavior != newConsent.behavior) {
             android.util.Log.d(
                 "ConsentModule",
                 "Consent changed: behavior ${if (newConsent.behavior) "granted" else "revoked"}"
             )
         }
-        if (oldConsent.motion != newConsent.motion) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: motion ${if (newConsent.motion) "granted" else "revoked"}"
-            )
-        }
         if (oldConsent.cloudUpload != newConsent.cloudUpload) {
             android.util.Log.d(
                 "ConsentModule",
                 "Consent changed: cloudUpload ${if (newConsent.cloudUpload) "granted" else "revoked"}"
+            )
+        }
+        if (oldConsent.focusEstimation != newConsent.focusEstimation) {
+            android.util.Log.d(
+                "ConsentModule",
+                "Consent changed: focusEstimation ${if (newConsent.focusEstimation) "granted" else "revoked"}"
+            )
+        }
+        if (oldConsent.emotionEstimation != newConsent.emotionEstimation) {
+            android.util.Log.d(
+                "ConsentModule",
+                "Consent changed: emotionEstimation ${if (newConsent.emotionEstimation) "granted" else "revoked"}"
             )
         }
         if (oldConsent.syni != newConsent.syni) {

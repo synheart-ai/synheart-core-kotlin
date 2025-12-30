@@ -12,6 +12,11 @@ open class CloudConnectorException(message: String, cause: Throwable? = null) :
 class ConsentRequiredError(message: String) : CloudConnectorException(message)
 
 /**
+ * Thrown when an app capability is required but not granted
+ */
+class CapabilityRequiredError(message: String) : CloudConnectorException(message)
+
+/**
  * Thrown when HMAC signature validation fails (401 invalid_signature)
  */
 class InvalidSignatureError : CloudConnectorException("HMAC signature validation failed")

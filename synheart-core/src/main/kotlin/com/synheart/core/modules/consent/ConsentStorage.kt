@@ -27,8 +27,13 @@ class ConsentStorage(context: Context) {
         val json = JSONObject().apply {
             put("biosignals", consent.biosignals)
             put("behavior", consent.behavior)
-            put("motion", consent.motion)
+            // RFC-0002: phoneContext
+            put("phoneContext", consent.phoneContext)
+            // Back-compat alias for older builds that stored `motion`
+            put("motion", consent.phoneContext)
             put("cloudUpload", consent.cloudUpload)
+            put("focusEstimation", consent.focusEstimation)
+            put("emotionEstimation", consent.emotionEstimation)
             put("syni", consent.syni)
             put("timestamp", consent.timestamp.toString())
             put("version", consent.version)
@@ -47,9 +52,15 @@ class ConsentStorage(context: Context) {
 
             ConsentSnapshot(
                 biosignals = json.getBoolean("biosignals"),
+                phoneContext = when {
+                    json.has("phoneContext") -> json.getBoolean("phoneContext")
+                    json.has("motion") -> json.getBoolean("motion") // Back-compat
+                    else -> false
+                },
                 behavior = json.getBoolean("behavior"),
-                motion = json.getBoolean("motion"),
                 cloudUpload = json.getBoolean("cloudUpload"),
+                focusEstimation = json.optBoolean("focusEstimation", false),
+                emotionEstimation = json.optBoolean("emotionEstimation", false),
                 syni = json.getBoolean("syni"),
                 timestamp = Instant.parse(json.getString("timestamp")),
                 version = json.optString("version", "1.0.0")

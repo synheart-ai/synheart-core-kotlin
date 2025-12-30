@@ -50,8 +50,8 @@ data class SDKCapabilities(
     /// Phone module capability level
     val phone: CapabilityLevel,
 
-    /// HSI module capability level
-    val hsi: CapabilityLevel,
+    /// HSV Runtime module capability level
+    val hsvRuntime: CapabilityLevel,
 
     /// Cloud module capability level
     val cloud: CapabilityLevel
@@ -62,7 +62,7 @@ data class SDKCapabilities(
             Module.BEHAVIOR -> behavior
             Module.WEAR -> wear
             Module.PHONE -> phone
-            Module.HSI -> hsi
+            Module.HSV_RUNTIME -> hsvRuntime
             Module.CLOUD -> cloud
         }
     }
@@ -74,7 +74,7 @@ data class SDKCapabilities(
                 behavior = parseLevel(token.capabilities["behavior"]),
                 wear = parseLevel(token.capabilities["wear"]),
                 phone = parseLevel(token.capabilities["phone"]),
-                hsi = parseLevel(token.capabilities["hsi"]),
+                hsvRuntime = parseLevel(token.capabilities["hsi_runtime"] ?: token.capabilities["hsi"]),
                 cloud = parseLevel(token.capabilities["cloud"])
             )
         }
@@ -95,7 +95,7 @@ data class SDKCapabilities(
                 behavior = CapabilityLevel.CORE,
                 wear = CapabilityLevel.CORE,
                 phone = CapabilityLevel.CORE,
-                hsi = CapabilityLevel.CORE,
+                hsvRuntime = CapabilityLevel.CORE,
                 cloud = CapabilityLevel.CORE
             )
         }

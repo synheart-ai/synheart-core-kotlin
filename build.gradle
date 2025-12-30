@@ -1,12 +1,13 @@
 // Top-level build file
 buildscript {
-    ext.kotlin_version = '1.9.20'
+    ext.kotlin_version = '2.3.0'
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.2'
+        // Gradle 9.x requires a newer Android Gradle Plugin than 8.1.x
+        classpath 'com.android.tools.build:gradle:9.0.0-rc02'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "org.jetbrains.kotlin:kotlin-serialization:$kotlin_version"
     }

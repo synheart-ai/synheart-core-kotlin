@@ -2,6 +2,7 @@ package com.synheart.core.modules.cloud
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Subject information for upload payload
@@ -23,7 +24,7 @@ data class Subject(
 @Serializable
 data class UploadRequest(
     val subject: Subject,
-    val snapshots: List<Map<String, @Serializable(with = kotlinx.serialization.json.JsonElementSerializer::class) kotlinx.serialization.json.JsonElement>>
+    val snapshots: List<JsonObject>
 )
 
 /**

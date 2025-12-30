@@ -6,12 +6,13 @@ import com.synheart.core.models.*
 import com.synheart.core.modules.base.ModuleManager
 import com.synheart.core.modules.capabilities.CapabilityModule
 import com.synheart.core.modules.consent.ConsentModule
-import com.synheart.core.modules.consent.ConsentSnapshot
+import com.synheart.core.modules.consent.ConsentStorage
+import com.synheart.core.modules.interfaces.ConsentSnapshot
 import com.synheart.core.modules.wear.WearModule
 import com.synheart.core.modules.phone.PhoneModule
 import com.synheart.core.modules.behavior.BehaviorModule
-import com.synheart.core.modules.hsi_runtime.HSIRuntimeModule
-import com.synheart.core.modules.hsi_runtime.ChannelCollector
+import com.synheart.core.modules.hsv_runtime.HSVRuntimeModule
+import com.synheart.core.modules.hsv_runtime.ChannelCollector
 import com.synheart.core.modules.cloud.CloudConnectorModule
 import com.synheart.core.modules.cloud.ConsentRequiredError
 import com.synheart.core.heads.EmotionHead
@@ -38,7 +39,7 @@ import kotlinx.coroutines.launch
  * - Wear Module (biosignal collection)
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
- * - HSI Runtime (signal fusion & state computation)
+ * - HSV Runtime (signal fusion & state computation; internal representation)
  * - Cloud Connector (secure uploads)
  *
  * Optional interpretation modules:
@@ -58,10 +59,10 @@ import kotlinx.coroutines.launch
  *     )
  * )
  *
- * // Subscribe to HSI updates (core state representation)
- * Synheart.onHSIUpdate.collect { hsi ->
- *     println("Arousal Index: ${hsi.affect?.arousalIndex}")
- *     println("Engagement Stability: ${hsi.engagement?.engagementStability}")
+ * // Subscribe to HSV updates (internal state representation)
+ * Synheart.onHSVUpdate.collect { hsv ->
+ *     println("Arousal Index: ${hsv.affect?.arousalIndex}")
+ *     println("Engagement Stability: ${hsv.engagement?.engagementStability}")
  * }
  *
  * // Optional: Enable interpretation modules
@@ -92,7 +93,7 @@ object Synheart {
     private var wearModule: WearModule? = null
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
-    private var hsiRuntimeModule: HSIRuntimeModule? = null
+    private var hsvRuntimeModule: HSVRuntimeModule? = null
     private var cloudConnector: CloudConnectorModule? = null
     // TODO: SyniHooksModule
 
@@ -107,12 +108,12 @@ object Synheart {
     private var userId: String? = null
 
     // Streams
-    private val _hsiFlow = MutableStateFlow<HumanStateVector?>(null)
+    private val _hsvFlow = MutableStateFlow<HumanStateVector?>(null)
     private val _emotionFlow = MutableStateFlow<EmotionState?>(null)
     private val _focusFlow = MutableStateFlow<FocusState?>(null)
 
     /**
-     * Stream of HSI updates (core state representation)
+     * Stream of HSV updates (internal state representation)
      *
      * HSI contains:
      * - State axes (affect, engagement, activity, context)
@@ -121,7 +122,7 @@ object Synheart {
      *
      * HSI does NOT contain interpretation (emotion, focus).
      */
-    val onHSIUpdate: Flow<HumanStateVector> = _hsiFlow.asStateFlow().filterNotNull()
+    val onHSVUpdate: Flow<HumanStateVector> = _hsvFlow.asStateFlow().filterNotNull()
 
     /**
      * Stream of emotion updates (optional interpretation)
@@ -178,7 +179,8 @@ object Synheart {
 
             // 2. Initialize consent module
             println("[Synheart] Initializing consent module...")
-            consentModule = ConsentModule()
+            val consentStorage = ConsentStorage(context = this.context!!)
+            consentModule = ConsentModule(storage = consentStorage)
 
             // 3. Register modules
             moduleManager.registerModule(capabilityModule!!)
@@ -203,16 +205,16 @@ object Synheart {
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(behaviorModule!!, dependsOn = listOf("capabilities", "consent"))
 
-            // 5. Initialize HSI Runtime (NO emotion/focus here - they're optional)
-            println("[Synheart] Initializing HSI Runtime...")
+            // 5. Initialize HSV Runtime (NO emotion/focus here - they're optional)
+            println("[Synheart] Initializing HSV Runtime...")
             val collector = ChannelCollector(
                 wear = wearModule!!,
                 phone = phoneModule!!,
                 behavior = behaviorModule!!
             )
-            hsiRuntimeModule = HSIRuntimeModule(collector = collector)
+            hsvRuntimeModule = HSVRuntimeModule(collector = collector)
             moduleManager.registerModule(
-                hsiRuntimeModule!!,
+                hsvRuntimeModule!!,
                 dependsOn = listOf("wear", "phone", "behavior")
             )
 
@@ -223,12 +225,12 @@ object Synheart {
                     context = this.context,
                     capabilities = capabilityModule!!,
                     consent = consentModule!!,
-                    hsiRuntime = hsiRuntimeModule!!,
+                    hsvRuntime = hsvRuntimeModule!!,
                     config = config.cloudConfig!!
                 )
                 moduleManager.registerModule(
                     cloudConnector!!,
-                    dependsOn = listOf("capabilities", "consent", "hsi_runtime")
+                    dependsOn = listOf("capabilities", "consent", "hsv_runtime")
                 )
             }
 
@@ -236,10 +238,10 @@ object Synheart {
             println("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
-            // 8. Subscribe to HSI stream (core state only)
+            // 8. Subscribe to HSV stream (core state only)
             scope.launch {
-                hsiRuntimeModule?.hsiFlow?.collect { hsi ->
-                    _hsiFlow.value = hsi
+                hsvRuntimeModule?.hsvFlow?.collect { hsv ->
+                    _hsvFlow.value = hsv
                 }
             }
 
@@ -260,7 +262,7 @@ object Synheart {
     /**
      * Enable focus interpretation module
      *
-     * This is an optional interpretation module that consumes HSI
+     * This is an optional interpretation module that consumes HSV
      * and produces focus estimates.
      *
      * Example:
@@ -286,10 +288,10 @@ object Synheart {
 
             focusHead = FocusHead()
 
-            // Focus head subscribes to HSI stream
+            // Focus head subscribes to HSV stream
             scope.launch {
-                onHSIUpdate.collect { hsi ->
-                    val hsvWithFocus = focusHead?.processOne(hsi)
+                onHSVUpdate.collect { hsv ->
+                    val hsvWithFocus = focusHead?.processOne(hsv)
                     hsvWithFocus?.focus?.let { focus ->
                         _focusFlow.value = focus
                     }
@@ -307,7 +309,7 @@ object Synheart {
     /**
      * Enable emotion interpretation module
      *
-     * This is an optional interpretation module that consumes HSI
+     * This is an optional interpretation module that consumes HSV
      * and produces emotion estimates.
      *
      * Example:
@@ -333,10 +335,10 @@ object Synheart {
 
             emotionHead = EmotionHead()
 
-            // Emotion head subscribes to HSI stream
+            // Emotion head subscribes to HSV stream
             scope.launch {
-                onHSIUpdate.collect { hsi ->
-                    val hsvWithEmotion = emotionHead?.processOne(hsi)
+                onHSVUpdate.collect { hsv ->
+                    val hsvWithEmotion = emotionHead?.processOne(hsv)
                     hsvWithEmotion?.emotion?.let { emotion ->
                         _emotionFlow.value = emotion
                     }
@@ -437,8 +439,10 @@ object Synheart {
         return when (consentType) {
             "biosignals" -> consent.biosignals
             "behavior" -> consent.behavior
-            "phoneContext", "motion" -> consent.motion
+            "phoneContext", "motion" -> consent.phoneContext
             "cloudUpload" -> consent.cloudUpload
+            "focusEstimation" -> consent.focusEstimation
+            "emotionEstimation" -> consent.emotionEstimation
             else -> false
         }
     }
@@ -456,12 +460,14 @@ object Synheart {
             throw IllegalStateException("Consent module not initialized")
         }
 
-        val current = consentModule?.current() ?: ConsentSnapshot()
+        val current = consentModule?.current() ?: ConsentSnapshot.none()
         val updated = when (consentType) {
             "biosignals" -> current.copy(biosignals = true)
             "behavior" -> current.copy(behavior = true)
-            "motion", "phoneContext" -> current.copy(motion = true)
+            "motion", "phoneContext" -> current.copy(phoneContext = true)
             "cloudUpload" -> current.copy(cloudUpload = true)
+            "focusEstimation" -> current.copy(focusEstimation = true)
+            "emotionEstimation" -> current.copy(emotionEstimation = true)
             "syni" -> current.copy(syni = true)
             else -> current
         }
@@ -482,12 +488,14 @@ object Synheart {
             throw IllegalStateException("Consent module not initialized")
         }
 
-        val current = consentModule?.current() ?: ConsentSnapshot()
+        val current = consentModule?.current() ?: ConsentSnapshot.none()
         val updated = when (consentType) {
             "biosignals" -> current.copy(biosignals = false)
             "behavior" -> current.copy(behavior = false)
-            "motion", "phoneContext" -> current.copy(motion = false)
+            "motion", "phoneContext" -> current.copy(phoneContext = false)
             "cloudUpload" -> current.copy(cloudUpload = false)
+            "focusEstimation" -> current.copy(focusEstimation = false)
+            "emotionEstimation" -> current.copy(emotionEstimation = false)
             "syni" -> current.copy(syni = false)
             else -> current
         }
@@ -496,10 +504,10 @@ object Synheart {
     }
 
     /**
-     * Get current HSI state (latest)
+     * Get current HSV state (latest)
      */
     val currentState: HumanStateVector?
-        get() = _hsiFlow.value
+        get() = _hsvFlow.value
 
     /**
      * Get current consent snapshot
@@ -549,7 +557,7 @@ object Synheart {
             wearModule = null
             phoneModule = null
             behaviorModule = null
-            hsiRuntimeModule = null
+            hsvRuntimeModule = null
             cloudConnector = null
             emotionHead = null
             focusHead = null

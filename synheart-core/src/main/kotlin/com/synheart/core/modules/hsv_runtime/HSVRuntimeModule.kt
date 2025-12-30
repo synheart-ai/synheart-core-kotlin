@@ -1,11 +1,10 @@
-package com.synheart.core.modules.hsi_runtime
+package com.synheart.core.modules.hsv_runtime
 
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.interfaces.WindowType
 import com.synheart.core.models.HumanStateVector
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.CoroutineScope
@@ -15,54 +14,50 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * HSI Runtime Module
+ * HSV Runtime Module
  *
- * Orchestrates the HSI pipeline:
+ * Orchestrates the HSV (internal) pipeline:
  * 1. Schedules windows (30s, 5m, 1h, 24h)
  * 2. Collects features from Wear, Phone, Behavior
- * 3. Fuses features into HSI (state axes, indices, embeddings)
- * 4. Publishes HSI updates
+ * 3. Fuses features into HSV (state axes/indices/embeddings — implementation-defined)
+ * 4. Publishes HSV updates
  *
  * IMPORTANT: This module does NOT include emotion or focus interpretation.
- * Those are optional downstream modules that consume HSI output.
+ * Those are optional downstream modules that consume HSV output.
+ *
+ * RFC alignment:
+ * - HSV is internal state representation (RFC-0001).
+ * - HSI is an external, canonical JSON contract (RFC-0005) produced via export.
  */
-class HSIRuntimeModule(
+class HSVRuntimeModule(
     private val collector: ChannelCollector
-) : BaseSynheartModule("hsi_runtime") {
+) : BaseSynheartModule("hsv_runtime") {
 
-    private val fusion = FusionEngineV2()
+    private val fusion = FusionEngine()
 
     private var scheduler: WindowScheduler? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val _hsiFlow = MutableStateFlow<HumanStateVector?>(null)
+    private val _hsvFlow = MutableStateFlow<HumanStateVector?>(null)
 
     /**
-     * Flow of HSI updates (state representation only)
-     *
-     * HSI contains:
-     * - State axes (affect, engagement, activity, context)
-     * - State indices (arousalIndex, engagementStability, etc.)
-     * - 64D state embedding
-     *
-     * HSI does NOT contain interpretation (emotion, focus).
+     * Flow of HSV updates (internal state representation only)
      */
-    val hsiFlow: Flow<HumanStateVector> = _hsiFlow.asStateFlow().filterNotNull()
+    val hsvFlow: Flow<HumanStateVector> = _hsvFlow.asStateFlow().filterNotNull()
 
     /**
-     * Get current HSI state
+     * Get current HSV state
      */
     val currentState: HumanStateVector?
-        get() = _hsiFlow.value
+        get() = _hsvFlow.value
 
     override suspend fun onInitialize() {
-        println("[HSIRuntime] Initializing HSI Runtime...")
-        // No emotion/focus heads here - they're optional modules
+        println("[HSVRuntime] Initializing HSV Runtime...")
     }
-    
+
     override suspend fun onStart() {
-        println("[HSIRuntime] Starting HSI Runtime...")
-        
+        println("[HSVRuntime] Starting HSV Runtime...")
+
         // Start window scheduler
         scheduler = WindowScheduler { window ->
             // Only compute for 30s window (primary window)
@@ -72,20 +67,20 @@ class HSIRuntimeModule(
                 }
             }
         }
-        
+
         scheduler?.start()
-        println("[HSIRuntime] HSI Runtime started")
+        println("[HSVRuntime] HSV Runtime started")
     }
-    
+
     override suspend fun onStop() {
-        println("[HSIRuntime] Stopping HSI Runtime...")
+        println("[HSVRuntime] Stopping HSV Runtime...")
 
         scheduler?.stop()
         scheduler = null
     }
 
     override suspend fun onDispose() {
-        println("[HSIRuntime] Disposing HSI Runtime...")
+        println("[HSVRuntime] Disposing HSV Runtime...")
 
         scheduler?.stop()
         scheduler = null
@@ -93,7 +88,7 @@ class HSIRuntimeModule(
     }
 
     /**
-     * Compute HSI state for a window
+     * Compute HSV state for a window
      */
     private suspend fun computeState(window: WindowType) {
         try {
@@ -101,22 +96,23 @@ class HSIRuntimeModule(
             val features = collector.collect(window)
 
             if (!features.hasAnyFeatures) {
-                println("[HSIRuntime] No features available for $window")
+                println("[HSVRuntime] No features available for $window")
                 return
             }
 
-            // Fuse into HSI (state representation)
+            // Fuse into HSV (internal state representation)
             val timestamp = System.currentTimeMillis()
-            val hsi = fusion.fuse(features, window, timestamp)
+            val hsv = fusion.fuse(features, window, timestamp)
 
-            // Emit HSI (state representation only, no interpretation)
-            _hsiFlow.value = hsi
+            // Emit HSV (state representation only, no interpretation)
+            _hsvFlow.value = hsv
 
-            println("[HSIRuntime] Computed HSI for $window")
+            println("[HSVRuntime] Computed HSV for $window")
         } catch (e: Exception) {
-            println("[HSIRuntime] Error computing HSI: $e")
+            println("[HSVRuntime] Error computing HSV: $e")
             e.printStackTrace()
         }
     }
 }
+
 

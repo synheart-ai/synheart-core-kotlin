@@ -36,7 +36,7 @@ class PhoneModule(
     
     override fun features(window: WindowType): PhoneWindowFeatures? {
         // Check consent
-        if (!consent.current().motion) {
+        if (!consent.current().phoneContext) {
             return null // Return null if consent denied
         }
         

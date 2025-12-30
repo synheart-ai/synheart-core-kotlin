@@ -62,7 +62,7 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             Module.BEHAVIOR to caps.behavior,
             Module.WEAR to caps.wear,
             Module.PHONE to caps.phone,
-            Module.HSI to caps.hsi,
+            Module.HSV_RUNTIME to caps.hsvRuntime,
             Module.CLOUD to caps.cloud
         )
     }
@@ -96,13 +96,13 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.BEHAVIOR_FULL_TIMING_STREAM ->
                 capabilities.behavior >= CapabilityLevel.RESEARCH
 
-            // HSI features
-            FeatureFlag.HSI_EMOTION_FOCUS ->
-                capabilities.hsi >= CapabilityLevel.CORE
-            FeatureFlag.HSI_FULL_EMBEDDING ->
-                capabilities.hsi >= CapabilityLevel.EXTENDED
-            FeatureFlag.HSI_FUSION_VECTOR_ACCESS ->
-                capabilities.hsi >= CapabilityLevel.RESEARCH
+            // HSV Runtime features
+            FeatureFlag.HSV_RUNTIME_EMOTION_FOCUS ->
+                capabilities.hsvRuntime >= CapabilityLevel.CORE
+            FeatureFlag.HSV_RUNTIME_FULL_EMBEDDING ->
+                capabilities.hsvRuntime >= CapabilityLevel.EXTENDED
+            FeatureFlag.HSV_RUNTIME_FUSION_VECTOR_ACCESS ->
+                capabilities.hsvRuntime >= CapabilityLevel.RESEARCH
 
             // Cloud features
             FeatureFlag.CLOUD_BASIC_INGEST ->

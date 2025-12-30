@@ -1,10 +1,10 @@
 # Add project specific ProGuard rules here.
 # Keep data classes
--keep class com.synheart.hsi.models.** { *; }
--keepclassmembers class com.synheart.hsi.models.** {
+-keep class com.synheart.core.models.** { *; }
+-keepclassmembers class com.synheart.core.models.** {
     <fields>;
 }
 
-# Keep HSI classes
--keep class com.synheart.hsi.** { *; }
+# Keep public SDK classes
+-keep class com.synheart.core.** { *; }
 

@@ -1,4 +1,4 @@
-package com.synheart.core.modules.hsi_runtime
+package com.synheart.core.modules.hsv_runtime
 
 import com.synheart.core.modules.interfaces.WindowType
 import com.synheart.core.models.BehaviorState
@@ -11,10 +11,10 @@ import com.synheart.core.models.DeviceInfo
 import com.synheart.core.models.UserPatternsContext
 import android.os.Build
 
-/// Fusion Engine V2
+/// Fusion Engine
 ///
-/// Combines features from all modules into a base HSV
-class FusionEngineV2 {
+/// Combines features from all modules into a base HSV (internal state representation).
+class FusionEngine {
     /// Fuse collected features into base HSV
     suspend fun fuse(
         features: CollectedFeatures,
@@ -23,16 +23,16 @@ class FusionEngineV2 {
     ): HumanStateVector {
         // Build fused feature vector
         val fusedVector = buildFusedVector(features)
-        
+
         // Run embedding model (placeholder for now)
         val embedding = computeEmbedding(fusedVector)
-        
+
         // Create behavior state
         val behavior = buildBehaviorState(features.behavior)
-        
+
         // Create context state
         val context = buildContextState(features.phone)
-        
+
         // Create meta state
         val meta = MetaState(
             device = DeviceInfo(
@@ -41,11 +41,10 @@ class FusionEngineV2 {
                 model = Build.MODEL,
                 manufacturer = Build.MANUFACTURER
             ),
-            sessionId = "sess-$timestamp",
-            version = "1.0.0"
+            sessionId = "session_${timestamp}"
         )
-        
-        // Create base HSV (emotion and focus will be populated by heads)
+
+        // Return HSV (internal representation)
         return HumanStateVector(
             timestamp = timestamp,
             meta = meta,
@@ -54,39 +53,35 @@ class FusionEngineV2 {
             hrvSdnn = null,
             hsiEmbedding = embedding,
             behavior = behavior,
-            context = context,
-            emotion = null, // Will be populated by EmotionHead
-            focus = null // Will be populated by FocusHead
+            context = context
         )
     }
-    
-    /// Build fused feature vector from collected features
+
+    /// Build fused feature vector from available modalities
     private fun buildFusedVector(features: CollectedFeatures): List<Double> {
         val vector = mutableListOf<Double>()
-        
-        // Wear features (biosignals)
+
+        // Wear features
         if (features.wear != null) {
             vector.add(features.wear.hrAverage ?: 0.0)
             vector.add(features.wear.hrvRmssd ?: 0.0)
             vector.add(features.wear.motionIndex ?: 0.0)
-            vector.add(features.wear.respRate ?: 0.0)
         } else {
-            vector.addAll(listOf(0.0, 0.0, 0.0, 0.0))
+            vector.addAll(List(3) { 0.0 })
         }
-        
-        // Phone features (context)
+
+        // Phone features
         if (features.phone != null) {
             vector.add(features.phone.motionLevel)
             vector.add(features.phone.screenOnRatio)
             vector.add(features.phone.appSwitchRate)
             vector.add(features.phone.notificationRate)
         } else {
-            vector.addAll(listOf(0.0, 0.0, 0.0, 0.0))
+            vector.addAll(List(4) { 0.0 })
         }
-        
+
         // Behavior features
         if (features.behavior != null) {
-            vector.add(features.behavior.tapRateNorm)
             vector.add(features.behavior.keystrokeRateNorm)
             vector.add(features.behavior.scrollVelocityNorm)
             vector.add(features.behavior.idleRatio)
@@ -95,12 +90,12 @@ class FusionEngineV2 {
             vector.add(features.behavior.sessionFragmentation)
             vector.add(features.behavior.notificationLoad)
         } else {
-            vector.addAll(List(8) { 0.0 })
+            vector.addAll(List(7) { 0.0 })
         }
-        
+
         return vector
     }
-    
+
     /// Compute embedding from fused vector (placeholder)
     private suspend fun computeEmbedding(fusedVector: List<Double>): List<Float> {
         // TODO: Implement actual embedding model (MLP/Tiny Transformer)
@@ -111,13 +106,13 @@ class FusionEngineV2 {
             fusedVector.map { it.toFloat() } + List(64 - fusedVector.size) { 0.0f }
         }
     }
-    
+
     /// Build behavior state from features
-    private fun buildBehaviorState(features: com.synheart.hsi.modules.interfaces.BehaviorWindowFeatures?): BehaviorState? {
+    private fun buildBehaviorState(features: com.synheart.core.modules.interfaces.BehaviorWindowFeatures?): BehaviorState? {
         if (features == null) {
             return BehaviorState()
         }
-        
+
         return BehaviorState(
             typingSpeed = features.keystrokeRateNorm.toFloat(),
             typingBurstiness = features.burstiness.toFloat(),
@@ -127,9 +122,9 @@ class FusionEngineV2 {
             engagementLevel = (1.0 - features.distractionScore).toFloat()
         )
     }
-    
+
     /// Build context state from phone features
-    private fun buildContextState(features: com.synheart.hsi.modules.interfaces.PhoneWindowFeatures?): ContextState {
+    private fun buildContextState(features: com.synheart.core.modules.interfaces.PhoneWindowFeatures?): ContextState {
         // Placeholder context state
         return ContextState(
             conversation = ConversationContext(
@@ -148,15 +143,6 @@ class FusionEngineV2 {
             userPatterns = UserPatternsContext()
         )
     }
-    
-    /// Get sampling rate for window type
-    private fun getSamplingRate(window: WindowType): Double {
-        return when (window) {
-            WindowType.WINDOW_30S -> 2.0 // 2 Hz
-            WindowType.WINDOW_5M -> 0.2 // 0.2 Hz
-            WindowType.WINDOW_1H -> 1.0 / 3600 // 1 sample per hour
-            WindowType.WINDOW_24H -> 1.0 / 86400 // 1 sample per day
-        }
-    }
 }
+
 
