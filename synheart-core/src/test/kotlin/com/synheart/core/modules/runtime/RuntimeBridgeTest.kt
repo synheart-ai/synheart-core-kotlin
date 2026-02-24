@@ -183,4 +183,109 @@ class RuntimeBridgeTest {
             framesProduced >= 1
         )
     }
+
+    // -- SRM Baselines --
+
+    @Test
+    fun `baselineSummary returns valid JSON with expected keys`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val summary = b.baselineSummary()
+        assertNotNull("baselineSummary() should return JSON", summary)
+
+        val parsed = JSONObject(summary!!)
+        assertTrue("summary should have 'total'", parsed.has("total"))
+        assertTrue("summary should have 'ready'", parsed.has("ready"))
+        assertTrue("summary should have 'warming'", parsed.has("warming"))
+        assertTrue("summary should have 'empty'", parsed.has("empty"))
+    }
+
+    @Test
+    fun `baselinesJson returns valid JSON`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val baselines = b.baselinesJson()
+        assertNotNull("baselinesJson() should return JSON", baselines)
+        // Should parse without throwing
+        JSONObject(baselines!!)
+    }
+
+    @Test
+    fun `baselineSummary shows metrics after data ingestion`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        for (w in 0 until 5) {
+            fillWindowAndTick(b, now + w * 15_000L)
+        }
+
+        val summary = b.baselineSummary()
+        assertNotNull(summary)
+
+        val parsed = JSONObject(summary!!)
+        assertTrue("Should have SRM metrics registered", parsed.getInt("total") > 0)
+    }
+
+    @Test
+    fun `SRM snapshot export and load round-trip`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        for (w in 0 until 5) {
+            fillWindowAndTick(b, now + w * 15_000L)
+        }
+
+        // Export snapshot
+        val snapshot = b.exportSrmSnapshot()
+        assertNotNull("exportSrmSnapshot() should return JSON", snapshot)
+        // Should parse without throwing
+        JSONObject(snapshot!!)
+
+        // Create a new bridge and load the snapshot
+        val b2 = RuntimeBridge.createIfAvailable(
+            RuntimeConfig(
+                subjectId = "sub_test_002",
+                sessionId = "sess_test_002",
+                windowMs = 10_000,
+                stepMs = 5_000
+            )
+        )
+        assertNotNull("Second bridge should be created", b2)
+
+        val result = b2!!.loadSrmSnapshot(snapshot)
+        assertEquals("loadSrmSnapshot should return 0 on success", 0, result)
+
+        // Verify loaded bridge has same baseline summary
+        assertEquals(
+            "Baseline summary should match after round-trip",
+            b.baselineSummary(),
+            b2.baselineSummary()
+        )
+
+        b2.close()
+    }
+
+    @Test
+    fun `reset clears SRM baselines`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        for (w in 0 until 5) {
+            fillWindowAndTick(b, now + w * 15_000L)
+        }
+
+        b.reset()
+
+        val summary = b.baselineSummary()
+        assertNotNull(summary)
+
+        val parsed = JSONObject(summary!!)
+        assertEquals("warming should be 0 after reset", 0, parsed.getInt("warming"))
+        assertEquals("ready should be 0 after reset", 0, parsed.getInt("ready"))
+    }
 }

@@ -197,16 +197,18 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
         return json
     }
 
-    /** Export the SRM snapshot as JSON for persistence, or `null`. */
-    fun exportSrmSnapshot(): String? {
+    /** Export the SRM snapshot as JSON for persistence, or `null`.
+     *  Internal: used by RuntimeModule for auto-save/load lifecycle. */
+    internal fun exportSrmSnapshot(): String? {
         val ptr = native.synheart_runtime_export_srm_snapshot(handle) ?: return null
         val json = ptr.getString(0)
         native.synheart_runtime_free_string(ptr)
         return json
     }
 
-    /** Load an SRM snapshot from JSON. Returns 0 on success, error code on failure. */
-    fun loadSrmSnapshot(json: String): Int {
+    /** Load an SRM snapshot from JSON. Returns 0 on success, error code on failure.
+     *  Internal: used by RuntimeModule for auto-save/load lifecycle. */
+    internal fun loadSrmSnapshot(json: String): Int {
         return native.synheart_runtime_load_srm_snapshot(handle, json)
     }
 
