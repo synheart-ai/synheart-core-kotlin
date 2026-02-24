@@ -1,6 +1,6 @@
 # Synheart Core SDK - Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -26,11 +26,10 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSV Runtime** → Signal fusion + on-device state computation (HSV is internal; HSI is export)
+- **HSI Runtime** → Signal fusion + state computation (via synheart-runtime Rust engine)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
-- **Cloud Connector** → Secure HSI snapshot uploads (planned)
-- **Syni Hooks** → LLM conditioning (planned)
+- **Cloud Connector** → Secure HSI snapshot uploads
 
 **Key principle:**
 > One SDK, many modules, unified human-state model
@@ -55,8 +54,8 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSV Runtime** - Signal fusion and internal state representation (HSV)
-7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
+6. **HSI Runtime** - Signal fusion and state computation (via synheart-runtime)
+7. **Cloud Connector** - Secure HSI snapshot uploads
 
 ### Optional Interpretation Modules
 
@@ -66,11 +65,13 @@ The Core SDK strictly separates:
 ### Data Flow
 
 ```
-Wear, Phone, Behavior Modules
+Wear, Phone, Behavior Modules (raw samples)
     ↓
-HSV Runtime
-    ↓
-HSI (State Representation)
+RuntimeModule → RuntimeBridge → synheart-runtime (Rust via JNA)
+    ↓                              ↓
+    ↓                   session → state → HSI JSON
+    ↓                              ↓
+    ←──── HumanStateVector ←───────┘
     ↓
 Optional: Focus Module → Focus Estimates
 Optional: Emotion Module → Emotion Estimates
@@ -126,29 +127,29 @@ class MainActivity : AppCompatActivity() {
                 context = this@MainActivity,
                 userId = "anon_user_123",
                 config = SynheartConfig(
+                    allowUnsignedCapabilities = true,  // Use capabilityToken + capabilitySecret in production
                     enableWear = true,
                     enablePhone = true,
                     enableBehavior = true
                 )
             )
 
-            // Subscribe to HSV updates (internal state representation)
+            // Subscribe to HSI updates (raw JSON from synheart-runtime)
             launch {
-                Synheart.onHSVUpdate.collect { hsv ->
-                    println("Arousal Index: ${hsv.affect?.arousalIndex}")
-                    println("Engagement Stability: ${hsv.engagement?.engagementStability}")
+                Synheart.onHSIUpdate.collect { hsiJson ->
+                    println("HSI JSON: $hsiJson")
                 }
             }
 
-            // Optional: Enable interpretation modules
-            Synheart.enableFocus()
+            // Optional: Enable interpretation modules (activate API preferred)
+            Synheart.activate(SynheartFeature.FOCUS)
             launch {
                 Synheart.onFocusUpdate.collect { focus ->
                     println("Focus Score: ${focus.score}")
                 }
             }
 
-            Synheart.enableEmotion()
+            Synheart.activate(SynheartFeature.EMOTION)
             launch {
                 Synheart.onEmotionUpdate.collect { emotion ->
                     println("Stress Index: ${emotion.stress}")
@@ -156,7 +157,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Optional: Enable cloud sync (requires consent)
-            // Synheart.enableCloud()
+            // Synheart.activate(SynheartFeature.CLOUD)
         }
     }
 
@@ -181,7 +182,9 @@ import kotlinx.coroutines.launch
 
 // Initialize modules
 val capabilities = CapabilityModule().apply {
-    loadDefaults() // Or loadFromToken(token, secret) for production
+    // In production, use loadFromToken(token, secret)
+    // For development only:
+    loadDefaults()
 }
 val consent = ConsentModule(
     storage = ConsentStorage(context)
@@ -190,15 +193,15 @@ val wearModule = WearModule(capabilities = capabilities, consent = consent)
 val phoneModule = PhoneModule(capabilities = capabilities, consent = consent)
 val behaviorModule = BehaviorModule(capabilities = capabilities, consent = consent)
 
-// Create channel collector
-val collector = ChannelCollector(
-    wear = wearModule,
-    phone = phoneModule,
-    behavior = behaviorModule
-)
+// Create RuntimeBridge (wraps synheart-runtime Rust engine)
+val bridge = RuntimeBridge.createIfAvailable(context)
 
-// Create HSV Runtime
-val runtime = HSVRuntimeModule(collector = collector)
+// Create Runtime Module
+val runtime = RuntimeModule(
+    bridge = bridge,
+    wearModule = wearModule,
+    behaviorModule = behaviorModule,
+)
 
 // Initialize and start modules
 lifecycleScope.launch {
@@ -224,8 +227,8 @@ lifecycleScope.launch {
 
 // Subscribe to final HSV
 lifecycleScope.launch {
-    runtime.finalHsvFlow.collect { hsv ->
-        // Handle state updates
+    runtime.hsiFlow.collect { hsiJson ->
+        // Handle HSI JSON frames from synheart-runtime
     }
 }
 ```
@@ -295,11 +298,39 @@ For the modular architecture, features are collected in time windows:
 - **PhoneWindowFeatures**: Motion level, app switch rate, screen on ratio, notification rate
 - **BehaviorWindowFeatures**: Typing cadence, scroll velocity, burstiness, distraction score, focus hints
 
+## API Reference
+
+### Synheart (Main Entry Point)
+
+| Method | Description |
+|--------|-------------|
+| `initialize(context, userId, config, appKey)` | Initialize the SDK |
+| `startSession()` | Start data collection |
+| `stopSession()` | Stop data collection |
+| `activate(feature)` | Enable a feature (focus, emotion, cloud, etc.) |
+| `deactivate(feature)` | Disable a feature |
+| `uploadNow()` | Force upload queued snapshots |
+| `grantConsent(consentType)` | Grant consent for a data type |
+| `revokeConsent(consentType)` | Revoke consent for a data type |
+| `hasConsent(consentType)` | Check if consent is granted |
+| `stop()` | Stop the session |
+| `dispose()` | Release all resources |
+
+### Properties / Flows
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `onHSIUpdate` | `Flow<String>` | HSI JSON frames from synheart-runtime |
+| `onEmotionUpdate` | `Flow<EmotionState>` | Stream of emotion updates |
+| `onFocusUpdate` | `Flow<FocusState>` | Stream of focus updates |
+| `currentState` | `String?` | Latest HSI JSON frame |
+| `currentConsent` | `ConsentSnapshot?` | Current consent state |
+
 ## Platform Integration
 
-### Health Connect Integration (Planned)
+### Health Connect (via synheart-wear-kotlin)
 
-The Wear Module will integrate with Android Health Connect for biosignal collection:
+The Wear Module collects biosignals from Health Connect via synheart-wear-kotlin:
 
 - Heart rate monitoring
 - Heart rate variability (HRV)
@@ -307,45 +338,85 @@ The Wear Module will integrate with Android Health Connect for biosignal collect
 - Sleep stage detection
 - Motion/activity data
 
-### SensorManager Integration (Planned)
+### SensorManager (via synheart-behavior-kotlin)
 
-The Phone Module will integrate with SensorManager for device motion:
+The Phone Module collects device motion via SensorManager:
 
 - Accelerometer data
 - Gyroscope data
 - Device motion sensors
 
-### MotionEvent Integration (Planned)
+### Behavior Tracking (via synheart-behavior-kotlin)
 
-The Behavior Module will integrate with MotionEvent for interaction tracking:
+The Behavior Module captures user-device interaction patterns:
 
 - Touch events
 - Scroll gestures
 - App switching detection
+
+## Error Handling
+
+The SDK uses Kotlin exceptions for error handling:
+
+```kotlin
+try {
+    Synheart.initialize(
+        context = this,
+        userId = "user_123",
+        config = SynheartConfig(allowUnsignedCapabilities = true)
+    )
+    Synheart.startSession()
+} catch (e: IllegalStateException) {
+    when {
+        e.message?.contains("already configured") == true -> {
+            println("SDK already initialized")
+        }
+        e.message?.contains("Capability token") == true -> {
+            println("Provide a valid capability token or set allowUnsignedCapabilities = true")
+        }
+        else -> println("Error: ${e.message}")
+    }
+} catch (e: Exception) {
+    println("Unexpected error: $e")
+}
+```
+
+### Common Exceptions
+
+| Exception | When |
+|-----------|------|
+| `IllegalStateException("Synheart already configured")` | `initialize()` called twice |
+| `IllegalStateException("Capability token and secret are required...")` | No token and `allowUnsignedCapabilities = false` |
+| `IllegalStateException("Synheart must be initialized...")` | Method called before `initialize()` |
+| `ConsentRequiredError` | Cloud operation without `cloudUpload` consent |
+| `CapabilityException` | Invalid or expired capability token |
 
 ## Architecture Details
 
 The SDK follows a pipeline architecture:
 
 ```
-Raw Signals → Ingestion Service → Signal Processor → Fusion Engine → Base HSV
-                                                                    ↓
-Final HSV ← Focus Head ← Emotion Head ←──────────────────────────────┘
+Raw Signals → synheart-runtime (Rust) → HSI JSON
+                ↓
+     session → state → HSI 1.x
+                ↓
+Optional: Focus/Emotion Heads → Semantic Estimates
 ```
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
 ## Features
 
-- **Signal Processing**: Synchronization, normalization, noise reduction
-- **Fusion Engine**: Combines biosignals, behavior, and context into unified state
+- **On-device state computation**: synheart-runtime (Rust) fuses signals into HSI
+- **SRM baseline persistence**: Self-Reference Model snapshots automatically saved/restored across app restarts
+- **Thread-safe FFI**: All native runtime calls serialized on a single-thread dispatcher
 - **Emotion Head**: Predicts emotion state (stress, calm, engagement, activation, valence)
 - **Focus Head**: Predicts focus state (score, cognitive load, clarity, distraction)
 - **Background Processing**: Android Service for continuous signal collection
 - **Kotlin Flow API**: Reactive state updates using Kotlin Coroutines
 - **Module-Based Architecture**: Windowed feature collection with capability/consent management
 
-## Development
+## Testing
 
 ### Building
 
@@ -353,17 +424,39 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 ./gradlew build
 ```
 
-### Testing
+### Running Tests
 
 ```bash
 ./gradlew test
+```
+
+### Testing with Mock Providers
+
+The SDK ships with mock data sources for development. When no real wearable or sensor is connected, modules use mock collectors that emit synthetic data.
+
+```kotlin
+// Initialize with default capabilities (no real token needed)
+Synheart.initialize(
+    context = this,
+    userId = "test_user",
+    config = SynheartConfig(allowUnsignedCapabilities = true)
+)
+Synheart.startSession()
+
+// Collect mock HSI updates
+Synheart.onHSIUpdate.collect { hsiJson ->
+    // Verify HSI JSON flows through pipeline
+    println("HSI: $hsiJson")
+}
 ```
 
 ## Privacy & Security
 
 - All processing is **on-device by default**
 - **No raw biosignals** are stored or transmitted
-- Cloud sync (when implemented) will only sync aggregated HSV with user consent
+- **HSI stream is consent-gated** — `onHSIUpdate` only emits frames when `biosignals` consent is granted
+- Cloud sync only for aggregated HSI (with user consent)
+- **SRM baseline persistence** — Learned baselines are encrypted and persisted to `EncryptedSharedPreferences`, restored automatically on next launch
 - Consent management via `ConsentModule`
 - Capability-based feature access control
 - Non-medical use only
@@ -372,9 +465,9 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 
 This Android implementation is part of a multi-platform SDK:
 
-- **Flutter:** `synheart-core-flutter` (reference implementation)
-- **iOS:** `synheart-core-ios` (Swift implementation)
-- **Android:** `synheart-core-android` (this repository)
+- **Flutter:** `synheart-core-dart` (reference implementation)
+- **iOS:** `synheart-core-swift` (Swift implementation)
+- **Android:** `synheart-core-kotlin` (this repository)
 
 All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
 
@@ -384,19 +477,18 @@ All three implementations share the same modular architecture. See the Flutter r
 - **[Module Specifications](docs/MODULE_SPECS.md)** - Module API documentation
 - **[Native Implementation Status](../synheart-core-flutter/docs/NATIVE_IMPLEMENTATION_STATUS.md)** - Cross-platform status
 
-## Next Steps
-
-1. **Connect to actual SDKs**: Integrate with Health Connect and SensorManager
-2. **Implement fusion model**: Replace placeholder embedding with actual Tiny Transformer or CNN-LSTM
-3. **Integrate model packages**: Connect synheart_emotion and synheart_focus modules
-4. **Cloud sync**: Implement cloud sync functionality (optional, with consent)
-
 ## 📄 License
 
 Apache 2.0 License - see [LICENSE](LICENSE) for details.
 
-Copyright 2025 Synheart AI Inc.
+Copyright 2025-2026 Synheart AI Inc.
 
 ## Author
 
 Synheart AI Team
+
+## Patent Pending Notice
+
+This project is provided under an open-source license. Certain underlying systems, methods, and architectures described or implemented herein may be covered by one or more pending patent applications.
+
+Nothing in this repository grants any license, express or implied, to any patents or patent applications, except as provided by the applicable open-source license.

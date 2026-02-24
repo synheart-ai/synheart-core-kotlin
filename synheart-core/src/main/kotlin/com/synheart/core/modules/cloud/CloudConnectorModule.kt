@@ -2,12 +2,9 @@ package com.synheart.core.modules.cloud
 
 import android.content.Context
 import com.synheart.core.config.CloudConfig
-import com.synheart.core.models.HumanStateVector
-import com.synheart.core.models.HSIExportAccessContext
-import com.synheart.core.models.toHSI10
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.consent.ConsentModule
-import com.synheart.core.modules.hsv_runtime.HSVRuntimeModule
+import com.synheart.core.modules.runtime.RuntimeModule
 import com.synheart.core.modules.interfaces.CapabilityProvider
 import com.synheart.core.modules.interfaces.Module
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +18,7 @@ import kotlinx.coroutines.launch
 /**
  * Cloud Connector Module
  *
- * Securely uploads HSV snapshots (as HSI 1.0 format) to Synheart Platform.
+ * Securely uploads HSV snapshots (as HSI 1.1 format) to Synheart Platform.
  *
  * Features:
  * - HMAC-SHA256 authentication
@@ -33,7 +30,7 @@ import kotlinx.coroutines.launch
  *
  * Architecture:
  * ```
- * HSIRuntime → CloudConnector → [Queue] → UploadClient → Platform
+ * RuntimeModule → CloudConnector → [Queue] → UploadClient → Platform
  *                    ↓
  *              RateLimiter
  *              NetworkMonitor
@@ -43,7 +40,7 @@ class CloudConnectorModule(
     private val context: Context?,
     private val capabilities: CapabilityProvider,
     private val consent: ConsentModule,
-    private val hsvRuntime: HSVRuntimeModule,
+    private val runtimeModule: RuntimeModule,
     private val config: CloudConfig
 ) : BaseSynheartModule("cloud") {
 
@@ -79,10 +76,10 @@ class CloudConnectorModule(
     override suspend fun onStart() {
         println("[CloudConnector] Starting...")
 
-        // 1. Subscribe to HSV stream
+        // 1. Subscribe to HSI stream from RuntimeModule
         hsvSubscription = scope.launch {
-            hsvRuntime.hsvFlow.collect { hsv ->
-                hsv?.let { handleHSVUpdate(it) }
+            runtimeModule.hsiFlow.collect { hsiJson ->
+                hsiJson?.let { handleHSIUpdate(it) }
             }
         }
 
@@ -126,9 +123,9 @@ class CloudConnectorModule(
     }
 
     /**
-     * Handle HSV update from runtime
+     * Handle HSI JSON update from RuntimeModule
      */
-    private suspend fun handleHSVUpdate(hsv: HumanStateVector) {
+    private suspend fun handleHSIUpdate(hsiJson: String) {
         // Check consent
         if (!consent.current().cloudUpload) {
             return // Silent return - no upload
@@ -140,13 +137,13 @@ class CloudConnectorModule(
         }
 
         // Check rate limit (based on window type, defaulting to "micro")
-        val windowType = "micro" // TODO: Extract from HSV when available
+        val windowType = "micro"
         if (!rateLimiter.canUpload(windowType)) {
             return // Silent return - rate limited
         }
 
         // Enqueue for upload
-        uploadQueue.enqueue(hsv)
+        uploadQueue.enqueue(hsiJson)
 
         // Try immediate upload if online
         if (networkMonitor.isOnline) {
@@ -168,29 +165,14 @@ class CloudConnectorModule(
      * Attempt to upload a batch from the queue
      */
     private suspend fun attemptUpload() {
-        // Get batch from queue
+        // Get batch of HSI JSON strings from queue
         val batch = uploadQueue.dequeueBatch(rateLimiter.batchSize)
         if (batch.isEmpty()) return
 
         try {
-            // Convert HSV → HSI 1.0
-            val hsi10Snapshots = batch.map { hsv ->
-                val c = consent.current()
-                hsv.toHSI10(
-                    producerName = "Synheart Core SDK",
-                    producerVersion = "1.0.0",
-                    instanceId = config.instanceId,
-                    access = HSIExportAccessContext(
-                        capabilityHsi = capabilities.capability(Module.HSV_RUNTIME).name,
-                        capabilityCloud = capabilities.capability(Module.CLOUD).name,
-                        consentBiosignals = c.biosignals,
-                        consentPhoneContext = c.phoneContext,
-                        consentBehavior = c.behavior,
-                        consentCloudUpload = c.cloudUpload,
-                        consentEmotionEstimation = c.emotionEstimation,
-                        consentFocusEstimation = c.focusEstimation
-                    )
-                )
+            // HSI JSON comes directly from synheart-runtime -- parse into JsonObjects
+            val snapshots = batch.map { raw ->
+                kotlinx.serialization.json.Json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
             }
 
             // Create upload payload
@@ -199,7 +181,7 @@ class CloudConnectorModule(
                     subjectType = config.subjectType,
                     subjectId = config.subjectId
                 ),
-                snapshots = hsi10Snapshots
+                snapshots = snapshots
             )
 
             // Sign and upload
@@ -213,7 +195,7 @@ class CloudConnectorModule(
             uploadQueue.confirmBatch(batch)
 
             // Update rate limiter
-            val windowType = "micro" // TODO: Extract from batch
+            val windowType = "micro"
             rateLimiter.recordUpload(windowType, batch.size)
 
             println("[CloudConnector] Uploaded ${batch.size} snapshots (${response.status})")
@@ -221,16 +203,11 @@ class CloudConnectorModule(
         } catch (e: CloudConnectorException) {
             // Re-enqueue batch on failure
             uploadQueue.requeueBatch(batch)
-
-            // Log error (but don't throw - this is background operation)
             println("[CloudConnector] Upload failed: ${e.message}")
-            e.printStackTrace()
         } catch (e: Exception) {
             // Re-enqueue batch on unexpected error
             uploadQueue.requeueBatch(batch)
-
             println("[CloudConnector] Upload failed with unexpected error: ${e.message}")
-            e.printStackTrace()
         }
     }
 

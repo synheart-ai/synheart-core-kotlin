@@ -19,7 +19,7 @@ data class Subject(
 /**
  * Upload request payload
  *
- * Contains subject info and HSI 1.0 snapshots.
+ * Contains subject info and HSI 1.1 snapshots.
  */
 @Serializable
 data class UploadRequest(

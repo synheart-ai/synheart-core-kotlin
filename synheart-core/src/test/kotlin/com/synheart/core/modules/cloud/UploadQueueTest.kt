@@ -1,8 +1,5 @@
 package com.synheart.core.modules.cloud
 
-import com.synheart.core.models.DeviceInfo
-import com.synheart.core.models.HumanStateVector
-import com.synheart.core.models.MetaState
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -14,19 +11,14 @@ class UploadQueueTest {
 
     @Before
     fun setUp() {
-        // Create queue without context (for testing)
         queue = UploadQueue(context = null, maxSize = 3)
     }
 
     @Test
     fun `enqueue adds items up to max size`() = runTest {
-        val hsv1 = createMockHSV(1)
-        val hsv2 = createMockHSV(2)
-        val hsv3 = createMockHSV(3)
-
-        queue.enqueue(hsv1)
-        queue.enqueue(hsv2)
-        queue.enqueue(hsv3)
+        queue.enqueue(mockHsiJson(1))
+        queue.enqueue(mockHsiJson(2))
+        queue.enqueue(mockHsiJson(3))
 
         assertEquals(3, queue.length)
         assertTrue(queue.hasItems)
@@ -34,34 +26,26 @@ class UploadQueueTest {
 
     @Test
     fun `enqueue evicts oldest when exceeding max size FIFO`() = runTest {
-        val hsv1 = createMockHSV(1)
-        val hsv2 = createMockHSV(2)
-        val hsv3 = createMockHSV(3)
-        val hsv4 = createMockHSV(4)
-
-        queue.enqueue(hsv1)
-        queue.enqueue(hsv2)
-        queue.enqueue(hsv3)
-        queue.enqueue(hsv4) // Should evict hsv1
+        queue.enqueue(mockHsiJson(1))
+        queue.enqueue(mockHsiJson(2))
+        queue.enqueue(mockHsiJson(3))
+        queue.enqueue(mockHsiJson(4)) // Should evict item 1
 
         assertEquals(3, queue.length)
 
         val batch = queue.dequeueBatch(3)
-        assertEquals(2, batch.first().timestamp) // hsv2 should be first now
-        assertEquals(4, batch.last().timestamp)  // hsv4 should be last
+        assertTrue(batch.first().contains("\"ts\":2"))
+        assertTrue(batch.last().contains("\"ts\":4"))
     }
 
     @Test
     fun `dequeueBatch returns correct number of items`() = runTest {
-        val hsv1 = createMockHSV(1)
-        val hsv2 = createMockHSV(2)
-
-        queue.enqueue(hsv1)
-        queue.enqueue(hsv2)
+        queue.enqueue(mockHsiJson(1))
+        queue.enqueue(mockHsiJson(2))
 
         val batch = queue.dequeueBatch(1)
         assertEquals(1, batch.size)
-        assertEquals(1, batch.first().timestamp)
+        assertTrue(batch.first().contains("\"ts\":1"))
 
         // Queue should still have both items until confirmBatch
         assertEquals(2, queue.length)
@@ -69,8 +53,7 @@ class UploadQueueTest {
 
     @Test
     fun `dequeueBatch returns all items when batch size exceeds queue length`() = runTest {
-        val hsv1 = createMockHSV(1)
-        queue.enqueue(hsv1)
+        queue.enqueue(mockHsiJson(1))
 
         val batch = queue.dequeueBatch(10)
         assertEquals(1, batch.size)
@@ -85,44 +68,35 @@ class UploadQueueTest {
 
     @Test
     fun `confirmBatch removes items from queue`() = runTest {
-        val hsv1 = createMockHSV(1)
-        val hsv2 = createMockHSV(2)
-
-        queue.enqueue(hsv1)
-        queue.enqueue(hsv2)
+        queue.enqueue(mockHsiJson(1))
+        queue.enqueue(mockHsiJson(2))
 
         val batch = queue.dequeueBatch(1)
         queue.confirmBatch(batch)
 
         assertEquals(1, queue.length)
 
-        // Next batch should be hsv2
         val nextBatch = queue.dequeueBatch(1)
-        assertEquals(2, nextBatch.first().timestamp)
+        assertTrue(nextBatch.first().contains("\"ts\":2"))
     }
 
     @Test
     fun `requeueBatch keeps items in queue`() = runTest {
-        val hsv1 = createMockHSV(1)
-        queue.enqueue(hsv1)
+        queue.enqueue(mockHsiJson(1))
 
         val batch = queue.dequeueBatch(1)
         queue.requeueBatch(batch)
 
-        // Items should still be in queue
         assertEquals(1, queue.length)
 
         val nextBatch = queue.dequeueBatch(1)
-        assertEquals(1, nextBatch.first().timestamp)
+        assertTrue(nextBatch.first().contains("\"ts\":1"))
     }
 
     @Test
     fun `clear removes all items`() = runTest {
-        val hsv1 = createMockHSV(1)
-        val hsv2 = createMockHSV(2)
-
-        queue.enqueue(hsv1)
-        queue.enqueue(hsv2)
+        queue.enqueue(mockHsiJson(1))
+        queue.enqueue(mockHsiJson(2))
 
         queue.clear()
 
@@ -130,19 +104,7 @@ class UploadQueueTest {
         assertFalse(queue.hasItems)
     }
 
-    // Helper function to create mock HSV
-    private fun createMockHSV(timestamp: Long): HumanStateVector {
-        return HumanStateVector(
-            timestamp = timestamp,
-            meta = MetaState(
-                sessionId = "test",
-                device = DeviceInfo(
-                    platform = "Android",
-                    osVersion = "14"
-                )
-            ),
-            heartRate = 70.0f,
-            hsiEmbedding = List(64) { 0.0f }
-        )
+    private fun mockHsiJson(ts: Int): String {
+        return """{"hsi_version":"1.1","ts":$ts,"observed_at_utc":"2024-01-01T00:00:00Z"}"""
     }
 }

@@ -62,7 +62,7 @@ data class SDKCapabilities(
             Module.BEHAVIOR -> behavior
             Module.WEAR -> wear
             Module.PHONE -> phone
-            Module.HSV_RUNTIME -> hsvRuntime
+            Module.HSI -> hsvRuntime
             Module.CLOUD -> cloud
         }
     }

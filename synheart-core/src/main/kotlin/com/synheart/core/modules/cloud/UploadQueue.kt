@@ -2,25 +2,25 @@ package com.synheart.core.modules.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.synheart.core.models.HumanStateVector
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.LinkedList
 
 /**
- * Persistent offline queue for HSV snapshots
+ * Persistent offline queue for HSI JSON snapshots.
+ *
+ * Stores raw HSI JSON strings produced by synheart-runtime.
  *
  * Features:
  * - FIFO eviction when max size exceeded
  * - Persistent storage using SharedPreferences
  * - Atomic batch operations
- * - Thread-safe queue operations
  */
 class UploadQueue(
     private val context: Context?,
     private val maxSize: Int = 100
 ) {
-    private val queue: LinkedList<HumanStateVector> = LinkedList()
+    private val queue: LinkedList<String> = LinkedList()
     private val storage: SharedPreferences? = context?.getSharedPreferences(
         STORAGE_KEY,
         Context.MODE_PRIVATE
@@ -42,9 +42,7 @@ class UploadQueue(
     val length: Int
         get() = queue.size
 
-    /**
-     * Load queue from persistent storage
-     */
+    /** Load queue from persistent storage. */
     suspend fun loadFromStorage() {
         if (storage == null) return
 
@@ -52,19 +50,16 @@ class UploadQueue(
             val jsonString = storage.getString(QUEUE_DATA_KEY, null)
             if (jsonString.isNullOrEmpty()) return
 
-            val items = json.decodeFromString<List<HumanStateVector>>(jsonString)
+            val items = json.decodeFromString<List<String>>(jsonString)
             queue.addAll(items)
 
             println("[UploadQueue] Loaded ${queue.size} items from storage")
         } catch (e: Exception) {
             println("[UploadQueue] Failed to load from storage: ${e.message}")
-            e.printStackTrace()
         }
     }
 
-    /**
-     * Persist queue to storage
-     */
+    /** Persist queue to storage. */
     suspend fun persistToStorage() {
         if (storage == null) return
 
@@ -73,49 +68,29 @@ class UploadQueue(
             storage.edit().putString(QUEUE_DATA_KEY, jsonString).apply()
         } catch (e: Exception) {
             println("[UploadQueue] Failed to persist to storage: ${e.message}")
-            e.printStackTrace()
         }
     }
 
-    /**
-     * Enqueue a new HSV snapshot
-     *
-     * Enforces max size with FIFO eviction.
-     */
-    suspend fun enqueue(hsv: HumanStateVector) {
-        queue.add(hsv)
-
-        // FIFO eviction if exceeding max size
+    /** Enqueue a new HSI JSON string. Enforces max size with FIFO eviction. */
+    suspend fun enqueue(hsiJson: String) {
+        queue.add(hsiJson)
         if (queue.size > maxSize) {
             queue.removeFirst()
         }
-
         persistToStorage()
     }
 
     /**
-     * Dequeue a batch of snapshots
-     *
-     * Returns up to `batchSize` items from the front of the queue.
-     * Items remain in queue until confirmBatch() is called.
-     *
-     * @param batchSize Maximum number of items to dequeue
-     * @return List of HSV snapshots (may be less than batchSize)
+     * Dequeue a batch of HSI JSON strings.
+     * Items remain in queue until [confirmBatch] is called.
      */
-    fun dequeueBatch(batchSize: Int): List<HumanStateVector> {
+    fun dequeueBatch(batchSize: Int): List<String> {
         if (queue.isEmpty()) return emptyList()
-
-        val count = minOf(queue.size, batchSize)
-        return queue.take(count)
+        return queue.take(minOf(queue.size, batchSize))
     }
 
-    /**
-     * Confirm batch was successfully uploaded (remove from queue)
-     *
-     * @param batch The batch that was successfully uploaded
-     */
-    suspend fun confirmBatch(batch: List<HumanStateVector>) {
-        // Remove the batch from the front of the queue
+    /** Confirm batch was successfully uploaded (remove from queue). */
+    suspend fun confirmBatch(batch: List<String>) {
         repeat(batch.size) {
             if (queue.isNotEmpty()) {
                 queue.removeFirst()
@@ -124,22 +99,12 @@ class UploadQueue(
         persistToStorage()
     }
 
-    /**
-     * Re-enqueue batch on failure
-     *
-     * Batch is still at the front of queue - just persist to ensure it's saved.
-     *
-     * @param batch The batch that failed to upload
-     */
-    suspend fun requeueBatch(batch: List<HumanStateVector>) {
-        // Batch is still at the front of queue - no action needed
-        // Just persist to ensure it's saved
+    /** Re-enqueue batch on failure (items are still at front, just persist). */
+    suspend fun requeueBatch(batch: List<String>) {
         persistToStorage()
     }
 
-    /**
-     * Clear entire queue
-     */
+    /** Clear entire queue. */
     suspend fun clear() {
         queue.clear()
         storage?.edit()?.remove(QUEUE_DATA_KEY)?.apply()

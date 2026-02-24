@@ -20,7 +20,7 @@ enum class Module {
     WEAR,
     PHONE,
     BEHAVIOR,
-    HSV_RUNTIME,
+    HSI,
     CLOUD
 }
 
@@ -42,10 +42,10 @@ enum class FeatureFlag {
     BEHAVIOR_EXTENDED_PATTERNS,
     BEHAVIOR_FULL_TIMING_STREAM,
 
-    // HSV Runtime features
-    HSV_RUNTIME_EMOTION_FOCUS,
-    HSV_RUNTIME_FULL_EMBEDDING,
-    HSV_RUNTIME_FUSION_VECTOR_ACCESS,
+    // HSI features
+    HSI_EMOTION_FOCUS,
+    HSI_FULL_EMBEDDING,
+    HSI_FUSION_VECTOR_ACCESS,
 
     // Cloud features
     CLOUD_BASIC_INGEST,

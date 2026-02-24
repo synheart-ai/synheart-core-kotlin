@@ -33,9 +33,9 @@ class RateLimitExceededError(val retryAfter: Int) :
 class InvalidTenantError : CloudConnectorException("Tenant ID not found or invalid")
 
 /**
- * Thrown when HSI 1.0 schema validation fails (400 schema_validation_failed)
+ * Thrown when HSI 1.1 schema validation fails (400 schema_validation_failed)
  */
-class SchemaValidationError : CloudConnectorException("HSI 1.0 schema validation failed")
+class SchemaValidationError : CloudConnectorException("HSI 1.1 schema validation failed")
 
 /**
  * Thrown on network errors or failed uploads after max retries

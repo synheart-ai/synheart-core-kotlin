@@ -51,7 +51,6 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
     }
 
     override fun canAccessFeature(moduleId: String, featureId: String): Boolean {
-        // TODO: Implement fine-grained feature access control
         return true
     }
 
@@ -62,7 +61,7 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             Module.BEHAVIOR to caps.behavior,
             Module.WEAR to caps.wear,
             Module.PHONE to caps.phone,
-            Module.HSV_RUNTIME to caps.hsvRuntime,
+            Module.HSI to caps.hsvRuntime,
             Module.CLOUD to caps.cloud
         )
     }
@@ -96,12 +95,12 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.BEHAVIOR_FULL_TIMING_STREAM ->
                 capabilities.behavior >= CapabilityLevel.RESEARCH
 
-            // HSV Runtime features
-            FeatureFlag.HSV_RUNTIME_EMOTION_FOCUS ->
+            // HSI features
+            FeatureFlag.HSI_EMOTION_FOCUS ->
                 capabilities.hsvRuntime >= CapabilityLevel.CORE
-            FeatureFlag.HSV_RUNTIME_FULL_EMBEDDING ->
+            FeatureFlag.HSI_FULL_EMBEDDING ->
                 capabilities.hsvRuntime >= CapabilityLevel.EXTENDED
-            FeatureFlag.HSV_RUNTIME_FUSION_VECTOR_ACCESS ->
+            FeatureFlag.HSI_FUSION_VECTOR_ACCESS ->
                 capabilities.hsvRuntime >= CapabilityLevel.RESEARCH
 
             // Cloud features

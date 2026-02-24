@@ -17,3 +17,29 @@ dependencyResolutionManagement {
 rootProject.name = "synheart-core-android"
 include ':synheart-core'
 
+includeBuild('../synheart-wear-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:synheart-wear') using project(':')
+    }
+}
+includeBuild('../synheart-emotion-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:emotion') using project(':')
+    }
+}
+includeBuild('../synheart-focus-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:focus') using project(':')
+    }
+}
+includeBuild('../synheart-behavior-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:synheart-behavior') using project(':')
+    }
+}
+includeBuild('../synheart-session-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:session') using project(':')
+    }
+}
+

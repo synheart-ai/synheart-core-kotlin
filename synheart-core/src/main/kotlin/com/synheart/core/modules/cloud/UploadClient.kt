@@ -10,7 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * HTTP client for uploading HSI 1.0 snapshots to Synheart Platform
+ * HTTP client for uploading HSI 1.1 snapshots to Synheart Platform
  *
  * Features:
  * - HMAC-SHA256 authentication
@@ -34,7 +34,7 @@ class UploadClient(
     }
 
     /**
-     * Upload HSI 1.0 snapshots to the platform
+     * Upload HSI 1.1 snapshots to the platform
      *
      * @param payload Upload request containing subject and snapshots
      * @param signer HMAC signer instance

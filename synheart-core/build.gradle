@@ -1,7 +1,12 @@
 plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.plugin.serialization'
+    id 'maven-publish'
 }
+
+group = 'ai.synheart'
+version = '1.0.0'
+description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
 
 android {
     namespace 'com.synheart.core'
@@ -9,7 +14,6 @@ android {
 
     defaultConfig {
         minSdk 24
-        targetSdk 34
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
@@ -25,6 +29,12 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
     }
 }
 
@@ -51,12 +61,59 @@ dependencies {
     
     // AndroidX Security (for encrypted storage)
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
+    // JNA for synheart-runtime native library
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
+
+    // Synheart sibling SDKs (resolved via composite builds)
+    implementation 'ai.synheart:synheart-wear:0.3.0'
+    implementation 'ai.synheart:emotion:0.1.0'
+    implementation 'ai.synheart:focus:0.1.0'
+    implementation 'ai.synheart:synheart-behavior:0.4.1'
+    implementation 'ai.synheart:session:0.1.0'
     
+    // JNA (non-Android JAR for host unit tests)
+    testImplementation 'net.java.dev.jna:jna:5.14.0'
+    // Real org.json for host unit tests (Android stubs throw at runtime)
+    testImplementation 'org.json:json:20231013'
+
     // Testing
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
     testImplementation 'io.mockk:mockk:1.13.8'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
+
+// Forward jna.library.path to the test JVM so host-side integration tests can load the native library.
+tasks.withType(Test) {
+    def jnaPath = System.getProperty("jna.library.path")
+            ?: "${rootProject.projectDir}/../synheart-runtime/target/release"
+    systemProperty 'jna.library.path', jnaPath
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'ai.synheart'
+                artifactId = 'synheart-core'
+                version = project.version
+
+                pom {
+                    name = 'Synheart Core SDK'
+                    description = project.description
+                    url = 'https://github.com/synheart-ai/synheart-core-kotlin'
+                    licenses {
+                        license {
+                            name = 'Apache License 2.0'
+                            url = 'https://www.apache.org/licenses/LICENSE-2.0'
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 

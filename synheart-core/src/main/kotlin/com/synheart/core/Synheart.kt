@@ -1,18 +1,26 @@
 package com.synheart.core
 
 import android.content.Context
+import com.synheart.core.config.ActivationManager
 import com.synheart.core.config.SynheartConfig
+import com.synheart.core.config.SynheartFeature
 import com.synheart.core.models.*
 import com.synheart.core.modules.base.ModuleManager
 import com.synheart.core.modules.capabilities.CapabilityModule
 import com.synheart.core.modules.consent.ConsentModule
 import com.synheart.core.modules.consent.ConsentStorage
+import com.synheart.core.modules.interfaces.CapabilityLevel
 import com.synheart.core.modules.interfaces.ConsentSnapshot
+import com.synheart.core.modules.interfaces.FeatureFlag
+import com.synheart.core.modules.interfaces.Module
 import com.synheart.core.modules.wear.WearModule
 import com.synheart.core.modules.phone.PhoneModule
 import com.synheart.core.modules.behavior.BehaviorModule
-import com.synheart.core.modules.hsv_runtime.HSVRuntimeModule
-import com.synheart.core.modules.hsv_runtime.ChannelCollector
+import com.synheart.core.modules.runtime.RuntimeBridge
+import com.synheart.core.modules.runtime.RuntimeConfig
+import com.synheart.core.modules.runtime.RuntimeModule
+import com.synheart.core.modules.srm.SRMModule
+import com.synheart.core.modules.srm.SRMSnapshotStorage
 import com.synheart.core.modules.cloud.CloudConnectorModule
 import com.synheart.core.modules.cloud.ConsentRequiredError
 import com.synheart.core.heads.EmotionHead
@@ -39,7 +47,7 @@ import kotlinx.coroutines.launch
  * - Wear Module (biosignal collection)
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
- * - HSV Runtime (signal fusion & state computation; internal representation)
+ * - Runtime (synheart-runtime C ABI bridge for signal fusion & HSI production)
  * - Cloud Connector (secure uploads)
  *
  * Optional interpretation modules:
@@ -59,10 +67,9 @@ import kotlinx.coroutines.launch
  *     )
  * )
  *
- * // Subscribe to HSV updates (internal state representation)
- * Synheart.onHSVUpdate.collect { hsv ->
- *     println("Arousal Index: ${hsv.affect?.arousalIndex}")
- *     println("Engagement Stability: ${hsv.engagement?.engagementStability}")
+ * // Subscribe to HSI JSON updates from synheart-runtime
+ * Synheart.onHSIUpdate.collect { hsiJson ->
+ *     println("HSI frame: $hsiJson")
  * }
  *
  * // Optional: Enable interpretation modules
@@ -93,36 +100,36 @@ object Synheart {
     private var wearModule: WearModule? = null
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
-    private var hsvRuntimeModule: HSVRuntimeModule? = null
+    private var runtimeModule: RuntimeModule? = null
+    private var srmModule: SRMModule? = null
     private var cloudConnector: CloudConnectorModule? = null
-    // TODO: SyniHooksModule
 
     // Optional interpretation modules
     private var emotionHead: EmotionHead? = null
     private var focusHead: FocusHead? = null
+
+    // Activation manager (RFC-0005 four-authority model)
+    private var activationManager: ActivationManager? = null
 
     // State
     private var context: Context? = null
     private var isConfigured = false
     private var isRunning = false
     private var userId: String? = null
+    private var previousConsent: ConsentSnapshot? = null
 
     // Streams
-    private val _hsvFlow = MutableStateFlow<HumanStateVector?>(null)
+    private val _hsiJsonFlow = MutableStateFlow<String?>(null)
     private val _emotionFlow = MutableStateFlow<EmotionState?>(null)
     private val _focusFlow = MutableStateFlow<FocusState?>(null)
 
     /**
-     * Stream of HSV updates (internal state representation)
+     * Stream of HSI JSON updates produced by synheart-runtime.
      *
-     * HSI contains:
-     * - State axes (affect, engagement, activity, context)
-     * - State indices (arousalIndex, engagementStability, etc.)
-     * - 64D state embedding
-     *
-     * HSI does NOT contain interpretation (emotion, focus).
+     * Each emission is a raw JSON string representing one HSI frame.
+     * Returns non-null values only.
      */
-    val onHSVUpdate: Flow<HumanStateVector> = _hsvFlow.asStateFlow().filterNotNull()
+    val onHSIUpdate: Flow<String> = _hsiJsonFlow.asStateFlow().filterNotNull()
 
     /**
      * Stream of emotion updates (optional interpretation)
@@ -137,6 +144,30 @@ object Synheart {
      * Only emits if focus module is enabled via enableFocus().
      */
     val onFocusUpdate: Flow<FocusState> = _focusFlow.asStateFlow().filterNotNull()
+
+    // Activation API (RFC-0005)
+
+    /** Activate a feature. If all four authorities are satisfied, the feature's module starts. */
+    fun activate(feature: SynheartFeature) {
+        activationManager?.activate(feature)
+        reevaluateFeature(feature)
+    }
+
+    /** Deactivate a feature. Stops the feature's module if running. */
+    fun deactivate(feature: SynheartFeature) {
+        activationManager?.deactivate(feature)
+        reevaluateFeature(feature)
+    }
+
+    /** Check whether a feature is currently activated by the developer. */
+    fun isActivated(feature: SynheartFeature): Boolean {
+        return activationManager?.isActivated(feature) ?: false
+    }
+
+    /** Return the set of all currently activated features. */
+    fun activatedFeatures(): Set<SynheartFeature> {
+        return activationManager?.activatedFeatures() ?: emptySet()
+    }
 
     /**
      * Initialize Synheart Core SDK
@@ -172,10 +203,18 @@ object Synheart {
         try {
             println("[Synheart] Initializing...")
 
-            // 1. Initialize capability module
+            // 1. Initialize capability module with token validation
             println("[Synheart] Initializing capability module...")
             capabilityModule = CapabilityModule()
-            capabilityModule?.loadDefaults() // TODO: Load from token in production
+            val resolvedConfig = config ?: SynheartConfig()
+            if (resolvedConfig.capabilityToken != null && resolvedConfig.capabilitySecret != null) {
+                capabilityModule!!.loadFromToken(resolvedConfig.capabilityToken, resolvedConfig.capabilitySecret)
+            } else if (resolvedConfig.allowUnsignedCapabilities) {
+                println("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
+                capabilityModule!!.loadDefaults()
+            } else {
+                throw IllegalStateException("Capability token and secret are required. Set allowUnsignedCapabilities=true for debug/testing.")
+            }
 
             // 2. Initialize consent module
             println("[Synheart] Initializing consent module...")
@@ -205,52 +244,76 @@ object Synheart {
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(behaviorModule!!, dependsOn = listOf("capabilities", "consent"))
 
-            // 5. Initialize HSV Runtime (NO emotion/focus here - they're optional)
-            println("[Synheart] Initializing HSV Runtime...")
-            val collector = ChannelCollector(
-                wear = wearModule!!,
-                phone = phoneModule!!,
-                behavior = behaviorModule!!
-            )
-            hsvRuntimeModule = HSVRuntimeModule(collector = collector)
+            // 5. Initialize SRM (personal reference model)
+            println("[Synheart] Initializing SRM...")
+            srmModule = SRMModule(storage = SRMSnapshotStorage(this.context!!))
             moduleManager.registerModule(
-                hsvRuntimeModule!!,
-                dependsOn = listOf("wear", "phone", "behavior")
+                srmModule!!,
+                dependsOn = listOf("capabilities", "consent")
             )
 
-            // 6. Initialize Cloud Connector (optional, depends on config)
+            // 6. Initialize Runtime Module (synheart-runtime C ABI bridge)
+            //    RuntimeBridge is null when the native library is not bundled;
+            //    the pipeline is then gracefully inert.
+            println("[Synheart] Initializing Runtime Module...")
+            val runtimeBridge = RuntimeBridge.createIfAvailable(
+                RuntimeConfig(
+                    subjectId = userId,
+                    sessionId = java.util.UUID.randomUUID().toString()
+                )
+            )
+            runtimeModule = RuntimeModule(
+                bridge = runtimeBridge,
+                wearModule = wearModule,
+                behaviorModule = behaviorModule
+            )
+            moduleManager.registerModule(
+                runtimeModule!!,
+                dependsOn = listOf("wear", "behavior")
+            )
+
+            // 7. Initialize Cloud Connector (optional, depends on config)
             if (config?.cloudConfig != null) {
                 println("[Synheart] Initializing Cloud Connector...")
                 cloudConnector = CloudConnectorModule(
                     context = this.context,
                     capabilities = capabilityModule!!,
                     consent = consentModule!!,
-                    hsvRuntime = hsvRuntimeModule!!,
+                    runtimeModule = runtimeModule!!,
                     config = config.cloudConfig!!
                 )
                 moduleManager.registerModule(
                     cloudConnector!!,
-                    dependsOn = listOf("capabilities", "consent", "hsv_runtime")
+                    dependsOn = listOf("capabilities", "consent", "runtime")
                 )
             }
 
-            // 7. Initialize all modules
+            // 8. Initialize all modules
             println("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
-            // 8. Subscribe to HSV stream (core state only)
+            // 9. Register consent change listener
+            previousConsent = consentModule!!.current()
+            consentModule!!.addListener { newConsent ->
+                handleConsentChange(newConsent)
+            }
+
+            // 10. Subscribe to HSI stream from RuntimeModule (consent-gated)
             scope.launch {
-                hsvRuntimeModule?.hsvFlow?.collect { hsv ->
-                    _hsvFlow.value = hsv
+                runtimeModule?.hsiFlow?.collect { hsiJson ->
+                    if (consentModule?.current()?.biosignals != true) return@collect
+                    _hsiJsonFlow.value = hsiJson
                 }
             }
 
-            // 9. Start modules
-            println("[Synheart] Starting all modules...")
-            moduleManager.startAll()
+            // 11. Create activation manager and auto-activate from config
+            activationManager = ActivationManager()
+            activationManager!!.activateFromConfig(resolvedConfig)
 
             isConfigured = true
-            isRunning = true
+            // Modules are initialized but NOT started.
+            // Call startSession() to begin data collection.
+            // Per RFC §5.1: initialize() must NOT start collecting signals.
             println("[Synheart] Initialization complete")
         } catch (e: Exception) {
             println("[Synheart] Initialization failed: $e")
@@ -259,122 +322,66 @@ object Synheart {
         }
     }
 
+    // MARK: - Session Lifecycle
+
     /**
-     * Enable focus interpretation module
+     * Start a session — activates permitted modules and begins signal collection.
      *
-     * This is an optional interpretation module that consumes HSV
-     * and produces focus estimates.
+     * Per RFC §5.2: Core must activate permitted modules, route normalized
+     * signals to synheart-runtime, enable HSV updates, and enable optional HSI export.
      *
-     * Example:
-     * ```kotlin
-     * Synheart.enableFocus()
-     * Synheart.onFocusUpdate.collect { focus ->
-     *     println("Focus Score: ${focus.score}")
-     * }
-     * ```
+     * Must be called after initialize(). No data collection occurs until
+     * this method is called (RFC §3.3).
      */
+    suspend fun startSession() {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before starting session")
+        }
+        if (isRunning) {
+            return // Already running
+        }
+
+        println("[Synheart] Starting session...")
+        moduleManager.startAll()
+        isRunning = true
+        reevaluateAllFeatures()
+        println("[Synheart] Session started")
+    }
+
+    /**
+     * Stop the current session — halts module streaming and clears ephemeral buffers.
+     *
+     * Per RFC §5.2: Core must halt module streaming, stop synheart-runtime updates,
+     * clear ephemeral buffers, and prevent further HSI export.
+     */
+    suspend fun stopSession() {
+        if (!isRunning) {
+            return
+        }
+
+        println("[Synheart] Stopping session...")
+        isRunning = false
+        reevaluateAllFeatures()
+        moduleManager.stopAll()
+        println("[Synheart] Session stopped")
+    }
+
+    /** Enable focus interpretation module. @Deprecated Use activate(SynheartFeature.FOCUS) instead. */
+    @Deprecated("Use activate(SynheartFeature.FOCUS) instead", ReplaceWith("activate(SynheartFeature.FOCUS)"))
     suspend fun enableFocus() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before enabling focus")
-        }
-
-        if (focusHead != null) {
-            println("[Synheart] Focus module already enabled")
-            return
-        }
-
-        try {
-            println("[Synheart] Enabling focus module...")
-
-            focusHead = FocusHead()
-
-            // Focus head subscribes to HSV stream
-            scope.launch {
-                onHSVUpdate.collect { hsv ->
-                    val hsvWithFocus = focusHead?.processOne(hsv)
-                    hsvWithFocus?.focus?.let { focus ->
-                        _focusFlow.value = focus
-                    }
-                }
-            }
-
-            println("[Synheart] Focus module enabled")
-        } catch (e: Exception) {
-            println("[Synheart] Failed to enable focus: $e")
-            e.printStackTrace()
-            throw e
-        }
+        activate(SynheartFeature.FOCUS)
     }
 
-    /**
-     * Enable emotion interpretation module
-     *
-     * This is an optional interpretation module that consumes HSV
-     * and produces emotion estimates.
-     *
-     * Example:
-     * ```kotlin
-     * Synheart.enableEmotion()
-     * Synheart.onEmotionUpdate.collect { emotion ->
-     *     println("Stress Index: ${emotion.stress}")
-     * }
-     * ```
-     */
+    /** Enable emotion interpretation module. @Deprecated Use activate(SynheartFeature.EMOTION) instead. */
+    @Deprecated("Use activate(SynheartFeature.EMOTION) instead", ReplaceWith("activate(SynheartFeature.EMOTION)"))
     suspend fun enableEmotion() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before enabling emotion")
-        }
-
-        if (emotionHead != null) {
-            println("[Synheart] Emotion module already enabled")
-            return
-        }
-
-        try {
-            println("[Synheart] Enabling emotion module...")
-
-            emotionHead = EmotionHead()
-
-            // Emotion head subscribes to HSV stream
-            scope.launch {
-                onHSVUpdate.collect { hsv ->
-                    val hsvWithEmotion = emotionHead?.processOne(hsv)
-                    hsvWithEmotion?.emotion?.let { emotion ->
-                        _emotionFlow.value = emotion
-                    }
-                }
-            }
-
-            println("[Synheart] Emotion module enabled")
-        } catch (e: Exception) {
-            println("[Synheart] Failed to enable emotion: $e")
-            e.printStackTrace()
-            throw e
-        }
+        activate(SynheartFeature.EMOTION)
     }
 
-    /**
-     * Enable cloud uploads (requires cloudUpload consent)
-     *
-     * Example:
-     * ```kotlin
-     * Synheart.enableCloud()
-     * ```
-     */
+    /** Enable cloud uploads. @Deprecated Use activate(SynheartFeature.CLOUD) instead. */
+    @Deprecated("Use activate(SynheartFeature.CLOUD) instead", ReplaceWith("activate(SynheartFeature.CLOUD)"))
     suspend fun enableCloud() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before enabling cloud")
-        }
-
-        if (!consentModule!!.current().cloudUpload) {
-            throw ConsentRequiredError("cloudUpload consent required")
-        }
-
-        if (cloudConnector == null) {
-            throw IllegalStateException("Cloud connector not configured. Provide cloudConfig during initialization")
-        }
-
-        cloudConnector?.start()
+        activate(SynheartFeature.CLOUD)
     }
 
     /**
@@ -411,15 +418,10 @@ object Synheart {
         cloudConnector?.flushQueue()
     }
 
-    /**
-     * Disable cloud uploads
-     */
+    /** Disable cloud uploads. @Deprecated Use deactivate(SynheartFeature.CLOUD) instead. */
+    @Deprecated("Use deactivate(SynheartFeature.CLOUD) instead", ReplaceWith("deactivate(SynheartFeature.CLOUD)"))
     suspend fun disableCloud() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before disabling cloud")
-        }
-
-        cloudConnector?.stop()
+        deactivate(SynheartFeature.CLOUD)
     }
 
     /**
@@ -504,10 +506,10 @@ object Synheart {
     }
 
     /**
-     * Get current HSV state (latest)
+     * Get current HSI JSON state (latest)
      */
-    val currentState: HumanStateVector?
-        get() = _hsvFlow.value
+    val currentState: String?
+        get() = _hsiJsonFlow.value
 
     /**
      * Get current consent snapshot
@@ -525,23 +527,126 @@ object Synheart {
         consentModule?.updateConsent(consent)
     }
 
+    // Consent Change Handling
+
+    private fun handleConsentChange(newConsent: ConsentSnapshot) {
+        previousConsent = newConsent
+        reevaluateAllFeatures()
+    }
+
+    // Feature Reevaluation (RFC-0005 Four-Authority Model)
+
+    /**
+     * Reevaluate whether a single feature should be operational.
+     *
+     * isOperational = activated AND hasConsent AND capabilityAllowed AND isRunning
+     */
+    private fun reevaluateFeature(feature: SynheartFeature) {
+        val activated = activationManager?.isActivated(feature) ?: false
+        val hasConsent = hasConsentForFeature(feature)
+        val capabilityAllowed = isCapabilityAllowed(feature)
+        val isOperational = activated && hasConsent && capabilityAllowed && isRunning
+
+        when (feature) {
+            SynheartFeature.WEAR -> {
+                if (isOperational && wearModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { wearModule?.start() } catch (_: Exception) {} }
+                } else if (!isOperational && wearModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { wearModule?.stop() } catch (_: Exception) {} }
+                }
+            }
+            SynheartFeature.BEHAVIOR -> {
+                if (isOperational && behaviorModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { behaviorModule?.start() } catch (_: Exception) {} }
+                } else if (!isOperational && behaviorModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { behaviorModule?.stop() } catch (_: Exception) {} }
+                }
+            }
+            SynheartFeature.PHONE_CONTEXT -> {
+                if (isOperational && phoneModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { phoneModule?.start() } catch (_: Exception) {} }
+                } else if (!isOperational && phoneModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
+                    scope.launch { try { phoneModule?.stop() } catch (_: Exception) {} }
+                }
+            }
+            SynheartFeature.FOCUS -> {
+                if (isOperational && focusHead == null) {
+                    focusHead = FocusHead()
+                    scope.launch {
+                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                            // FocusHead: HSI JSON parser pending.
+                        }
+                    }
+                } else if (!isOperational && focusHead != null) {
+                    focusHead = null
+                    _focusFlow.value = null
+                }
+            }
+            SynheartFeature.EMOTION -> {
+                if (isOperational && emotionHead == null) {
+                    emotionHead = EmotionHead()
+                    scope.launch {
+                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                            // EmotionHead: HSI JSON parser pending.
+                        }
+                    }
+                } else if (!isOperational && emotionHead != null) {
+                    emotionHead = null
+                    _emotionFlow.value = null
+                }
+            }
+            SynheartFeature.CLOUD -> {
+                if (isOperational && cloudConnector != null) {
+                    scope.launch { try { cloudConnector?.start() } catch (_: Exception) {} }
+                } else if (!isOperational && cloudConnector != null) {
+                    scope.launch { try { cloudConnector?.stop() } catch (_: Exception) {} }
+                }
+            }
+            SynheartFeature.SYNI -> {
+                // placeholder — no SyniHooksModule yet
+            }
+        }
+    }
+
+    /** Reevaluate all features (e.g. after consent change or session start/stop). */
+    private fun reevaluateAllFeatures() {
+        for (feature in SynheartFeature.entries) {
+            reevaluateFeature(feature)
+        }
+    }
+
+    /** Check consent for a feature's required consent type. */
+    private fun hasConsentForFeature(feature: SynheartFeature): Boolean {
+        val consent = consentModule?.current() ?: return false
+        return when (feature.requiredConsent) {
+            "biosignals" -> consent.biosignals
+            "behavior" -> consent.behavior
+            "motion" -> consent.phoneContext
+            "cloudUpload" -> consent.cloudUpload
+            "syni" -> consent.syni
+            else -> false
+        }
+    }
+
+    /** Check whether the CapabilityModule allows a given feature. */
+    private fun isCapabilityAllowed(feature: SynheartFeature): Boolean {
+        val cap = capabilityModule ?: return false
+        return when (feature) {
+            SynheartFeature.WEAR -> cap.capability(Module.WEAR) != CapabilityLevel.NONE
+            SynheartFeature.BEHAVIOR -> cap.capability(Module.BEHAVIOR) != CapabilityLevel.NONE
+            SynheartFeature.PHONE_CONTEXT -> cap.capability(Module.PHONE) != CapabilityLevel.NONE
+            SynheartFeature.FOCUS -> cap.isEnabled(FeatureFlag.HSI_EMOTION_FOCUS)
+            SynheartFeature.EMOTION -> cap.isEnabled(FeatureFlag.HSI_EMOTION_FOCUS)
+            SynheartFeature.CLOUD -> cap.capability(Module.CLOUD) != CapabilityLevel.NONE
+            SynheartFeature.SYNI -> true // no capability gate for syni yet
+        }
+    }
+
     /**
      * Stop Synheart Core SDK
      */
     suspend fun stop() {
-        if (!isRunning) {
-            return
-        }
-
-        try {
-            println("[Synheart] Stopping...")
-            moduleManager.stopAll()
-            isRunning = false
-            println("[Synheart] Stopped")
-        } catch (e: Exception) {
-            println("[Synheart] Stop failed: $e")
-            e.printStackTrace()
-        }
+        stopSession()
     }
 
     /**
@@ -557,10 +662,13 @@ object Synheart {
             wearModule = null
             phoneModule = null
             behaviorModule = null
-            hsvRuntimeModule = null
+            runtimeModule = null
+            srmModule = null
             cloudConnector = null
             emotionHead = null
             focusHead = null
+            activationManager = null
+            previousConsent = null
             isConfigured = false
             isRunning = false
 
