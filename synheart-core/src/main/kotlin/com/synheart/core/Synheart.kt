@@ -527,6 +527,44 @@ object Synheart {
         consentModule?.updateConsent(consent)
     }
 
+    // MARK: - synheart-runtime SRM API (baselines live in the native Rust engine)
+
+    /**
+     * Get baseline summary from the native synheart-runtime (if available).
+     *
+     * Returns a JSON string like `{"total":14,"ready":0,"warming":5,"empty":9}`
+     * or `null` if the native runtime is not linked.
+     */
+    val runtimeBaselineSummary: String?
+        get() = runtimeModule?.bridge?.baselineSummary()
+
+    /**
+     * Get all native runtime baselines as JSON, or `null`.
+     */
+    val runtimeBaselinesJson: String?
+        get() = runtimeModule?.bridge?.baselinesJson()
+
+    /**
+     * Export the native runtime SRM snapshot as JSON for cross-session persistence.
+     */
+    fun exportRuntimeSRMSnapshot(): String? {
+        return runtimeModule?.bridge?.exportSrmSnapshot()
+    }
+
+    /**
+     * Load a native runtime SRM snapshot from JSON.
+     * Returns 0 on success, non-zero error code on failure, or `null` if runtime unavailable.
+     */
+    fun loadRuntimeSRMSnapshot(json: String): Int? {
+        return runtimeModule?.bridge?.loadSrmSnapshot(json)
+    }
+
+    /**
+     * Get the native synheart-runtime version, or `null` if unavailable.
+     */
+    val runtimeVersion: String?
+        get() = RuntimeBridge.version()
+
     // Consent Change Handling
 
     private fun handleConsentChange(newConsent: ConsentSnapshot) {

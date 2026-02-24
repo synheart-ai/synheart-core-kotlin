@@ -59,6 +59,18 @@ interface RuntimeNative : Library {
 
     /** Get runtime library version. Caller MUST free with [synheart_runtime_free_string]. */
     fun synheart_runtime_version(): Pointer?
+
+    /** Return all SRM baselines as JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_baselines_json(handle: Pointer?): Pointer?
+
+    /** Return baseline summary as JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_baseline_summary(handle: Pointer?): Pointer?
+
+    /** Export the SRM snapshot as JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_export_srm_snapshot(handle: Pointer?): Pointer?
+
+    /** Load an SRM snapshot from JSON. Returns 0 on success, non-zero on failure. */
+    fun synheart_runtime_load_srm_snapshot(handle: Pointer?, json: String?): Int
 }
 
 /**
@@ -165,6 +177,37 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
     /** Reset the runtime state (clears all internal buffers). */
     fun reset() {
         native.synheart_runtime_reset(handle)
+    }
+
+    // -- SRM Baselines --
+
+    /** Return all SRM baselines as JSON, or `null`. */
+    fun baselinesJson(): String? {
+        val ptr = native.synheart_runtime_baselines_json(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /** Return baseline summary as JSON: `{"total":14,"ready":0,"warming":5,"empty":9}`. */
+    fun baselineSummary(): String? {
+        val ptr = native.synheart_runtime_baseline_summary(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /** Export the SRM snapshot as JSON for persistence, or `null`. */
+    fun exportSrmSnapshot(): String? {
+        val ptr = native.synheart_runtime_export_srm_snapshot(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /** Load an SRM snapshot from JSON. Returns 0 on success, error code on failure. */
+    fun loadSrmSnapshot(json: String): Int {
+        return native.synheart_runtime_load_srm_snapshot(handle, json)
     }
 
     /**

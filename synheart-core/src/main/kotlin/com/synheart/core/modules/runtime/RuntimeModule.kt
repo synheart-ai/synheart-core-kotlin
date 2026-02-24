@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
  * This is the standard pattern for all synheart-runtime consumers.
  */
 class RuntimeModule(
-    private val bridge: RuntimeBridge?,
+    val bridge: RuntimeBridge?,
     private val wearModule: WearModule?,
     private val behaviorModule: BehaviorModule?,
 ) : BaseSynheartModule("runtime") {
