@@ -1,5 +1,6 @@
 package com.synheart.core.modules.consent
 
+import com.synheart.core.SynheartLogger
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.interfaces.ConsentProvider
 import com.synheart.core.modules.interfaces.ConsentSnapshot
@@ -116,54 +117,26 @@ class ConsentModule(
             try {
                 listener(consent)
             } catch (e: Exception) {
-                android.util.Log.e("ConsentModule", "Error notifying consent listener", e)
+                SynheartLogger.log("[ConsentModule] Error notifying consent listener: $e")
             }
         }
     }
 
     /// Log consent changes for debugging
     private fun logConsentChanges(oldConsent: ConsentSnapshot, newConsent: ConsentSnapshot) {
-        if (oldConsent.biosignals != newConsent.biosignals) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: biosignals ${if (newConsent.biosignals) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.phoneContext != newConsent.phoneContext) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: phoneContext ${if (newConsent.phoneContext) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.behavior != newConsent.behavior) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: behavior ${if (newConsent.behavior) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.cloudUpload != newConsent.cloudUpload) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: cloudUpload ${if (newConsent.cloudUpload) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.focusEstimation != newConsent.focusEstimation) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: focusEstimation ${if (newConsent.focusEstimation) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.emotionEstimation != newConsent.emotionEstimation) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: emotionEstimation ${if (newConsent.emotionEstimation) "granted" else "revoked"}"
-            )
-        }
-        if (oldConsent.syni != newConsent.syni) {
-            android.util.Log.d(
-                "ConsentModule",
-                "Consent changed: syni ${if (newConsent.syni) "granted" else "revoked"}"
-            )
+        val fields = listOf(
+            Triple("biosignals", oldConsent.biosignals, newConsent.biosignals),
+            Triple("behavior", oldConsent.behavior, newConsent.behavior),
+            Triple("phoneContext", oldConsent.phoneContext, newConsent.phoneContext),
+            Triple("focusEstimation", oldConsent.focusEstimation, newConsent.focusEstimation),
+            Triple("emotionEstimation", oldConsent.emotionEstimation, newConsent.emotionEstimation),
+            Triple("cloudUpload", oldConsent.cloudUpload, newConsent.cloudUpload),
+            Triple("syni", oldConsent.syni, newConsent.syni),
+        )
+        for ((name, oldVal, newVal) in fields) {
+            if (oldVal != newVal) {
+                SynheartLogger.log("Consent changed: $name ${if (newVal) "granted" else "revoked"}")
+            }
         }
     }
 

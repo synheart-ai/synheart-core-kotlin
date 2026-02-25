@@ -1,5 +1,6 @@
 package com.synheart.core.modules.runtime
 
+import com.synheart.core.SynheartDefaults
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
@@ -48,6 +49,9 @@ interface RuntimeNative : Library {
     /** Return the latest quality-assessment JSON, or null. */
     fun synheart_runtime_last_quality(handle: Pointer?): Pointer?
 
+    /** Return the latest HSV values as JSON, or null. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_last_hsv(handle: Pointer?): Pointer?
+
     /** Number of HSI frames produced so far. */
     fun synheart_runtime_frame_count(handle: Pointer?): Long
 
@@ -79,8 +83,8 @@ interface RuntimeNative : Library {
  * @param behaviorEnabled `true` for phone (default), `false` for watch/edge.
  */
 data class RuntimeConfig(
-    val windowMs: Long = 60_000,
-    val stepMs: Long = 5_000,
+    val windowMs: Long = SynheartDefaults.RUNTIME_WINDOW_MS,
+    val stepMs: Long = SynheartDefaults.RUNTIME_STEP_MS,
     val subjectId: String,
     val sessionId: String,
     val behaviorEnabled: Boolean = true,
@@ -164,6 +168,21 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
     /** Return the latest quality-assessment JSON, or `null` if unavailable. */
     fun lastQuality(): String? {
         val ptr = native.synheart_runtime_last_quality(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /**
+     * Return the latest HSV (Human State Vector) values as JSON, or `null`
+     * if no window has completed yet.
+     *
+     * The JSON contains per-head values (emotion, focus, capacity, recovery,
+     * strain, sleep) with confidence and inference metadata. This is the
+     * canonical source for all HSV data.
+     */
+    fun lastHsv(): String? {
+        val ptr = native.synheart_runtime_last_hsv(handle) ?: return null
         val json = ptr.getString(0)
         native.synheart_runtime_free_string(ptr)
         return json

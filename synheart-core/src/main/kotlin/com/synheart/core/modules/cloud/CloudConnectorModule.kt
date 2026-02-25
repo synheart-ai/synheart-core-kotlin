@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import com.synheart.core.SynheartLogger
 
 /**
  * Cloud Connector Module
@@ -58,7 +59,7 @@ class CloudConnectorModule(
     private var networkSubscription: Job? = null
 
     override suspend fun onInitialize() {
-        println("[CloudConnector] Initializing...")
+        SynheartLogger.log("[CloudConnector] Initializing...")
 
         // 1. Initialize components
         hmacSigner = HMACSigner(hmacSecret = config.hmacSecret)
@@ -70,11 +71,11 @@ class CloudConnectorModule(
         // 2. Load persisted queue
         uploadQueue.loadFromStorage()
 
-        println("[CloudConnector] Initialized")
+        SynheartLogger.log("[CloudConnector] Initialized")
     }
 
     override suspend fun onStart() {
-        println("[CloudConnector] Starting...")
+        SynheartLogger.log("[CloudConnector] Starting...")
 
         // 1. Subscribe to HSI stream from RuntimeModule
         hsvSubscription = scope.launch {
@@ -97,20 +98,20 @@ class CloudConnectorModule(
             }
         }
 
-        println("[CloudConnector] Started")
+        SynheartLogger.log("[CloudConnector] Started")
     }
 
     override suspend fun onStop() {
-        println("[CloudConnector] Stopping...")
+        SynheartLogger.log("[CloudConnector] Stopping...")
 
         hsvSubscription?.cancel()
         networkSubscription?.cancel()
 
-        println("[CloudConnector] Stopped")
+        SynheartLogger.log("[CloudConnector] Stopped")
     }
 
     override suspend fun onDispose() {
-        println("[CloudConnector] Disposing...")
+        SynheartLogger.log("[CloudConnector] Disposing...")
 
         // Persist queue before disposal
         uploadQueue.persistToStorage()
@@ -119,7 +120,7 @@ class CloudConnectorModule(
         uploadClient.dispose()
         networkMonitor.dispose()
 
-        println("[CloudConnector] Disposed")
+        SynheartLogger.log("[CloudConnector] Disposed")
     }
 
     /**
@@ -156,7 +157,7 @@ class CloudConnectorModule(
      */
     private suspend fun handleNetworkChange(isOnline: Boolean) {
         if (isOnline) {
-            println("[CloudConnector] Network available, flushing queue...")
+            SynheartLogger.log("[CloudConnector] Network available, flushing queue...")
             flushQueue()
         }
     }
@@ -198,16 +199,16 @@ class CloudConnectorModule(
             val windowType = "micro"
             rateLimiter.recordUpload(windowType, batch.size)
 
-            println("[CloudConnector] Uploaded ${batch.size} snapshots (${response.status})")
+            SynheartLogger.log("[CloudConnector] Uploaded ${batch.size} snapshots (${response.status})")
 
         } catch (e: CloudConnectorException) {
             // Re-enqueue batch on failure
             uploadQueue.requeueBatch(batch)
-            println("[CloudConnector] Upload failed: ${e.message}")
+            SynheartLogger.log("[CloudConnector] Upload failed: ${e.message}")
         } catch (e: Exception) {
             // Re-enqueue batch on unexpected error
             uploadQueue.requeueBatch(batch)
-            println("[CloudConnector] Upload failed with unexpected error: ${e.message}")
+            SynheartLogger.log("[CloudConnector] Upload failed with unexpected error: ${e.message}")
         }
     }
 

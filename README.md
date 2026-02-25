@@ -4,7 +4,7 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, generate focus/emotion signals, and integrate with Syni.
+**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, and generate focus/emotion signals.
 
 > **📦 SDK Implementations**: This is the Android/Kotlin implementation. For documentation and other platforms, see the repositories below.
 
@@ -474,8 +474,6 @@ All three implementations share the same modular architecture. See the Flutter r
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - Detailed architecture documentation
-- **[Module Specifications](docs/MODULE_SPECS.md)** - Module API documentation
-- **[Native Implementation Status](../synheart-core-flutter/docs/NATIVE_IMPLEMENTATION_STATUS.md)** - Cross-platform status
 
 ## 📄 License
 

@@ -69,18 +69,18 @@ import kotlinx.coroutines.launch
  *
  * // Subscribe to HSI JSON updates from synheart-runtime
  * Synheart.onHSIUpdate.collect { hsiJson ->
- *     println("HSI frame: $hsiJson")
+ *     SynheartLogger.log("HSI frame: $hsiJson")
  * }
  *
  * // Optional: Enable interpretation modules
  * Synheart.enableFocus()
  * Synheart.onFocusUpdate.collect { focus ->
- *     println("Focus Score: ${focus.score}")
+ *     SynheartLogger.log("Focus Score: ${focus.score}")
  * }
  *
  * Synheart.enableEmotion()
  * Synheart.onEmotionUpdate.collect { emotion ->
- *     println("Stress Index: ${emotion.stress}")
+ *     SynheartLogger.log("Stress Index: ${emotion.stress}")
  * }
  *
  * // Enable cloud upload (with consent)
@@ -201,23 +201,23 @@ object Synheart {
         this.userId = userId
 
         try {
-            println("[Synheart] Initializing...")
+            SynheartLogger.log("[Synheart] Initializing...")
 
             // 1. Initialize capability module with token validation
-            println("[Synheart] Initializing capability module...")
+            SynheartLogger.log("[Synheart] Initializing capability module...")
             capabilityModule = CapabilityModule()
             val resolvedConfig = config ?: SynheartConfig()
             if (resolvedConfig.capabilityToken != null && resolvedConfig.capabilitySecret != null) {
                 capabilityModule!!.loadFromToken(resolvedConfig.capabilityToken, resolvedConfig.capabilitySecret)
             } else if (resolvedConfig.allowUnsignedCapabilities) {
-                println("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
+                SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
                 capabilityModule!!.loadDefaults()
             } else {
                 throw IllegalStateException("Capability token and secret are required. Set allowUnsignedCapabilities=true for debug/testing.")
             }
 
             // 2. Initialize consent module
-            println("[Synheart] Initializing consent module...")
+            SynheartLogger.log("[Synheart] Initializing consent module...")
             val consentStorage = ConsentStorage(context = this.context!!)
             consentModule = ConsentModule(storage = consentStorage)
 
@@ -226,7 +226,7 @@ object Synheart {
             moduleManager.registerModule(consentModule!!)
 
             // 4. Initialize data collection modules
-            println("[Synheart] Initializing data modules...")
+            SynheartLogger.log("[Synheart] Initializing data modules...")
             wearModule = WearModule(
                 capabilities = capabilityModule!!,
                 consent = consentModule!!
@@ -245,7 +245,7 @@ object Synheart {
             moduleManager.registerModule(behaviorModule!!, dependsOn = listOf("capabilities", "consent"))
 
             // 5. Initialize SRM (personal reference model)
-            println("[Synheart] Initializing SRM...")
+            SynheartLogger.log("[Synheart] Initializing SRM...")
             srmModule = SRMModule(storage = SRMSnapshotStorage(this.context!!))
             moduleManager.registerModule(
                 srmModule!!,
@@ -255,7 +255,7 @@ object Synheart {
             // 6. Initialize Runtime Module (synheart-runtime C ABI bridge)
             //    RuntimeBridge is null when the native library is not bundled;
             //    the pipeline is then gracefully inert.
-            println("[Synheart] Initializing Runtime Module...")
+            SynheartLogger.log("[Synheart] Initializing Runtime Module...")
             val runtimeBridge = RuntimeBridge.createIfAvailable(
                 RuntimeConfig(
                     subjectId = userId,
@@ -274,7 +274,7 @@ object Synheart {
 
             // 7. Initialize Cloud Connector (optional, depends on config)
             if (config?.cloudConfig != null) {
-                println("[Synheart] Initializing Cloud Connector...")
+                SynheartLogger.log("[Synheart] Initializing Cloud Connector...")
                 cloudConnector = CloudConnectorModule(
                     context = this.context,
                     capabilities = capabilityModule!!,
@@ -289,7 +289,7 @@ object Synheart {
             }
 
             // 8. Initialize all modules
-            println("[Synheart] Initializing all modules...")
+            SynheartLogger.log("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
             // 9. Register consent change listener
@@ -314,9 +314,9 @@ object Synheart {
             // Modules are initialized but NOT started.
             // Call startSession() to begin data collection.
             // Per RFC §5.1: initialize() must NOT start collecting signals.
-            println("[Synheart] Initialization complete")
+            SynheartLogger.log("[Synheart] Initialization complete")
         } catch (e: Exception) {
-            println("[Synheart] Initialization failed: $e")
+            SynheartLogger.log("[Synheart] Initialization failed: $e")
             e.printStackTrace()
             throw e
         }
@@ -341,11 +341,11 @@ object Synheart {
             return // Already running
         }
 
-        println("[Synheart] Starting session...")
+        SynheartLogger.log("[Synheart] Starting session...")
         moduleManager.startAll()
         isRunning = true
         reevaluateAllFeatures()
-        println("[Synheart] Session started")
+        SynheartLogger.log("[Synheart] Session started")
     }
 
     /**
@@ -359,30 +359,13 @@ object Synheart {
             return
         }
 
-        println("[Synheart] Stopping session...")
+        SynheartLogger.log("[Synheart] Stopping session...")
         isRunning = false
         reevaluateAllFeatures()
         moduleManager.stopAll()
-        println("[Synheart] Session stopped")
+        SynheartLogger.log("[Synheart] Session stopped")
     }
 
-    /** Enable focus interpretation module. @Deprecated Use activate(SynheartFeature.FOCUS) instead. */
-    @Deprecated("Use activate(SynheartFeature.FOCUS) instead", ReplaceWith("activate(SynheartFeature.FOCUS)"))
-    suspend fun enableFocus() {
-        activate(SynheartFeature.FOCUS)
-    }
-
-    /** Enable emotion interpretation module. @Deprecated Use activate(SynheartFeature.EMOTION) instead. */
-    @Deprecated("Use activate(SynheartFeature.EMOTION) instead", ReplaceWith("activate(SynheartFeature.EMOTION)"))
-    suspend fun enableEmotion() {
-        activate(SynheartFeature.EMOTION)
-    }
-
-    /** Enable cloud uploads. @Deprecated Use activate(SynheartFeature.CLOUD) instead. */
-    @Deprecated("Use activate(SynheartFeature.CLOUD) instead", ReplaceWith("activate(SynheartFeature.CLOUD)"))
-    suspend fun enableCloud() {
-        activate(SynheartFeature.CLOUD)
-    }
 
     /**
      * Force upload of queued snapshots now
@@ -418,11 +401,6 @@ object Synheart {
         cloudConnector?.flushQueue()
     }
 
-    /** Disable cloud uploads. @Deprecated Use deactivate(SynheartFeature.CLOUD) instead. */
-    @Deprecated("Use deactivate(SynheartFeature.CLOUD) instead", ReplaceWith("deactivate(SynheartFeature.CLOUD)"))
-    suspend fun disableCloud() {
-        deactivate(SynheartFeature.CLOUD)
-    }
 
     /**
      * Check if user has granted a specific consent
@@ -588,33 +566,28 @@ object Synheart {
         when (feature) {
             SynheartFeature.WEAR -> {
                 if (isOperational && wearModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { wearModule?.start() } catch (_: Exception) {} }
+                    scope.launch { try { wearModule?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start wear module: $e") } }
                 } else if (!isOperational && wearModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { wearModule?.stop() } catch (_: Exception) {} }
+                    scope.launch { try { wearModule?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop wear module: $e") } }
                 }
             }
             SynheartFeature.BEHAVIOR -> {
                 if (isOperational && behaviorModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { behaviorModule?.start() } catch (_: Exception) {} }
+                    scope.launch { try { behaviorModule?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start behavior module: $e") } }
                 } else if (!isOperational && behaviorModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { behaviorModule?.stop() } catch (_: Exception) {} }
+                    scope.launch { try { behaviorModule?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop behavior module: $e") } }
                 }
             }
             SynheartFeature.PHONE_CONTEXT -> {
                 if (isOperational && phoneModule?.status != com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { phoneModule?.start() } catch (_: Exception) {} }
+                    scope.launch { try { phoneModule?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start phone module: $e") } }
                 } else if (!isOperational && phoneModule?.status == com.synheart.core.modules.base.ModuleStatus.RUNNING) {
-                    scope.launch { try { phoneModule?.stop() } catch (_: Exception) {} }
+                    scope.launch { try { phoneModule?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop phone module: $e") } }
                 }
             }
             SynheartFeature.FOCUS -> {
                 if (isOperational && focusHead == null) {
                     focusHead = FocusHead()
-                    scope.launch {
-                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
-                            // FocusHead: HSI JSON parser pending.
-                        }
-                    }
                 } else if (!isOperational && focusHead != null) {
                     focusHead = null
                     _focusFlow.value = null
@@ -623,11 +596,6 @@ object Synheart {
             SynheartFeature.EMOTION -> {
                 if (isOperational && emotionHead == null) {
                     emotionHead = EmotionHead()
-                    scope.launch {
-                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
-                            // EmotionHead: HSI JSON parser pending.
-                        }
-                    }
                 } else if (!isOperational && emotionHead != null) {
                     emotionHead = null
                     _emotionFlow.value = null
@@ -635,14 +603,12 @@ object Synheart {
             }
             SynheartFeature.CLOUD -> {
                 if (isOperational && cloudConnector != null) {
-                    scope.launch { try { cloudConnector?.start() } catch (_: Exception) {} }
+                    scope.launch { try { cloudConnector?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start cloud connector: $e") } }
                 } else if (!isOperational && cloudConnector != null) {
-                    scope.launch { try { cloudConnector?.stop() } catch (_: Exception) {} }
+                    scope.launch { try { cloudConnector?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop cloud connector: $e") } }
                 }
             }
-            SynheartFeature.SYNI -> {
-                // placeholder — no SyniHooksModule yet
-            }
+            SynheartFeature.SYNI -> { }
         }
     }
 
@@ -710,9 +676,9 @@ object Synheart {
             isConfigured = false
             isRunning = false
 
-            println("[Synheart] Disposed")
+            SynheartLogger.log("[Synheart] Disposed")
         } catch (e: Exception) {
-            println("[Synheart] Dispose failed: $e")
+            SynheartLogger.log("[Synheart] Dispose failed: $e")
             e.printStackTrace()
         }
     }

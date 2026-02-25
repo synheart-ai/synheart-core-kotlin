@@ -60,10 +60,13 @@ class CanonicalExample : AppCompatActivity() {
             println("[Runtime] Version: ${runtimeVersion ?: "unavailable"}")
             println("[Runtime] Native library loaded: ${runtimeVersion != null}")
 
-            // 4. Subscribe to HSI updates (core state representation)
+            // 4. Subscribe to HSI updates (core state representation — JSON string)
             launch {
-                Synheart.onHSIUpdate.collect { hsi ->
-                    println("[HSI] v${hsi.hsiVersion} at ${hsi.observedAtUtc}")
+                Synheart.onHSIUpdate.collect { hsiJson ->
+                    val hsi = org.json.JSONObject(hsiJson)
+                    val version = hsi.optString("hsi_version", "unknown")
+                    val observedAt = hsi.optString("observed_at_utc", "unknown")
+                    println("[HSI] v$version at $observedAt")
                 }
             }
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import com.synheart.core.SynheartLogger
 
 /// Phone Module
 ///
@@ -50,11 +51,11 @@ class PhoneModule(
     }
 
     override suspend fun onInitialize() {
-        println("[PhoneModule] Initializing phone collectors...")
+        SynheartLogger.log("[PhoneModule] Initializing phone collectors...")
     }
 
     override suspend fun onStart() {
-        println("[PhoneModule] Starting phone data collection...")
+        SynheartLogger.log("[PhoneModule] Starting phone data collection...")
 
         motionCollector.start()
         val motionJob = motionCollector.motionFlow
@@ -92,11 +93,11 @@ class PhoneModule(
             jobSet.add(notifJob)
         }
 
-        println("[PhoneModule] Started ${jobSet.size} collectors")
+        SynheartLogger.log("[PhoneModule] Started ${jobSet.size} collectors")
     }
 
     override suspend fun onStop() {
-        println("[PhoneModule] Stopping phone data collection...")
+        SynheartLogger.log("[PhoneModule] Stopping phone data collection...")
 
         jobSet.forEach { it.cancel() }
         jobSet.clear()
@@ -108,7 +109,7 @@ class PhoneModule(
     }
 
     override suspend fun onDispose() {
-        println("[PhoneModule] Disposing phone module...")
+        SynheartLogger.log("[PhoneModule] Disposing phone module...")
 
         motionCollector.dispose()
         screenTracker.dispose()

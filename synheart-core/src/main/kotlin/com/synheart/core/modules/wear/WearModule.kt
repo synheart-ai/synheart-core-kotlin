@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import com.synheart.core.SynheartLogger
 
 /// Wear Module
 ///
@@ -53,22 +54,22 @@ class WearModule(
     }
 
     override suspend fun onInitialize() {
-        println("[WearModule] Initializing wear sources...")
+        SynheartLogger.log("[WearModule] Initializing wear sources...")
 
         actualSources.forEach { source ->
             if (source.isAvailable) {
                 try {
                     source.initialize()
-                    println("[WearModule] Initialized ${source.sourceType} source")
+                    SynheartLogger.log("[WearModule] Initialized ${source.sourceType} source")
                 } catch (e: Exception) {
-                    println("[WearModule] Failed to initialize ${source.sourceType}: $e")
+                    SynheartLogger.log("[WearModule] Failed to initialize ${source.sourceType}: $e")
                 }
             }
         }
     }
 
     override suspend fun onStart() {
-        println("[WearModule] Starting wear data collection...")
+        SynheartLogger.log("[WearModule] Starting wear data collection...")
 
         actualSources.forEach { source ->
             if (source.isAvailable) {
@@ -87,24 +88,24 @@ class WearModule(
             }
         }
 
-        println("[WearModule] Started ${jobSet.size} wear sources")
+        SynheartLogger.log("[WearModule] Started ${jobSet.size} wear sources")
     }
 
     override suspend fun onStop() {
-        println("[WearModule] Stopping wear data collection...")
+        SynheartLogger.log("[WearModule] Stopping wear data collection...")
 
         jobSet.forEach { it.cancel() }
         jobSet.clear()
     }
 
     override suspend fun onDispose() {
-        println("[WearModule] Disposing wear module...")
+        SynheartLogger.log("[WearModule] Disposing wear module...")
 
         actualSources.forEach { source ->
             try {
                 source.dispose()
             } catch (e: Exception) {
-                println("[WearModule] Error disposing ${source.sourceType}: $e")
+                SynheartLogger.log("[WearModule] Error disposing ${source.sourceType}: $e")
             }
         }
 

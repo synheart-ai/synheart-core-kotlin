@@ -1,5 +1,6 @@
 package com.synheart.core.modules.behavior
 
+import com.synheart.core.SynheartDefaults
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.interfaces.BehaviorFeatureProvider
 import com.synheart.core.modules.interfaces.BehaviorWindowFeatures
@@ -16,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.synheart.core.SynheartLogger
 
 /// Behavior Module
 ///
@@ -53,11 +55,11 @@ class BehaviorModule(
     }
 
     override suspend fun onInitialize() {
-        println("[BehaviorModule] Initializing behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Initializing behavior tracking...")
     }
 
     override suspend fun onStart() {
-        println("[BehaviorModule] Starting behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Starting behavior tracking...")
 
         eventJob = eventStream.events
             .onEach { event ->
@@ -69,16 +71,16 @@ class BehaviorModule(
 
         cleanupJob = scope.launch {
             while (isActive) {
-                delay(60000)
+                delay(SynheartDefaults.RUNTIME_WINDOW_MS)
                 aggregator.cleanOldWindows()
             }
         }
 
-        println("[BehaviorModule] Behavior tracking started")
+        SynheartLogger.log("[BehaviorModule] Behavior tracking started")
     }
 
     override suspend fun onStop() {
-        println("[BehaviorModule] Stopping behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
 
         eventJob?.cancel()
         eventJob = null
@@ -88,7 +90,7 @@ class BehaviorModule(
     }
 
     override suspend fun onDispose() {
-        println("[BehaviorModule] Disposing behavior module...")
+        SynheartLogger.log("[BehaviorModule] Disposing behavior module...")
         eventStream.dispose()
         scope.cancel()
     }

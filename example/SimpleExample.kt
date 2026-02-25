@@ -38,16 +38,18 @@ class SimpleExample : AppCompatActivity() {
             println("[Runtime] Version: ${runtimeVersion ?: "unavailable"}")
             println("[Runtime] Native library loaded: ${runtimeVersion != null}")
 
-            // Subscribe to HSI updates
+            // Subscribe to HSI updates (JSON string from synheart-runtime)
             var firstHsiReceived = false
             launch {
-                Synheart.onHSIUpdate.collect { hsi ->
+                Synheart.onHSIUpdate.collect { hsiJson ->
                     if (!firstHsiReceived) {
                         firstHsiReceived = true
                         println("[Runtime] First HSI frame received")
                     }
-                    println("Arousal: ${hsi.affect?.arousalIndex}")
-                    println("Valence: ${hsi.affect?.valenceIndex}")
+                    val hsi = org.json.JSONObject(hsiJson)
+                    val affect = hsi.optJSONObject("affect")
+                    println("Arousal: ${affect?.optDouble("arousal_index")}")
+                    println("Valence: ${affect?.optDouble("valence_index")}")
                 }
             }
 

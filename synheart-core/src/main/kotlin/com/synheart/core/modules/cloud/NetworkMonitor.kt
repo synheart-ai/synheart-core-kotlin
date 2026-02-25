@@ -8,6 +8,7 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.synheart.core.SynheartLogger
 
 /**
  * Network connectivity monitor
@@ -34,7 +35,7 @@ class NetworkMonitor(context: Context?) {
 
     private fun initializeNetworkMonitoring() {
         if (connectivityManager == null) {
-            println("[NetworkMonitor] ConnectivityManager not available")
+            SynheartLogger.log("[NetworkMonitor] ConnectivityManager not available")
             return
         }
 
@@ -52,7 +53,7 @@ class NetworkMonitor(context: Context?) {
                 _connectivityFlow.value = true
 
                 if (!wasOnline) {
-                    println("[NetworkMonitor] Network available")
+                    SynheartLogger.log("[NetworkMonitor] Network available")
                 }
             }
 
@@ -61,7 +62,7 @@ class NetworkMonitor(context: Context?) {
                 _connectivityFlow.value = isConnected()
 
                 if (wasOnline && !_connectivityFlow.value) {
-                    println("[NetworkMonitor] Network lost")
+                    SynheartLogger.log("[NetworkMonitor] Network lost")
                 }
             }
 
@@ -79,7 +80,7 @@ class NetworkMonitor(context: Context?) {
         try {
             connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)
         } catch (e: Exception) {
-            println("[NetworkMonitor] Failed to register network callback: ${e.message}")
+            SynheartLogger.log("[NetworkMonitor] Failed to register network callback: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -105,7 +106,7 @@ class NetworkMonitor(context: Context?) {
             try {
                 connectivityManager?.unregisterNetworkCallback(it)
             } catch (e: Exception) {
-                println("[NetworkMonitor] Failed to unregister network callback: ${e.message}")
+                SynheartLogger.log("[NetworkMonitor] Failed to unregister network callback: ${e.message}")
             }
         }
         networkCallback = null

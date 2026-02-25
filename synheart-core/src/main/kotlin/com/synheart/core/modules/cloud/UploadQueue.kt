@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.LinkedList
+import com.synheart.core.SynheartLogger
 
 /**
  * Persistent offline queue for HSI JSON snapshots.
@@ -53,9 +54,9 @@ class UploadQueue(
             val items = json.decodeFromString<List<String>>(jsonString)
             queue.addAll(items)
 
-            println("[UploadQueue] Loaded ${queue.size} items from storage")
+            SynheartLogger.log("[UploadQueue] Loaded ${queue.size} items from storage")
         } catch (e: Exception) {
-            println("[UploadQueue] Failed to load from storage: ${e.message}")
+            SynheartLogger.log("[UploadQueue] Failed to load from storage: ${e.message}")
         }
     }
 
@@ -67,7 +68,7 @@ class UploadQueue(
             val jsonString = json.encodeToString(queue.toList())
             storage.edit().putString(QUEUE_DATA_KEY, jsonString).apply()
         } catch (e: Exception) {
-            println("[UploadQueue] Failed to persist to storage: ${e.message}")
+            SynheartLogger.log("[UploadQueue] Failed to persist to storage: ${e.message}")
         }
     }
 

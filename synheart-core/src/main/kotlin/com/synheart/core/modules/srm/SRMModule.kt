@@ -2,6 +2,7 @@ package com.synheart.core.modules.srm
 
 import com.synheart.core.modules.base.BaseSynheartModule
 import java.time.Instant
+import com.synheart.core.SynheartLogger
 
 /// SRM (Synheart Reference Model) module.
 ///
@@ -23,7 +24,7 @@ class SRMModule(
     // ---------------------------------------------------------------------------
 
     override suspend fun onInitialize() {
-        println("[SRM] Initializing SRM module...")
+        SynheartLogger.log("[SRM] Initializing SRM module...")
         for (stratum in SRMStratum.entries) {
             buffers[stratum] = SRMBuffer(stratum = stratum, config = config)
         }
@@ -34,18 +35,18 @@ class SRMModule(
                 val saved = storage.load()
                 if (saved != null) {
                     restoreSnapshot(saved)
-                    println("[SRM] Restored persisted snapshot")
+                    SynheartLogger.log("[SRM] Restored persisted snapshot")
                 }
             } catch (e: Exception) {
-                println("[SRM] Warning: failed to load persisted snapshot: $e")
+                SynheartLogger.log("[SRM] Warning: failed to load persisted snapshot: $e")
             }
         }
 
-        println("[SRM] SRM module initialized (${buffers.size} strata)")
+        SynheartLogger.log("[SRM] SRM module initialized (${buffers.size} strata)")
     }
 
     override suspend fun onStart() {
-        println("[SRM] SRM module started")
+        SynheartLogger.log("[SRM] SRM module started")
     }
 
     override suspend fun onStop() {
@@ -53,19 +54,19 @@ class SRMModule(
             try {
                 storage.save(snapshot())
             } catch (e: Exception) {
-                println("[SRM] Warning: failed to persist snapshot on stop: $e")
+                SynheartLogger.log("[SRM] Warning: failed to persist snapshot on stop: $e")
             }
         }
-        println("[SRM] SRM module stopped")
+        SynheartLogger.log("[SRM] SRM module stopped")
     }
 
     override suspend fun onDispose() {
-        println("[SRM] Disposing SRM module...")
+        SynheartLogger.log("[SRM] Disposing SRM module...")
         if (storage != null) {
             try {
                 storage.save(snapshot())
             } catch (e: Exception) {
-                println("[SRM] Warning: failed to persist snapshot on dispose: $e")
+                SynheartLogger.log("[SRM] Warning: failed to persist snapshot on dispose: $e")
             }
         }
         buffers.clear()
@@ -159,12 +160,12 @@ class SRMModule(
     /// Restore SRM state from a snapshot.
     fun restoreSnapshot(snapshot: SRMSnapshot) {
         if (snapshot.srmVersion != config.srmVersion) {
-            println("[SRM] Warning: snapshot version ${snapshot.srmVersion} differs from config version ${config.srmVersion}")
+            SynheartLogger.log("[SRM] Warning: snapshot version ${snapshot.srmVersion} differs from config version ${config.srmVersion}")
         }
         for ((stratum, stratumSnapshot) in snapshot.strata) {
             buffers[stratum]?.restore(stratumSnapshot.entries)
         }
-        println("[SRM] Restored snapshot (${snapshot.strata.size} strata)")
+        SynheartLogger.log("[SRM] Restored snapshot (${snapshot.strata.size} strata)")
     }
 
     /// Reset all buffers.
@@ -172,7 +173,7 @@ class SRMModule(
         for (buffer in buffers.values) {
             buffer.reset()
         }
-        println("[SRM] All buffers reset")
+        SynheartLogger.log("[SRM] All buffers reset")
     }
 
     /// Access to config (for integration modules that need thresholds).

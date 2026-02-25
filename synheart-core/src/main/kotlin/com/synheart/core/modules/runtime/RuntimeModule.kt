@@ -1,5 +1,6 @@
 package com.synheart.core.modules.runtime
 
+import com.synheart.core.SynheartDefaults
 import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.behavior.BehaviorEventType
 import com.synheart.core.modules.behavior.BehaviorModule
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.synheart.core.SynheartLogger
 
 /**
  * Runtime Module -- streams wear and behavior data into the synheart-runtime
@@ -54,14 +56,14 @@ class RuntimeModule(
     private var behaviorJob: Job? = null
 
     override suspend fun onInitialize() {
-        println("[RuntimeModule] Initialized (native bridge ${if (bridge != null) "available" else "unavailable"})")
+        SynheartLogger.log("[RuntimeModule] Initialized (native bridge ${if (bridge != null) "available" else "unavailable"})")
     }
 
     override suspend fun onStart() {
-        println("[RuntimeModule] Starting...")
+        SynheartLogger.log("[RuntimeModule] Starting...")
 
         if (bridge == null) {
-            println("[RuntimeModule] No native bridge -- pipeline inert until synheart_runtime is linked")
+            SynheartLogger.log("[RuntimeModule] No native bridge -- pipeline inert until synheart_runtime is linked")
             return
         }
 
@@ -72,13 +74,13 @@ class RuntimeModule(
                 if (saved != null) {
                     val rc = bridge.loadSrmSnapshot(saved)
                     if (rc == 0) {
-                        println("[RuntimeModule] Restored SRM baselines from snapshot")
+                        SynheartLogger.log("[RuntimeModule] Restored SRM baselines from snapshot")
                     } else {
-                        println("[RuntimeModule] SRM snapshot load failed (code $rc), starting fresh")
+                        SynheartLogger.log("[RuntimeModule] SRM snapshot load failed (code $rc), starting fresh")
                     }
                 }
             } catch (e: Exception) {
-                println("[RuntimeModule] SRM snapshot restore error: $e")
+                SynheartLogger.log("[RuntimeModule] SRM snapshot restore error: $e")
             }
         }
 
@@ -103,7 +105,7 @@ class RuntimeModule(
         // Tick every 5 seconds
         tickJob = moduleScope.launch {
             while (isActive) {
-                delay(5_000)
+                delay(SynheartDefaults.RUNTIME_TICK_INTERVAL_MS)
                 val hsiJson = bridge.tick(System.currentTimeMillis())
                 if (hsiJson != null) {
                     _hsiFlow.value = hsiJson
@@ -111,11 +113,11 @@ class RuntimeModule(
             }
         }
 
-        println("[RuntimeModule] Started")
+        SynheartLogger.log("[RuntimeModule] Started")
     }
 
     override suspend fun onStop() {
-        println("[RuntimeModule] Stopping...")
+        SynheartLogger.log("[RuntimeModule] Stopping...")
 
         // Persist SRM baselines for next session
         if (bridge != null && saveSrmSnapshot != null) {
@@ -123,10 +125,10 @@ class RuntimeModule(
                 val snapshot = bridge.exportSrmSnapshot()
                 if (snapshot != null) {
                     saveSrmSnapshot.invoke(snapshot)
-                    println("[RuntimeModule] Saved SRM baselines snapshot")
+                    SynheartLogger.log("[RuntimeModule] Saved SRM baselines snapshot")
                 }
             } catch (e: Exception) {
-                println("[RuntimeModule] SRM snapshot save error: $e")
+                SynheartLogger.log("[RuntimeModule] SRM snapshot save error: $e")
             }
         }
 
@@ -139,11 +141,11 @@ class RuntimeModule(
         behaviorJob?.cancel()
         behaviorJob = null
 
-        println("[RuntimeModule] Stopped")
+        SynheartLogger.log("[RuntimeModule] Stopped")
     }
 
     override suspend fun onDispose() {
-        println("[RuntimeModule] Disposing...")
+        SynheartLogger.log("[RuntimeModule] Disposing...")
 
         tickJob?.cancel()
         wearJob?.cancel()

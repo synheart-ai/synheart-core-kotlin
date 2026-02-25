@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'ai.synheart'
-version = '1.0.0'
+version = '1.2.0'
 description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
 
 android {
