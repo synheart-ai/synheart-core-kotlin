@@ -4,7 +4,7 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, and generate focus/emotion signals.
+**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, and integrate with Syni. Human state inference is computed by the on-device synheart-runtime engine.
 
 > **📦 SDK Implementations**: This is the Android/Kotlin implementation. For documentation and other platforms, see the repositories below.
 
@@ -38,14 +38,14 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 
 ### Core Principle
 
-> **HSI represents human state.**
+> **All inference is computed by synheart-runtime (Rust).**
 >
-> **Interpretation is downstream and optional.**
+> **SDKs coordinate data collection and distribution.**
 
 The Core SDK strictly separates:
-- **Representation (HSI)** - State axes, indices, embeddings
-- **Interpretation (Focus, Emotion)** - Optional, explicit modules
-- **Application logic** - Your app
+- **Computation** — synheart-runtime (Rust) computes HSV
+- **Collection** — Core SDK modules (Wear, Phone, Behavior, Consent, Capability)
+- **Distribution** — HSI JSON export, cloud upload, raw HSV diagnostics
 
 ### Core Modules
 

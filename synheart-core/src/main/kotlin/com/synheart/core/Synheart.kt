@@ -23,8 +23,6 @@ import com.synheart.core.modules.srm.SRMModule
 import com.synheart.core.modules.srm.SRMSnapshotStorage
 import com.synheart.core.modules.cloud.CloudConnectorModule
 import com.synheart.core.modules.cloud.ConsentRequiredError
-import com.synheart.core.heads.EmotionHead
-import com.synheart.core.heads.FocusHead
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -104,10 +102,6 @@ object Synheart {
     private var srmModule: SRMModule? = null
     private var cloudConnector: CloudConnectorModule? = null
 
-    // Optional interpretation modules
-    private var emotionHead: EmotionHead? = null
-    private var focusHead: FocusHead? = null
-
     // Activation manager (RFC-0005 four-authority model)
     private var activationManager: ActivationManager? = null
 
@@ -120,8 +114,6 @@ object Synheart {
 
     // Streams
     private val _hsiJsonFlow = MutableStateFlow<String?>(null)
-    private val _emotionFlow = MutableStateFlow<EmotionState?>(null)
-    private val _focusFlow = MutableStateFlow<FocusState?>(null)
 
     /**
      * Stream of HSI JSON updates produced by synheart-runtime.
@@ -130,20 +122,6 @@ object Synheart {
      * Returns non-null values only.
      */
     val onHSIUpdate: Flow<String> = _hsiJsonFlow.asStateFlow().filterNotNull()
-
-    /**
-     * Stream of emotion updates (optional interpretation)
-     *
-     * Only emits if emotion module is enabled via enableEmotion().
-     */
-    val onEmotionUpdate: Flow<EmotionState> = _emotionFlow.asStateFlow().filterNotNull()
-
-    /**
-     * Stream of focus updates (optional interpretation)
-     *
-     * Only emits if focus module is enabled via enableFocus().
-     */
-    val onFocusUpdate: Flow<FocusState> = _focusFlow.asStateFlow().filterNotNull()
 
     // Activation API (RFC-0005)
 
@@ -585,22 +563,6 @@ object Synheart {
                     scope.launch { try { phoneModule?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop phone module: $e") } }
                 }
             }
-            SynheartFeature.FOCUS -> {
-                if (isOperational && focusHead == null) {
-                    focusHead = FocusHead()
-                } else if (!isOperational && focusHead != null) {
-                    focusHead = null
-                    _focusFlow.value = null
-                }
-            }
-            SynheartFeature.EMOTION -> {
-                if (isOperational && emotionHead == null) {
-                    emotionHead = EmotionHead()
-                } else if (!isOperational && emotionHead != null) {
-                    emotionHead = null
-                    _emotionFlow.value = null
-                }
-            }
             SynheartFeature.CLOUD -> {
                 if (isOperational && cloudConnector != null) {
                     scope.launch { try { cloudConnector?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start cloud connector: $e") } }
@@ -639,8 +601,6 @@ object Synheart {
             SynheartFeature.WEAR -> cap.capability(Module.WEAR) != CapabilityLevel.NONE
             SynheartFeature.BEHAVIOR -> cap.capability(Module.BEHAVIOR) != CapabilityLevel.NONE
             SynheartFeature.PHONE_CONTEXT -> cap.capability(Module.PHONE) != CapabilityLevel.NONE
-            SynheartFeature.FOCUS -> cap.isEnabled(FeatureFlag.HSI_EMOTION_FOCUS)
-            SynheartFeature.EMOTION -> cap.isEnabled(FeatureFlag.HSI_EMOTION_FOCUS)
             SynheartFeature.CLOUD -> cap.capability(Module.CLOUD) != CapabilityLevel.NONE
             SynheartFeature.SYNI -> true // no capability gate for syni yet
         }
@@ -669,8 +629,6 @@ object Synheart {
             runtimeModule = null
             srmModule = null
             cloudConnector = null
-            emotionHead = null
-            focusHead = null
             activationManager = null
             previousConsent = null
             isConfigured = false

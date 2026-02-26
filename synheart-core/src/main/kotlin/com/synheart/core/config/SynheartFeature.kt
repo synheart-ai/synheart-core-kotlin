@@ -18,12 +18,6 @@ enum class SynheartFeature(val requiredConsent: String) {
     /** Device motion, screen state, and app context */
     PHONE_CONTEXT("motion"),
 
-    /** Focus inference head */
-    FOCUS("biosignals"),
-
-    /** Emotion inference head */
-    EMOTION("biosignals"),
-
     /** Cloud upload connector */
     CLOUD("cloudUpload"),
 
