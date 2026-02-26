@@ -97,6 +97,24 @@ class CanonicalExample : AppCompatActivity() {
 
             // 8. Consent can be revoked mid-session — affected features stop automatically
             // Synheart.revokeConsent("behavior")
+
+            // 9. Internal diagnostics (pre-processed data — R&D / training only)
+            println("[Runtime] Internal diagnostics example:")
+            Synheart.runtimeModule()?.let { runtimeModule ->
+                runtimeModule.bridge?.lastPreprocessed()?.let { json ->
+                    try {
+                        val window = com.synheart.core.models.PreprocessedWindow.fromJson(json)
+                        println("  Quality score: ${window.quality.score}")
+                        window.derivedFeatures.hrv?.let { hrv ->
+                            println("  HRV RMSSD: ${hrv.rmssdMs}ms")
+                        }
+                        println("  Embeddings dimension: ${window.embeddings.signalEmbedding.dimension}")
+                        println("  SRM ready count: ${window.srmContext.readyCount}/${window.srmContext.totalCount}")
+                    } catch (e: Exception) {
+                        println("  Error parsing pre-processed data: ${e.message}")
+                    }
+                }
+            }
         }
     }
 

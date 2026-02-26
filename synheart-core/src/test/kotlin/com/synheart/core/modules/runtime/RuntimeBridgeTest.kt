@@ -1,5 +1,6 @@
 package com.synheart.core.modules.runtime
 
+import com.synheart.core.models.PreprocessedWindow
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -287,5 +288,50 @@ class RuntimeBridgeTest {
         val parsed = JSONObject(summary!!)
         assertEquals("warming should be 0 after reset", 0, parsed.getInt("warming"))
         assertEquals("ready should be 0 after reset", 0, parsed.getInt("ready"))
+    }
+
+    // -- Pre-processed Data --
+
+    @Test
+    fun `lastPreprocessed returns valid JSON with expected structure`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+        val now = System.currentTimeMillis()
+        for (w in 0 until 3) { fillWindowAndTick(b, now + w * 15_000L) }
+        val json = b.lastPreprocessed()
+        if (json != null) {
+            val parsed = JSONObject(json)
+            assertTrue("should have schema_version", parsed.has("schema_version"))
+            assertTrue("should have quality", parsed.has("quality"))
+            assertTrue("should have derived_features", parsed.has("derived_features"))
+            assertTrue("should have srm_context", parsed.has("srm_context"))
+            assertTrue("should have embeddings", parsed.has("embeddings"))
+            val window = PreprocessedWindow.fromJson(json)
+            assertTrue("quality.score in [0,1]", window.quality.score in 0.0..1.0)
+            assertTrue("quality.rrCount >= 0", window.quality.rrCount >= 0)
+            assertTrue("srm totalCount >= 0", window.srmContext.totalCount >= 0)
+        }
+    }
+
+    @Test
+    fun `lastPreprocessed returns null after reset`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+        val now = System.currentTimeMillis()
+        for (w in 0 until 3) { fillWindowAndTick(b, now + w * 15_000L) }
+        b.reset()
+        assertNull("lastPreprocessed should be null after reset", b.lastPreprocessed())
+    }
+
+    @Test
+    fun `PreprocessedWindow model parses valid JSON`() {
+        val jsonStr = """{"schema_version":"1.0.0","window_start_ms":1000,"window_end_ms":11000,"session_id":"test_session","quality":{"score":0.85,"coverage_pct":0.9,"dropout_count":0,"rr_count":10,"artifact_pct":0.05},"derived_features":{"hrv":{"rmssd_ms":42.5,"sdnn_ms":38.0,"pnn50":0.25,"mean_rr_ms":800.0,"hr_mean_bpm":72.0,"hr_std_bpm":3.5,"rr_count":10},"motion":null,"artifact":null},"behavior_features":null,"srm_context":{"ready_count":0,"total_count":14,"deviations":{}},"embeddings":{"signal_embedding":{"vector":[0.1,0.2,0.3],"dimension":3,"space":"latent"}}}"""
+        val window = PreprocessedWindow.fromJson(jsonStr)
+        assertEquals("1.0.0", window.schemaVersion)
+        assertEquals(0.85, window.quality.score, 0.001)
+        assertEquals(10, window.quality.rrCount)
+        assertEquals(42.5, window.derivedFeatures.hrv!!.rmssdMs, 0.001)
+        assertEquals(14, window.srmContext.totalCount)
+        assertEquals(3, window.embeddings.signalEmbedding.dimension)
     }
 }

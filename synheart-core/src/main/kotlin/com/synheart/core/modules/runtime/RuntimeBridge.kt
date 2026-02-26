@@ -52,6 +52,9 @@ interface RuntimeNative : Library {
     /** Return the latest HSV values as JSON, or null. Caller MUST free with [synheart_runtime_free_string]. */
     fun synheart_runtime_last_hsv(handle: Pointer?): Pointer?
 
+    /** Return the latest pre-processed window as JSON (internal use only), or null. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_last_preprocessed(handle: Pointer?): Pointer?
+
     /** Number of HSI frames produced so far. */
     fun synheart_runtime_frame_count(handle: Pointer?): Long
 
@@ -183,6 +186,21 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
      */
     fun lastHsv(): String? {
         val ptr = native.synheart_runtime_last_hsv(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /**
+     * Return the latest pre-processed window as JSON (internal use only), or `null`
+     * if no window has completed yet.
+     *
+     * The JSON contains quality metrics, derived features (HRV, motion, artifact),
+     * behavior features, SRM baseline context with Z-score deviations, and 64D
+     * signal embeddings. Used for on-device model training, R&D, and diagnostics.
+     */
+    fun lastPreprocessed(): String? {
+        val ptr = native.synheart_runtime_last_preprocessed(handle) ?: return null
         val json = ptr.getString(0)
         native.synheart_runtime_free_string(ptr)
         return json
