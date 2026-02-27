@@ -23,8 +23,10 @@ import com.synheart.core.modules.srm.SRMModule
 import com.synheart.core.modules.srm.SRMSnapshotStorage
 import com.synheart.core.modules.cloud.CloudConnectorModule
 import com.synheart.core.modules.cloud.ConsentRequiredError
+import com.synheart.core.modules.wear.WearSample
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +114,12 @@ object Synheart {
     private var userId: String? = null
     private var previousConsent: ConsentSnapshot? = null
 
+    // Session data buffers — accumulate during session, persist after stop
+    private val sessionHsiBuffer = mutableListOf<String>()
+    private val sessionWearBuffer = mutableListOf<WearSample>()
+    private var sessionHsiJob: Job? = null
+    private var sessionWearJob: Job? = null
+
     // Streams
     private val _hsiJsonFlow = MutableStateFlow<String?>(null)
 
@@ -122,6 +130,20 @@ object Synheart {
      * Returns non-null values only.
      */
     val onHSIUpdate: Flow<String> = _hsiJsonFlow.asStateFlow().filterNotNull()
+
+    /**
+     * Returns a snapshot of all HSI JSON windows accumulated during the current
+     * (or most recent) session. The list is cleared when [startSession] is called.
+     */
+    fun getSessionHsiWindows(): List<String> =
+        synchronized(sessionHsiBuffer) { sessionHsiBuffer.toList() }
+
+    /**
+     * Returns a snapshot of all raw wear samples accumulated during the current
+     * (or most recent) session. The list is cleared when [startSession] is called.
+     */
+    fun getSessionWearSamples(): List<WearSample> =
+        synchronized(sessionWearBuffer) { sessionWearBuffer.toList() }
 
     // Activation API (RFC-0005)
 
@@ -321,6 +343,21 @@ object Synheart {
 
         SynheartLogger.log("[Synheart] Starting session...")
         moduleManager.startAll()
+
+        // Clear session buffers and start accumulating
+        synchronized(sessionHsiBuffer) { sessionHsiBuffer.clear() }
+        synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
+        sessionHsiJob = scope.launch {
+            runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                synchronized(sessionHsiBuffer) { sessionHsiBuffer.add(hsiJson) }
+            }
+        }
+        sessionWearJob = scope.launch {
+            wearModule?.sampleFlow?.collect { sample ->
+                synchronized(sessionWearBuffer) { sessionWearBuffer.add(sample) }
+            }
+        }
+
         isRunning = true
         reevaluateAllFeatures()
         SynheartLogger.log("[Synheart] Session started")
@@ -338,6 +375,13 @@ object Synheart {
         }
 
         SynheartLogger.log("[Synheart] Stopping session...")
+
+        // Cancel buffer collection jobs but keep buffers for post-session queries
+        sessionHsiJob?.cancel()
+        sessionHsiJob = null
+        sessionWearJob?.cancel()
+        sessionWearJob = null
+
         isRunning = false
         reevaluateAllFeatures()
         moduleManager.stopAll()
@@ -620,6 +664,13 @@ object Synheart {
         try {
             stop()
             moduleManager.disposeAll()
+
+            sessionHsiJob?.cancel()
+            sessionHsiJob = null
+            sessionWearJob?.cancel()
+            sessionWearJob = null
+            synchronized(sessionHsiBuffer) { sessionHsiBuffer.clear() }
+            synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
 
             consentModule = null
             capabilityModule = null
