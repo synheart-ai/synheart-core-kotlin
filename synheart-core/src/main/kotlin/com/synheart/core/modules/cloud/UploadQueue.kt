@@ -76,7 +76,7 @@ class UploadQueue(
     suspend fun enqueue(hsiJson: String) {
         queue.add(hsiJson)
         if (queue.size > maxSize) {
-            queue.removeFirst()
+            queue.removeAt(0)
         }
         persistToStorage()
     }
@@ -94,7 +94,7 @@ class UploadQueue(
     suspend fun confirmBatch(batch: List<String>) {
         repeat(batch.size) {
             if (queue.isNotEmpty()) {
-                queue.removeFirst()
+                queue.removeAt(0)
             }
         }
         persistToStorage()
