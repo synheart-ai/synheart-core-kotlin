@@ -11,6 +11,7 @@ data class SynheartConfig(
     val enablePhone: Boolean = true,
     val enableBehavior: Boolean = true,
     val cloudConfig: CloudConfig? = null,
+    val platformIngestConfig: PlatformIngestConfig? = null,
     /** Server-signed capability token for feature gating */
     val capabilityToken: com.synheart.core.modules.capabilities.CapabilityToken? = null,
     /** HMAC secret for verifying the capability token signature */

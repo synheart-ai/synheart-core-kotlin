@@ -23,6 +23,9 @@ import com.synheart.core.modules.srm.SRMModule
 import com.synheart.core.modules.srm.SRMSnapshotStorage
 import com.synheart.core.modules.cloud.CloudConnectorModule
 import com.synheart.core.modules.cloud.ConsentRequiredError
+import com.synheart.core.modules.platform_ingest.PlatformIngestClient
+import com.synheart.core.modules.platform_ingest.PlatformIngestModule
+import com.synheart.core.modules.platform_ingest.PlatformIngestResponse
 import com.synheart.core.modules.wear.WearSample
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +106,7 @@ object Synheart {
     private var runtimeModule: RuntimeModule? = null
     private var srmModule: SRMModule? = null
     private var cloudConnector: CloudConnectorModule? = null
+    private var platformIngestModule: PlatformIngestModule? = null
 
     // Activation manager (RFC-0005 four-authority model)
     private var activationManager: ActivationManager? = null
@@ -288,7 +292,21 @@ object Synheart {
                 )
             }
 
-            // 8. Initialize all modules
+            // 8. Initialize Platform Ingest (optional, depends on config)
+            val platformConfig = config?.platformIngestConfig
+            if (platformConfig != null) {
+                SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
+                platformIngestModule = PlatformIngestModule(
+                    consentModule = consentModule!!,
+                    config = platformConfig
+                )
+                moduleManager.registerModule(
+                    platformIngestModule!!,
+                    dependsOn = listOf("consent")
+                )
+            }
+
+            // 9. Initialize all modules
             SynheartLogger.log("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
@@ -424,6 +442,48 @@ object Synheart {
         cloudConnector?.flushQueue()
     }
 
+
+    // MARK: - Platform Ingestion
+
+    /**
+     * Ingest a session payload via the Platform Ingest module.
+     *
+     * Requires `behavior` consent.
+     *
+     * @throws IllegalStateException if SDK not initialized or platform ingest not configured
+     */
+    suspend fun ingestSession(payload: Map<String, Any?>): PlatformIngestResponse {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before ingesting sessions")
+        }
+        val module = platformIngestModule
+            ?: throw IllegalStateException("Platform ingest not configured")
+        return module.ingestSession(payload)
+    }
+
+    /**
+     * Ingest a metadata payload via the Platform Ingest module.
+     *
+     * Requires `biosignals` consent.
+     *
+     * @throws IllegalStateException if SDK not initialized or platform ingest not configured
+     */
+    suspend fun ingestMetadata(payload: Map<String, Any?>): PlatformIngestResponse {
+        if (!isConfigured) {
+            throw IllegalStateException("Synheart must be initialized before ingesting metadata")
+        }
+        val module = platformIngestModule
+            ?: throw IllegalStateException("Platform ingest not configured")
+        return module.ingestMetadata(payload)
+    }
+
+    /**
+     * Get the underlying PlatformIngestClient for standalone/background usage.
+     *
+     * Returns null if platform ingest is not configured.
+     */
+    val platformIngestClient: PlatformIngestClient?
+        get() = platformIngestModule?.client
 
     /**
      * Check if user has granted a specific consent
@@ -681,6 +741,7 @@ object Synheart {
             runtimeModule = null
             srmModule = null
             cloudConnector = null
+            platformIngestModule = null
             activationManager = null
             previousConsent = null
             isConfigured = false
