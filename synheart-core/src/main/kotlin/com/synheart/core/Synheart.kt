@@ -349,6 +349,7 @@ object Synheart {
         synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
         sessionHsiJob = scope.launch {
             runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                if (consentModule?.current()?.biosignals != true) return@collect
                 synchronized(sessionHsiBuffer) { sessionHsiBuffer.add(hsiJson) }
             }
         }

@@ -1,5 +1,7 @@
 package com.synheart.core.modules.cloud
 
+import com.synheart.core.config.ApiEndpoints
+import com.synheart.core.modules.interfaces.AuthProvider
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -37,18 +39,20 @@ class UploadClient(
      * Upload HSI 1.1 snapshots to the platform
      *
      * @param payload Upload request containing subject and snapshots
-     * @param signer HMAC signer instance
+     * @param signer HMAC signer instance (null when authProvider is used)
      * @param tenantId Tenant identifier
+     * @param authProvider Optional custom auth provider (takes precedence over HMAC)
      * @return UploadResponse on success
      * @throws CloudConnectorException on failure
      */
     suspend fun upload(
         payload: UploadRequest,
-        signer: HMACSigner,
-        tenantId: String
+        signer: HMACSigner?,
+        tenantId: String,
+        authProvider: AuthProvider? = null
     ): UploadResponse {
         val method = "POST"
-        val path = "/v1/ingest/hsi"
+        val path = ApiEndpoints.INGEST_PATH
 
         // Serialize payload
         val bodyJson = json.encodeToString(payload)
@@ -60,7 +64,8 @@ class UploadClient(
             bodyJson = bodyJson,
             signer = signer,
             tenantId = tenantId,
-            maxAttempts = 3
+            maxAttempts = 3,
+            authProvider = authProvider
         )
     }
 
@@ -71,9 +76,10 @@ class UploadClient(
         method: String,
         path: String,
         bodyJson: String,
-        signer: HMACSigner,
+        signer: HMACSigner?,
         tenantId: String,
-        maxAttempts: Int
+        maxAttempts: Int,
+        authProvider: AuthProvider?
     ): UploadResponse {
         var attempts = 0
         val baseDelay = 1000L // 1 second
@@ -82,31 +88,44 @@ class UploadClient(
             attempts++
 
             try {
-                // Generate fresh nonce and timestamp for each attempt
-                val nonce = signer.generateNonce()
-                val timestamp = System.currentTimeMillis() / 1000
-                val signature = signer.computeSignature(
-                    method = method,
-                    path = path,
-                    tenantId = tenantId,
-                    timestamp = timestamp,
-                    nonce = nonce,
-                    bodyJson = bodyJson
-                )
-
-                // Build request
                 val url = "$baseUrl$path"
                 val requestBody = bodyJson.toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
+                val bodyBytes = bodyJson.toByteArray(Charsets.UTF_8)
+
+                val requestBuilder = Request.Builder()
                     .url(url)
                     .post(requestBody)
-                    .header("Content-Type", "application/json")
-                    .header("X-Synheart-Tenant", tenantId)
-                    .header("X-Synheart-Signature", signature)
-                    .header("X-Synheart-Nonce", nonce)
-                    .header("X-Synheart-Timestamp", timestamp.toString())
-                    .header("X-Synheart-SDK-Version", "1.0.0")
-                    .build()
+
+                if (authProvider != null) {
+                    // AuthProvider path — provider controls all auth headers
+                    val authHeaders = authProvider.signRequest(method, path, bodyBytes)
+                    for ((key, value) in authHeaders) {
+                        requestBuilder.header(key, value)
+                    }
+                    requestBuilder.header("Content-Type", "application/json")
+                } else {
+                    // Existing HMAC path (unchanged)
+                    val nonce = signer!!.generateNonce()
+                    val timestamp = System.currentTimeMillis() / 1000
+                    val signature = signer.computeSignature(
+                        method = method,
+                        path = path,
+                        tenantId = tenantId,
+                        timestamp = timestamp,
+                        nonce = nonce,
+                        bodyJson = bodyJson
+                    )
+
+                    requestBuilder
+                        .header("Content-Type", "application/json")
+                        .header("X-Synheart-Tenant", tenantId)
+                        .header("X-Synheart-Signature", signature)
+                        .header("X-Synheart-Nonce", nonce)
+                        .header("X-Synheart-Timestamp", timestamp.toString())
+                        .header("X-Synheart-SDK-Version", "1.0.0")
+                }
+
+                val request = requestBuilder.build()
 
                 // Execute request
                 val response = client.newCall(request).execute()
@@ -121,6 +140,15 @@ class UploadClient(
                 val errorBody = response.body?.string()
                     ?: throw NetworkError("Empty error response body")
                 val error = json.decodeFromString<UploadErrorResponse>(errorBody)
+
+                // Handle 401 with AuthProvider retry
+                if (response.code == 401 && authProvider != null) {
+                    val responseHeaders = response.headers.toMultimap().mapValues { it.value.first() }
+                    val handled = authProvider.onAuthError(401, responseHeaders)
+                    if (handled && attempts < maxAttempts) {
+                        continue // Retry with corrected auth
+                    }
+                }
 
                 // Handle specific errors (non-retryable)
                 when {

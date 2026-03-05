@@ -1,5 +1,6 @@
 package com.synheart.core.config
 
+import com.synheart.core.modules.interfaces.AuthProvider
 import java.util.UUID
 
 /**
@@ -35,13 +36,17 @@ data class SynheartConfig(
  */
 data class CloudConfig(
     /// Base URL for Synheart Platform (default: production)
-    val baseUrl: String = "https://api.synheart.com",
+    val baseUrl: String = ApiEndpoints.DEFAULT_CLOUD_BASE_URL,
 
     /// Tenant ID (from app registration)
     val tenantId: String,
 
-    /// HMAC secret for signing requests
-    val hmacSecret: String,
+    /// HMAC secret for signing requests (null when authProvider is used)
+    val hmacSecret: String? = null,
+
+    /// Custom auth provider for request signing (e.g., ECDSA device-identity).
+    /// When set, takes precedence over the HMAC path.
+    val authProvider: AuthProvider? = null,
 
     /// Subject ID (pseudonymous user identifier)
     val subjectId: String,
@@ -66,4 +71,10 @@ data class CloudConfig(
 
     /// Enable backlog persistence (default: true)
     val enableBacklog: Boolean = true
-)
+) {
+    init {
+        require(hmacSecret != null || authProvider != null) {
+            "CloudConfig requires either hmacSecret or authProvider"
+        }
+    }
+}
