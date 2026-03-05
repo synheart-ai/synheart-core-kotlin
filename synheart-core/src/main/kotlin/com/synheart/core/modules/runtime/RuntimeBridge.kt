@@ -78,6 +78,23 @@ interface RuntimeNative : Library {
 
     /** Load an SRM snapshot from JSON. Returns 0 on success, non-zero on failure. */
     fun synheart_runtime_load_srm_snapshot(handle: Pointer?, json: String?): Int
+
+    // -- Lab Session --
+
+    /** Start a lab session. Returns null on success, error string on failure. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_lab_start(handle: Pointer?, protocol_json: String?, started_at_ms: Long): Pointer?
+
+    /** Open a lab window. Returns window ID pointer. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_lab_open_window(handle: Pointer?, parent_id: String?, window_type: String?, label: String?, started_at_ms: Long): Pointer?
+
+    /** Close a lab window. */
+    fun synheart_lab_close_window(handle: Pointer?, window_id: String?, ended_at_ms: Long)
+
+    /** Set protocol-specific values on a lab window. */
+    fun synheart_lab_set_window_values(handle: Pointer?, window_id: String?, values_json: String?)
+
+    /** Finalize the lab session and return the complete payload JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_lab_finalize(handle: Pointer?, ended_at_ms: Long): Pointer?
 }
 
 /**
@@ -247,6 +264,59 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
      *  Internal: used by RuntimeModule for auto-save/load lifecycle. */
     internal fun loadSrmSnapshot(json: String): Int {
         return native.synheart_runtime_load_srm_snapshot(handle, json)
+    }
+
+    // -- Lab Session --
+
+    /**
+     * Start a lab session.
+     *
+     * [protocolJson] should contain: `namespace`, `protocol_version`, `parameters`,
+     * and optionally `app_id`, `device_id`, `user_id`, `protocol_id`.
+     *
+     * Returns `null` on success, or an error string on failure.
+     */
+    fun labStart(protocolJson: String, startedAtMs: Long): String? {
+        val ptr = native.synheart_lab_start(handle, protocolJson, startedAtMs) ?: return null
+        val err = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return err
+    }
+
+    /**
+     * Open a window in the active lab session. Returns the window ID, or `null` on failure.
+     */
+    fun labOpenWindow(
+        parentId: String?,
+        windowType: String,
+        label: String?,
+        startedAtMs: Long,
+    ): String? {
+        val ptr = native.synheart_lab_open_window(handle, parentId, windowType, label, startedAtMs) ?: return null
+        val windowId = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return windowId
+    }
+
+    /** Close a window in the active lab session. */
+    fun labCloseWindow(windowId: String, endedAtMs: Long) {
+        native.synheart_lab_close_window(handle, windowId, endedAtMs)
+    }
+
+    /** Set protocol-specific values on a lab window. */
+    fun labSetWindowValues(windowId: String, valuesJson: String) {
+        native.synheart_lab_set_window_values(handle, windowId, valuesJson)
+    }
+
+    /**
+     * Finalize the lab session and return the complete payload JSON.
+     * Returns `null` if no active session.
+     */
+    fun labFinalize(endedAtMs: Long): String? {
+        val ptr = native.synheart_lab_finalize(handle, endedAtMs) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
     }
 
     /**
