@@ -521,6 +521,70 @@ This Android implementation is part of a multi-platform SDK:
 
 All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
 
+## Local Development with `synheart local`
+
+For offline SDK development and testing, use the **Synheart CLI** local platform server. It replicates the cloud consent and ingest APIs locally.
+
+### Setup
+
+1. Install the [Synheart CLI](https://github.com/synheart-ai/synheart-cli):
+
+```bash
+git clone https://github.com/synheart-ai/synheart-cli
+cd synheart-cli
+make build && make install
+```
+
+2. Start the local platform:
+
+```bash
+synheart local
+```
+
+This starts an HTTP server on `localhost:8083` with mock consent profiles, token issuance, and ingest endpoints.
+
+### Connecting your Android app
+
+Point the SDK at the local server via build config:
+
+```kotlin
+// In your Application class or DI setup
+val config = SynheartConfig(
+    appId = "your_app_id",
+    subjectId = "user_123",
+    allowUnsignedCapabilities = true,
+    platformIngestConfig = PlatformIngestConfig(
+        baseUrl = "http://10.0.2.2:8083",  // Android emulator → host localhost
+        apiKey = "mock-dev-api-key-2026",
+    )
+)
+```
+
+For a physical device on the same network:
+
+```kotlin
+baseUrl = "http://192.168.1.100:8083"  // your machine's LAN IP
+```
+
+### Available endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/apps/{id}/consent-profiles` | Fetch consent profiles |
+| `POST` | `/api/v1/sdk/consent-token` | Issue consent token |
+| `POST` | `/api/v1/sdk/consent-revoke` | Revoke consent |
+| `POST` | `/v1/ingest/hsi` | Ingest HSI snapshots |
+| `POST` | `/v1/platform/session/ingest` | Ingest session data |
+| `POST` | `/v1/platform/metadata/ingest` | Ingest metadata |
+| `GET` | `/status` | Server status and stats |
+
+### Default credentials
+
+- **API Key:** `mock-dev-api-key-2026`
+- **HMAC Secret:** `mock-dev-hmac-secret-2026`
+
+Ingested payloads are persisted as JSON files in the local server's data directory.
+
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - Detailed architecture documentation
