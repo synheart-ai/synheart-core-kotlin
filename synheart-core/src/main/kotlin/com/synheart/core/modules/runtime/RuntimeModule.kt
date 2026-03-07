@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.synheart.core.SynheartLogger
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Runtime Module -- streams wear and behavior data into the synheart-runtime
@@ -40,6 +42,7 @@ class RuntimeModule(
     private val behaviorModule: BehaviorModule?,
     private val loadSrmSnapshot: (() -> String?)? = null,
     private val saveSrmSnapshot: ((String) -> Unit)? = null,
+    val batchIngestOnStop: Boolean = false,
 ) : BaseSynheartModule("runtime") {
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -54,6 +57,9 @@ class RuntimeModule(
     private var tickJob: Job? = null
     private var wearJob: Job? = null
     private var behaviorJob: Job? = null
+
+    /** Buffered events for batch ingest (only used when [batchIngestOnStop] is true). */
+    private val batchEventBuffer = mutableListOf<Map<String, Any>>()
 
     override suspend fun onInitialize() {
         SynheartLogger.log("[RuntimeModule] Initialized (native bridge ${if (bridge != null) "available" else "unavailable"})")
@@ -119,6 +125,10 @@ class RuntimeModule(
     override suspend fun onStop() {
         SynheartLogger.log("[RuntimeModule] Stopping...")
 
+        if (bridge != null && batchIngestOnStop && batchEventBuffer.isNotEmpty()) {
+            flushBatchOnStop()
+        }
+
         // Persist SRM baselines for next session
         if (bridge != null && saveSrmSnapshot != null) {
             try {
@@ -160,6 +170,11 @@ class RuntimeModule(
     private fun handleWearSample(sample: WearSample) {
         val tsMs = sample.timestamp
 
+        if (batchIngestOnStop) {
+            appendWearToBatch(sample, tsMs)
+            return
+        }
+
         // Push individual RR intervals
         sample.rrIntervals?.forEach { rr ->
             bridge!!.pushRr(tsMs, rr)
@@ -171,8 +186,27 @@ class RuntimeModule(
         }
     }
 
+    private fun appendWearToBatch(sample: WearSample, tsMs: Long) {
+        if (sample.rrIntervals != null && sample.rrIntervals.isNotEmpty()) {
+            val rrs = sample.rrIntervals
+            val totalRrMs = rrs.sum()
+            var rrTs = tsMs - totalRrMs.toLong()
+            for (rr in rrs) {
+                batchEventBuffer.add(mapOf("type" to "rr", "ts_ms" to rrTs, "rr_ms" to rr))
+                rrTs += rr.toLong()
+            }
+        } else if (sample.hr != null && sample.hr > 0) {
+            batchEventBuffer.add(mapOf("type" to "hr", "ts_ms" to tsMs, "bpm" to sample.hr))
+        }
+    }
+
     private fun handleBehaviorEvent(event: com.synheart.core.modules.behavior.BehaviorEvent) {
         val tsMs = event.timestamp
+
+        if (batchIngestOnStop) {
+            batchEventBuffer.add(behaviorEventToBatchMap(tsMs, event))
+            return
+        }
 
         when (event.type) {
             // Touch / input -- event_type 2
@@ -188,5 +222,113 @@ class RuntimeModule(
             BehaviorEventType.NOTIFICATION_RECEIVED,
             BehaviorEventType.NOTIFICATION_OPENED -> bridge!!.pushBehavior(tsMs, 4, 1.0)
         }
+    }
+
+    private fun behaviorEventToBatchMap(tsMs: Long, event: com.synheart.core.modules.behavior.BehaviorEvent): Map<String, Any> {
+        val eventName: String
+        val options = mutableMapOf<String, Any>()
+        val meta = event.metadata
+
+        when (event.type) {
+            BehaviorEventType.TAP,
+            BehaviorEventType.KEY_DOWN,
+            BehaviorEventType.KEY_UP -> {
+                eventName = "touch"
+                if (meta != null) {
+                    (meta["x"] as? Number)?.let { options["x"] = it.toDouble() }
+                    (meta["y"] as? Number)?.let { options["y"] = it.toDouble() }
+                }
+            }
+            BehaviorEventType.APP_SWITCH -> {
+                eventName = "app_switch"
+                if (meta != null) {
+                    meta["from_app_id"]?.let { options["from_app_id"] = it }
+                    meta["to_app_id"]?.let { options["to_app_id"] = it }
+                }
+            }
+            BehaviorEventType.NOTIFICATION_RECEIVED,
+            BehaviorEventType.NOTIFICATION_OPENED -> {
+                eventName = "notification"
+                if (meta != null) {
+                    meta["action"]?.let { options["action"] = it }
+                    meta["source_app_id"]?.let { options["source_app_id"] = it }
+                }
+            }
+            BehaviorEventType.SCROLL -> {
+                eventName = "scroll"
+                if (meta != null) {
+                    (meta["delta"] as? Number)?.let { options["delta"] = it.toDouble() }
+                    meta["velocity"]?.let { options["velocity"] = it }
+                    meta["direction"]?.let { options["direction"] = it }
+                }
+            }
+        }
+
+        val result = mutableMapOf<String, Any>(
+            "type" to "behavior",
+            "ts_ms" to tsMs,
+            "event" to eventName,
+            "provider" to "behavior_app"
+        )
+        if (options.isNotEmpty()) {
+            result["options"] = options
+        }
+        return result
+    }
+
+    private fun flushBatchOnStop() {
+        if (bridge == null || batchEventBuffer.isEmpty()) return
+
+        batchEventBuffer.sortBy { (it["ts_ms"] as? Long) ?: 0L }
+
+        val nowMs = System.currentTimeMillis()
+        val batchJson = JSONArray(batchEventBuffer).toString()
+        val resultJson = bridge.ingestBatch(batchJson, nowMs)
+
+        if (resultJson == null) {
+            SynheartLogger.log(
+                "[RuntimeModule] Batch ingest not available (synheart_runtime_ingest_batch_json missing). " +
+                "HSI will not be produced for this session."
+            )
+            batchEventBuffer.clear()
+            return
+        }
+
+        try {
+            val result = JSONObject(resultJson)
+            val frames = result.optJSONArray("frames")
+            if (result.optBoolean("ok") && frames != null && frames.length() > 0) {
+                for (i in 0 until frames.length()) {
+                    val frame = frames.getJSONObject(i)
+                    val hsi = frame.optJSONObject("hsi")
+                    if (hsi != null) {
+                        val hsiJson = hsi.toString()
+                        SynheartLogger.log("[Runtime] HSI (batch on stop, frame): $hsiJson")
+                        _hsiFlow.value = hsiJson
+                    }
+                }
+            } else if (result.optBoolean("ok") && result.has("hsi")) {
+                // Legacy: single top-level hsi
+                val hsiJson = result.getJSONObject("hsi").toString()
+                SynheartLogger.log("[Runtime] HSI (batch on stop): $hsiJson")
+                _hsiFlow.value = hsiJson
+                // Drain remaining frames
+                val maxDrain = 256
+                var drainCount = 0
+                val drainNowMs = System.currentTimeMillis()
+                while (drainCount < maxDrain) {
+                    val drainHsi = bridge.tick(drainNowMs) ?: break
+                    drainCount++
+                    SynheartLogger.log("[Runtime] HSI (batch drain): $drainHsi")
+                    _hsiFlow.value = drainHsi
+                }
+                if (drainCount >= maxDrain) {
+                    SynheartLogger.log("[RuntimeModule] Batch drain hit max iterations ($maxDrain)")
+                }
+            }
+        } catch (e: Exception) {
+            SynheartLogger.log("[RuntimeModule] Batch result parse error: $e")
+        }
+        batchEventBuffer.clear()
     }
 }

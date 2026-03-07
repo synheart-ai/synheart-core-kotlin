@@ -136,10 +136,17 @@ class UploadClient(
                     return json.decodeFromString<UploadResponse>(responseBody)
                 }
 
-                // Parse error response
-                val errorBody = response.body?.string()
+                // Parse error response (API may return JSON or plain text e.g. "404 page not found")
+                val errorBodyStr = response.body?.string()
                     ?: throw NetworkError("Empty error response body")
-                val error = json.decodeFromString<UploadErrorResponse>(errorBody)
+                val error: UploadErrorResponse
+                try {
+                    error = json.decodeFromString<UploadErrorResponse>(errorBodyStr)
+                } catch (_: Exception) {
+                    throw CloudConnectorException(
+                        "Upload failed: ${response.code} $errorBodyStr"
+                    )
+                }
 
                 // Handle 401 with AuthProvider retry
                 if (response.code == 401 && authProvider != null) {

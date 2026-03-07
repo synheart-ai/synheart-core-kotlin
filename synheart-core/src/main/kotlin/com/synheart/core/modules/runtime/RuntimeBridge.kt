@@ -46,6 +46,9 @@ interface RuntimeNative : Library {
     /** Advance the runtime clock; returns HSI JSON pointer or null. */
     fun synheart_runtime_tick(handle: Pointer?, now_ms: Long): Pointer?
 
+    /** Ingest a batch of events as JSON array; returns result JSON or null. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_ingest_batch_json(handle: Pointer?, batch_json: String?, now_ms: Long): Pointer?
+
     /** Return the latest quality-assessment JSON, or null. */
     fun synheart_runtime_last_quality(handle: Pointer?): Pointer?
 
@@ -180,6 +183,22 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
      */
     fun tick(nowMs: Long): String? {
         val ptr = native.synheart_runtime_tick(handle, nowMs) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /**
+     * Ingest a batch of events (JSON array). Returns result JSON or null.
+     *
+     * The batch JSON is an array of event objects, each with `type`, `ts_ms`, and
+     * type-specific fields (e.g., `rr_ms` for RR events, `event` for behavior).
+     *
+     * Returns a JSON result with `ok`, `frames` array (each containing `hsi`), or
+     * legacy single `hsi` field.
+     */
+    fun ingestBatch(batchJson: String, nowMs: Long): String? {
+        val ptr = native.synheart_runtime_ingest_batch_json(handle, batchJson, nowMs) ?: return null
         val json = ptr.getString(0)
         native.synheart_runtime_free_string(ptr)
         return json

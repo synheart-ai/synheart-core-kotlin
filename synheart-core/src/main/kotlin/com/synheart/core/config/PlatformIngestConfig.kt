@@ -28,5 +28,9 @@ data class PlatformIngestConfig(
     val timeoutMs: Long = 30_000,
 
     /// Maximum retry attempts for failed requests.
-    val maxRetries: Int = 3
+    val maxRetries: Int = 3,
+
+    /// When true, automatically build and ingest a session payload after
+    /// stopSession(). Defaults to false (manual ingestion).
+    val autoIngest: Boolean = false
 )

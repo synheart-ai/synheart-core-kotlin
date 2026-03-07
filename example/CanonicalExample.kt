@@ -2,11 +2,11 @@
 // Synheart Core SDK — Full-featured example
 //
 // This example demonstrates the complete SDK surface:
-// 1. Initialization with full module configuration
+// 1. Configuration with SynheartConfig
 // 2. Consent management for all data types
-// 3. HSI streaming (core state representation)
-// 4. Activating optional features (Focus, Emotion)
-// 5. Feature activation/deactivation
+// 3. HSI state streaming (onStateUpdate)
+// 4. Session lifecycle (start/stop)
+// 5. Sync API
 // 6. Error handling
 // 7. Clean shutdown on Activity destroy
 //
@@ -19,8 +19,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.synheart.core.Synheart
 import com.synheart.core.config.SynheartConfig
-import com.synheart.core.config.SynheartFeature
-import com.synheart.core.modules.runtime.RuntimeBridge
 import kotlinx.coroutines.launch
 
 class CanonicalExample : AppCompatActivity() {
@@ -29,99 +27,60 @@ class CanonicalExample : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         lifecycleScope.launch {
-            // 1. Initialize SDK with all modules enabled
+            // 1. Configure SDK
             //    In production, replace allowUnsignedCapabilities with
             //    capabilityToken + capabilitySecret from your server.
             try {
-                Synheart.initialize(
+                Synheart.configure(
                     context = this@CanonicalExample,
-                    userId = "example_user_123",
                     config = SynheartConfig(
+                        subjectId = "example_user_123",
                         allowUnsignedCapabilities = true,
                         enableWear = true,
                         enablePhone = true,
                         enableBehavior = true
                     )
                 )
-                println("[Synheart] SDK initialized")
+                println("[Synheart] SDK configured")
             } catch (e: IllegalStateException) {
-                println("[Synheart] Initialization failed: ${e.message}")
+                println("[Synheart] Configuration failed: ${e.message}")
                 return@launch
             }
 
-            // 2. Grant consent for all data collection types
+            // 2. Grant consent for data collection types
             Synheart.grantConsent("biosignals")
             Synheart.grantConsent("behavior")
             Synheart.grantConsent("phoneContext")
             println("[Synheart] Consent granted for biosignals, behavior, phoneContext")
 
-            // 3. Runtime diagnostics
-            val runtimeVersion = RuntimeBridge.version()
-            println("[Runtime] Version: ${runtimeVersion ?: "unavailable"}")
-            println("[Runtime] Native library loaded: ${runtimeVersion != null}")
-
-            // 4. Subscribe to HSI updates (core state representation — JSON string)
+            // 3. Subscribe to typed HSI state updates
             launch {
-                Synheart.onHSIUpdate.collect { hsiJson ->
-                    val hsi = org.json.JSONObject(hsiJson)
-                    val version = hsi.optString("hsi_version", "unknown")
-                    val observedAt = hsi.optString("observed_at_utc", "unknown")
-                    println("[HSI] v$version at $observedAt")
+                Synheart.onStateUpdate.collect { state ->
+                    println("[HSI] v${state.hsiVersion} at ${state.observedAtUtc}")
                 }
             }
 
-            // 5. Activate optional features (four-authority model)
-            //    Features become operational when: Activated AND Consent AND Capability AND SessionActive
-            Synheart.activate(SynheartFeature.FOCUS)
-            launch {
-                Synheart.onFocusUpdate.collect { focus ->
-                    println("[Focus] Score: ${focus.score}")
-                }
-            }
-
-            Synheart.activate(SynheartFeature.EMOTION)
-            launch {
-                Synheart.onEmotionUpdate.collect { emotion ->
-                    println("[Emotion] Stress: ${emotion.stress}")
-                }
-            }
-
-            // 6. Start session — data collection begins, activated features become operational
+            // 4. Start session — data collection begins
             Synheart.startSession()
             println("[Synheart] Session started")
-            println("[Synheart] Active features: ${Synheart.activatedFeatures()}")
 
-            // 7. Features can be deactivated mid-session
-            Synheart.deactivate(SynheartFeature.EMOTION)
-            println("[Synheart] Emotion deactivated")
+            // 5. Sync data to the cloud
+            val syncResult = Synheart.syncNow()
+            println("[Synheart] Sync result: pushed=${syncResult.pushed}, pulled=${syncResult.pulled}")
 
-            // 8. Consent can be revoked mid-session — affected features stop automatically
+            // 6. Consent can be revoked mid-session — affected features stop automatically
             // Synheart.revokeConsent("behavior")
 
-            // 9. Internal diagnostics (pre-processed data — R&D / training only)
-            println("[Runtime] Internal diagnostics example:")
-            Synheart.runtimeModule()?.let { runtimeModule ->
-                runtimeModule.bridge?.lastPreprocessed()?.let { json ->
-                    try {
-                        val window = com.synheart.core.models.PreprocessedWindow.fromJson(json)
-                        println("  Quality score: ${window.quality.score}")
-                        window.derivedFeatures.hrv?.let { hrv ->
-                            println("  HRV RMSSD: ${hrv.rmssdMs}ms")
-                        }
-                        println("  Embeddings dimension: ${window.embeddings.signalEmbedding.dimension}")
-                        println("  SRM ready count: ${window.srmContext.readyCount}/${window.srmContext.totalCount}")
-                    } catch (e: Exception) {
-                        println("  Error parsing pre-processed data: ${e.message}")
-                    }
-                }
-            }
+            // 7. Runtime diagnostics via public API
+            println("[Runtime] Version: ${Synheart.runtimeVersion ?: "unavailable"}")
+            println("[Runtime] Baseline summary: ${Synheart.runtimeBaselineSummary ?: "n/a"}")
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         lifecycleScope.launch {
-            // 9. Clean shutdown
+            // 8. Clean shutdown
             Synheart.stopSession()
             Synheart.dispose()
             println("[Synheart] SDK disposed")

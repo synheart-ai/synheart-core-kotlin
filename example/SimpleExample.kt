@@ -11,7 +11,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.synheart.core.Synheart
 import com.synheart.core.config.SynheartConfig
-import com.synheart.core.modules.runtime.RuntimeBridge
 import kotlinx.coroutines.launch
 
 class SimpleExample : AppCompatActivity() {
@@ -20,11 +19,11 @@ class SimpleExample : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         lifecycleScope.launch {
-            // Initialize with wearable data collection
-            Synheart.initialize(
+            // Configure with wearable data collection
+            Synheart.configure(
                 context = this@SimpleExample,
-                userId = "user_123",
                 config = SynheartConfig(
+                    subjectId = "user_123",
                     allowUnsignedCapabilities = true,
                     enableWear = true
                 )
@@ -33,23 +32,10 @@ class SimpleExample : AppCompatActivity() {
             // Grant consent for biosignal collection
             Synheart.grantConsent("biosignals")
 
-            // Log runtime diagnostics
-            val runtimeVersion = RuntimeBridge.version()
-            println("[Runtime] Version: ${runtimeVersion ?: "unavailable"}")
-            println("[Runtime] Native library loaded: ${runtimeVersion != null}")
-
-            // Subscribe to HSI updates (JSON string from synheart-runtime)
-            var firstHsiReceived = false
+            // Subscribe to typed state updates
             launch {
-                Synheart.onHSIUpdate.collect { hsiJson ->
-                    if (!firstHsiReceived) {
-                        firstHsiReceived = true
-                        println("[Runtime] First HSI frame received")
-                    }
-                    val hsi = org.json.JSONObject(hsiJson)
-                    val affect = hsi.optJSONObject("affect")
-                    println("Arousal: ${affect?.optDouble("arousal_index")}")
-                    println("Valence: ${affect?.optDouble("valence_index")}")
+                Synheart.onStateUpdate.collect { state ->
+                    println("[State] $state")
                 }
             }
 

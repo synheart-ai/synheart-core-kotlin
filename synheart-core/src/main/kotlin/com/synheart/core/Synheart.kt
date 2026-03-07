@@ -19,13 +19,20 @@ import com.synheart.core.modules.behavior.BehaviorModule
 import com.synheart.core.modules.runtime.RuntimeBridge
 import com.synheart.core.modules.runtime.RuntimeConfig
 import com.synheart.core.modules.runtime.RuntimeModule
-import com.synheart.core.modules.srm.SRMModule
-import com.synheart.core.modules.srm.SRMSnapshotStorage
-import com.synheart.core.modules.cloud.CloudConnectorModule
-import com.synheart.core.modules.cloud.ConsentRequiredError
+import com.synheart.core.artifacts.ArtifactPipeline
+import com.synheart.core.config.SynheartMode
+import com.synheart.core.crypto.SMK
+import com.synheart.core.models.HSIState
+import com.synheart.core.models.SessionHandle
+import com.synheart.core.storage.StorageManager
+import com.synheart.core.storage.StoragePolicy
+import com.synheart.core.storage.SessionRecord
+import com.synheart.core.storage.storagePolicyForMode
 import com.synheart.core.modules.platform_ingest.PlatformIngestClient
 import com.synheart.core.modules.platform_ingest.PlatformIngestModule
 import com.synheart.core.modules.platform_ingest.PlatformIngestResponse
+import com.synheart.core.modules.platform_ingest.PlatformPayloadBuilder
+import com.synheart.core.modules.interfaces.WindowType
 import com.synheart.core.modules.wear.WearSample
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -51,7 +59,6 @@ import kotlinx.coroutines.launch
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
  * - Runtime (synheart-runtime C ABI bridge for signal fusion & HSI production)
- * - Cloud Connector (secure uploads)
  *
  * Optional interpretation modules:
  * - Emotion (affect modeling)
@@ -85,9 +92,6 @@ import kotlinx.coroutines.launch
  * Synheart.onEmotionUpdate.collect { emotion ->
  *     SynheartLogger.log("Stress Index: ${emotion.stress}")
  * }
- *
- * // Enable cloud upload (with consent)
- * Synheart.enableCloud()
  * ```
  */
 object Synheart {
@@ -104,8 +108,6 @@ object Synheart {
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
     private var runtimeModule: RuntimeModule? = null
-    private var srmModule: SRMModule? = null
-    private var cloudConnector: CloudConnectorModule? = null
     private var platformIngestModule: PlatformIngestModule? = null
 
     // Activation manager (RFC-0005 four-authority model)
@@ -118,6 +120,19 @@ object Synheart {
     private var userId: String? = null
     private var previousConsent: ConsentSnapshot? = null
 
+    // Phase 1: Storage and artifact pipeline
+    private var storageManager: StorageManager? = null
+    private var storagePolicy: StoragePolicy? = null
+    private var artifactPipeline: ArtifactPipeline? = null
+    private var smk: SMK? = null
+    private var currentSessionHandle: SessionHandle? = null
+    private var artifactHsiJob: Job? = null
+    private var synheartConfig: SynheartConfig? = null
+
+    // Phase 3: Auth & Sync
+    private var authModule: com.synheart.core.auth.AuthModule? = null
+    private var syncModule: com.synheart.core.sync.SyncModule? = null
+
     // Session data buffers — accumulate during session, persist after stop
     private val sessionHsiBuffer = mutableListOf<String>()
     private val sessionWearBuffer = mutableListOf<WearSample>()
@@ -127,6 +142,20 @@ object Synheart {
     // Streams
     private val _hsiJsonFlow = MutableStateFlow<String?>(null)
 
+    /** The currently active session, if any. */
+    val currentSession: SessionHandle? get() = currentSessionHandle
+
+    /** Configure the SDK using RFC-CORE-0007 config shape. */
+    suspend fun configure(context: Context, config: SynheartConfig) {
+        config.validate()
+        initialize(
+            context = context,
+            userId = config.subjectId,
+            config = config,
+            appKey = "configured"
+        )
+    }
+
     /**
      * Stream of HSI JSON updates produced by synheart-runtime.
      *
@@ -134,6 +163,207 @@ object Synheart {
      * Returns non-null values only.
      */
     val onHSIUpdate: Flow<String> = _hsiJsonFlow.asStateFlow().filterNotNull()
+
+    /** Stream of typed [HSIState] updates (RFC-CORE-0007 §3). */
+    val onStateUpdate: Flow<HSIState> = _hsiJsonFlow.asStateFlow().filterNotNull()
+        .map { HSIState.fromJson(it, subjectId = synheartConfig?.subjectId ?: userId ?: "") }
+
+    /** Get the current HSI state as a typed object. */
+    val currentHSIState: HSIState?
+        get() {
+            val json = _hsiJsonFlow.value ?: return null
+            return HSIState.fromJson(json, subjectId = synheartConfig?.subjectId ?: userId ?: "")
+        }
+
+    // Phase 2: Metrics API
+
+    /** Record a single metric event for the current session. */
+    fun recordMetric(event: com.synheart.core.models.MetricEvent) {
+        val handle = currentSessionHandle ?: return
+        if (storagePolicy?.canIncludeMetrics() != true) return
+        try { storageManager?.insertMetric(handle.sessionId, event) } catch (_: Exception) {}
+    }
+
+    // Phase 2: Local Query API
+
+    /** List stored sessions with optional filters. */
+    fun listLocalSessions(range: com.synheart.core.models.SessionRange? = null): List<SessionRecord> {
+        val sm = storageManager ?: return emptyList()
+        if (!sm.isOpen) return emptyList()
+        val mode = range?.mode?.let { m ->
+            SynheartMode.entries.find { it.value == m }
+        }
+        return sm.listSessions(subjectId = synheartConfig?.subjectId ?: userId ?: "")
+    }
+
+    /** Get a session summary (decrypted) for the given session. */
+    fun getSessionSummary(sessionId: String): org.json.JSONObject? {
+        val sm = storageManager ?: return null
+        if (!sm.isOpen) return null
+
+        val cached = sm.getSummaryJson(sessionId)
+        if (cached != null) return try { org.json.JSONObject(cached) } catch (_: Exception) { null }
+
+        val smk = this.smk ?: return null
+        val artifacts = sm.getArtifactsBySession(sessionId, "session_summary")
+        if (artifacts.isEmpty()) return null
+        return try {
+            val plaintext = com.synheart.core.crypto.ArtifactCrypto.decrypt(smk, artifacts.first().payload)
+            org.json.JSONObject(String(plaintext, Charsets.UTF_8))
+        } catch (_: Exception) { null }
+    }
+
+    /** Get decrypted HSI window artifacts for a session. */
+    fun getHSIWindows(sessionId: String, range: com.synheart.core.models.WindowRange? = null): List<org.json.JSONObject> {
+        val sm = storageManager ?: return emptyList()
+        val smk = this.smk ?: return emptyList()
+        if (!sm.isOpen) return emptyList()
+
+        val artifacts = sm.getArtifactsBySession(sessionId, "hsi_window")
+        val results = mutableListOf<org.json.JSONObject>()
+        for (art in artifacts) {
+            if (range?.startMs != null && art.startMs < range.startMs) continue
+            if (range?.endMs != null && art.endMs > range.endMs) continue
+            try {
+                val plaintext = com.synheart.core.crypto.ArtifactCrypto.decrypt(smk, art.payload)
+                results.add(org.json.JSONObject(String(plaintext, Charsets.UTF_8)))
+            } catch (_: Exception) {}
+            if (range?.limit != null && results.size >= range.limit) break
+        }
+        return results
+    }
+
+    // Phase 2: Storage & Retention
+
+    /** Get storage usage statistics. */
+    fun getStorageUsage(): com.synheart.core.models.StorageUsage {
+        val sm = storageManager ?: return com.synheart.core.models.StorageUsage(0, emptyMap())
+        if (!sm.isOpen) return com.synheart.core.models.StorageUsage(0, emptyMap())
+        return sm.getStorageUsage()
+    }
+
+    /** Set retention policy. Deletes sessions older than the given number of days. */
+    fun setRetentionDays(days: Int?) {
+        if (days == null) return
+        val sm = storageManager ?: return
+        if (!sm.isOpen) return
+        val cutoffMs = System.currentTimeMillis() - days.toLong() * 86400000
+        sm.enforceRetention(cutoffMs)
+    }
+
+    // Phase 2: Deletion API
+
+    /** Delete a session and all its artifacts locally. */
+    fun deleteLocalSession(sessionId: String) {
+        val sm = storageManager ?: return
+        if (!sm.isOpen) return
+        sm.deleteSession(sessionId, createTombstones = true)
+    }
+
+    /** Wipe all local data. */
+    suspend fun wipeLocalData() {
+        if (isRunning) stopSession()
+        storageManager?.let { sm ->
+            if (sm.isOpen) {
+                sm.wipeAll()
+                sm.close()
+            }
+        }
+        storageManager = null
+        context?.let { com.synheart.core.crypto.SMK.delete(it) }
+        context?.let { com.synheart.core.crypto.URK.delete(it) }
+
+        // Phase 3: Clear auth/sync state
+        syncModule?.dispose()
+        syncModule = null
+        authModule?.logout()
+        authModule = null
+
+        artifactPipeline = null
+        storagePolicy = null
+        smk = null
+        currentSessionHandle = null
+    }
+
+    /** Request account deletion — wipes local data and requests server-side deletion. */
+    suspend fun requestAccountDeletion(): com.synheart.core.models.DeletionRequestResult {
+        // POST server-side deletion request if authenticated
+        val auth = authModule
+        if (auth != null && auth.isAuthenticated && auth.accessToken != null) {
+            try {
+                val conn = java.net.URL("https://api.synheart.com/v1/account/delete")
+                    .openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer ${auth.accessToken}")
+                conn.doOutput = true
+                val body = org.json.JSONObject().put("confirmation", "DELETE_MY_ACCOUNT")
+                java.io.OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+                conn.responseCode // trigger request
+            } catch (_: Exception) {
+                // Best-effort; still wipe locally
+            }
+        }
+        wipeLocalData()
+        return com.synheart.core.models.DeletionRequestResult(
+            status = "accepted",
+            message = "Local data wiped. Server deletion pending."
+        )
+    }
+
+    /** Cancel a pending account deletion request. */
+    fun cancelAccountDeletion(): Boolean {
+        val auth = authModule ?: return false
+        if (!auth.isAuthenticated || auth.accessToken == null) return false
+        return try {
+            val conn = java.net.URL("https://api.synheart.com/v1/account/delete/cancel")
+                .openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Authorization", "Bearer ${auth.accessToken}")
+            conn.doOutput = false
+            conn.responseCode == 200
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Phase 3: Auth API
+
+    /** Authenticate with a provider token. */
+    fun authenticate(provider: String, token: String): com.synheart.core.auth.AuthResult {
+        val auth = authModule ?: throw IllegalStateException("SDK not initialized")
+        return auth.authenticate(provider, token)
+    }
+
+    /** Get current auth status. */
+    val authStatus: com.synheart.core.auth.AuthStatus?
+        get() = authModule?.status
+
+    /** Log out and clear auth state. */
+    fun logout() {
+        syncModule?.dispose()
+        authModule?.logout()
+        context?.let { com.synheart.core.crypto.URK.delete(it) }
+    }
+
+    // Phase 3: Sync API
+
+    /** Enable or disable sync. */
+    fun setSyncEnabled(enabled: Boolean) {
+        syncModule?.setSyncEnabled(enabled)
+    }
+
+    /** Execute a sync cycle (push + pull). */
+    fun syncNow(): com.synheart.core.sync.SyncResult {
+        val sync = syncModule ?: return com.synheart.core.sync.SyncResult()
+        return sync.syncNow()
+    }
+
+    /** Get current sync status. */
+    fun getSyncStatus(): com.synheart.core.sync.SyncStatus {
+        val sync = syncModule ?: return com.synheart.core.sync.SyncStatus(enabled = false)
+        return sync.getStatus()
+    }
 
     /**
      * Returns a snapshot of all HSI JSON windows accumulated during the current
@@ -248,15 +478,10 @@ object Synheart {
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(behaviorModule!!, dependsOn = listOf("capabilities", "consent"))
 
-            // 5. Initialize SRM (personal reference model)
-            SynheartLogger.log("[Synheart] Initializing SRM...")
-            srmModule = SRMModule(storage = SRMSnapshotStorage(this.context!!))
-            moduleManager.registerModule(
-                srmModule!!,
-                dependsOn = listOf("capabilities", "consent")
-            )
+            // SRM is handled by the native runtime (RuntimeBridge.exportSrmSnapshot /
+            // loadSrmSnapshot). BaselineSnapshot artifacts are produced via ArtifactPipeline.
 
-            // 6. Initialize Runtime Module (synheart-runtime C ABI bridge)
+            // 5. Initialize Runtime Module (synheart-runtime C ABI bridge)
             //    RuntimeBridge is null when the native library is not bundled;
             //    the pipeline is then gracefully inert.
             SynheartLogger.log("[Synheart] Initializing Runtime Module...")
@@ -276,23 +501,7 @@ object Synheart {
                 dependsOn = listOf("wear", "behavior")
             )
 
-            // 7. Initialize Cloud Connector (optional, depends on config)
-            if (config?.cloudConfig != null) {
-                SynheartLogger.log("[Synheart] Initializing Cloud Connector...")
-                cloudConnector = CloudConnectorModule(
-                    context = this.context,
-                    capabilities = capabilityModule!!,
-                    consent = consentModule!!,
-                    runtimeModule = runtimeModule!!,
-                    config = config.cloudConfig!!
-                )
-                moduleManager.registerModule(
-                    cloudConnector!!,
-                    dependsOn = listOf("capabilities", "consent", "runtime")
-                )
-            }
-
-            // 8. Initialize Platform Ingest (optional, depends on config)
+            // 7. Initialize Platform Ingest (optional, depends on config)
             val platformConfig = config?.platformIngestConfig
             if (platformConfig != null) {
                 SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
@@ -327,6 +536,68 @@ object Synheart {
             // 11. Create activation manager and auto-activate from config
             activationManager = ActivationManager()
             activationManager!!.activateFromConfig(resolvedConfig)
+
+            // Phase 1: Initialize storage and artifact pipeline
+            synheartConfig = resolvedConfig
+            if (resolvedConfig.storage.enabled &&
+                resolvedConfig.appId.isNotEmpty() &&
+                resolvedConfig.subjectId.isNotEmpty()
+            ) {
+                try {
+                    storagePolicy = storagePolicyForMode(resolvedConfig.mode)
+                    smk = SMK.loadOrCreate(this.context!!)
+                    storageManager = StorageManager.create(this.context!!)
+                    storageManager!!.open()
+
+                    artifactPipeline = ArtifactPipeline(
+                        storage = storageManager!!,
+                        policy = storagePolicy!!,
+                        smk = smk!!,
+                        subjectId = resolvedConfig.subjectId,
+                        appId = resolvedConfig.appId,
+                        appVersion = resolvedConfig.appVersion,
+                        deviceId = resolvedConfig.deviceId,
+                        platform = resolvedConfig.platform
+                    )
+
+                    // Wire HSI stream to artifact pipeline
+                    artifactHsiJob = scope.launch {
+                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                            if (currentSessionHandle == null) return@collect
+                            val nowMs = System.currentTimeMillis()
+                            try {
+                                artifactPipeline?.ingestHsiFrame(hsiJson, nowMs)
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    SynheartLogger.log("[Synheart] Storage and artifact pipeline initialized")
+                } catch (e: Exception) {
+                    SynheartLogger.log("[Synheart] Storage init failed (non-fatal): $e")
+                }
+            }
+
+            // Phase 3: Initialize auth and sync modules
+            val appId = resolvedConfig.appId
+            if (appId.isNotEmpty() && this.context != null) {
+                val tokenStorage = com.synheart.core.auth.TokenStorage(this.context!!)
+                authModule = com.synheart.core.auth.AuthModule(
+                    appId = appId,
+                    tokenStorage = tokenStorage
+                )
+                authModule!!.restoreSession()
+
+                if (storageManager?.isOpen == true) {
+                    syncModule = com.synheart.core.sync.SyncModule(
+                        auth = authModule!!,
+                        storage = storageManager!!,
+                        smk = smk,
+                        context = this.context!!,
+                        baseUrl = "https://api.synheart.com"
+                    )
+                }
+                SynheartLogger.log("[Synheart] Auth and sync modules initialized")
+            }
 
             isConfigured = true
             // Modules are initialized but NOT started.
@@ -377,6 +648,31 @@ object Synheart {
             }
         }
 
+        // Phase 1: Create session record and start artifact pipeline
+        val nowMs = System.currentTimeMillis()
+        val sessionId = "core_$nowMs"
+        val mode = synheartConfig?.mode ?: SynheartMode.PERSONAL
+
+        if (storageManager?.isOpen == true) {
+            try {
+                storageManager!!.insertSession(SessionRecord(
+                    sessionId = sessionId,
+                    subjectId = synheartConfig?.subjectId ?: userId ?: "",
+                    mode = mode.value,
+                    createdAtUtc = nowMs / 1000,
+                    startUtc = nowMs / 1000,
+                    appId = synheartConfig?.appId ?: "",
+                    appVersion = synheartConfig?.appVersion ?: "0.0.0",
+                    deviceId = synheartConfig?.deviceId ?: "",
+                    platform = synheartConfig?.platform ?: "android"
+                ))
+                artifactPipeline?.onSessionStart(sessionId, mode)
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Session record creation failed: $e")
+            }
+        }
+        currentSessionHandle = SessionHandle(sessionId = sessionId, startedAtMs = nowMs, mode = mode)
+
         isRunning = true
         reevaluateAllFeatures()
         SynheartLogger.log("[Synheart] Session started")
@@ -401,6 +697,49 @@ object Synheart {
         sessionWearJob?.cancel()
         sessionWearJob = null
 
+        // Phase 1: Finalize session summary and baseline snapshot
+        val handle = currentSessionHandle
+        val pipeline = artifactPipeline
+        if (handle != null && pipeline != null) {
+            val nowMs = System.currentTimeMillis()
+
+            // SessionSummary artifact
+            try {
+                pipeline.finalizeSession(handle.startedAtMs, nowMs)
+                SynheartLogger.log("[Synheart] Session summary artifact created")
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Session summary creation failed: $e")
+            }
+
+            // BaselineSnapshot from native SRM export
+            try {
+                val srmJson = runtimeModule?.bridge?.exportSrmSnapshot()
+                if (srmJson != null) {
+                    pipeline.produceBaselineSnapshot(srmJson)
+                    SynheartLogger.log("[Synheart] Baseline snapshot artifact created")
+                }
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Baseline snapshot creation failed: $e")
+            }
+        }
+        // Auto-ingest session to platform (opt-in)
+        val piConfig = synheartConfig?.platformIngestConfig
+        if (piConfig?.autoIngest == true && handle != null && platformIngestModule != null) {
+            try {
+                autoIngestSession(handle)
+                SynheartLogger.log("[Synheart] Auto-ingest completed")
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Auto-ingest failed: $e")
+            }
+        }
+
+        currentSessionHandle = null
+
+        // Auto-sync after session ends
+        if (syncModule?.enabled == true) {
+            try { syncModule?.syncNow() } catch (_: Exception) {}
+        }
+
         isRunning = false
         reevaluateAllFeatures()
         moduleManager.stopAll()
@@ -408,42 +747,31 @@ object Synheart {
     }
 
 
-    /**
-     * Force upload of queued snapshots now
-     *
-     * @throws ConsentRequiredError if cloudUpload consent not granted
-     */
-    suspend fun uploadNow() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before uploading")
-        }
-
-        if (cloudConnector == null) {
-            throw IllegalStateException("Cloud connector not enabled")
-        }
-
-        cloudConnector?.uploadNow()
-    }
-
-    /**
-     * Flush entire upload queue
-     *
-     * Attempts to upload all queued snapshots while online.
-     */
-    suspend fun flushUploadQueue() {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before flushing queue")
-        }
-
-        if (cloudConnector == null) {
-            throw IllegalStateException("Cloud connector not enabled")
-        }
-
-        cloudConnector?.flushQueue()
-    }
-
 
     // MARK: - Platform Ingestion
+
+    /**
+     * Auto-ingest a session payload built from SDK internal data.
+     */
+    private suspend fun autoIngestSession(session: SessionHandle) {
+        val wearSamples = synchronized(sessionWearBuffer) { sessionWearBuffer.toList() }
+        val behaviorEvents = behaviorModule?.rawEvents(WindowType.WINDOW_1H) ?: emptyList()
+        val phoneDataPoints = phoneModule?.rawDataPoints(WindowType.WINDOW_1H) ?: emptyList()
+
+        val payload = PlatformPayloadBuilder.buildSession(
+            sessionId = session.sessionId,
+            deviceId = synheartConfig?.deviceId ?: "",
+            appId = synheartConfig?.appId ?: "",
+            userId = synheartConfig?.subjectId ?: "",
+            startedAtMs = session.startedAtMs,
+            endedAtMs = System.currentTimeMillis(),
+            dataOnCloud = syncModule?.enabled ?: false,
+            wearSamples = wearSamples,
+            behaviorEvents = behaviorEvents,
+            phoneDataPoints = phoneDataPoints
+        )
+        platformIngestModule!!.ingestSession(payload)
+    }
 
     /**
      * Ingest a session payload via the Platform Ingest module.
@@ -668,13 +996,7 @@ object Synheart {
                     scope.launch { try { phoneModule?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop phone module: $e") } }
                 }
             }
-            SynheartFeature.CLOUD -> {
-                if (isOperational && cloudConnector != null) {
-                    scope.launch { try { cloudConnector?.start() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to start cloud connector: $e") } }
-                } else if (!isOperational && cloudConnector != null) {
-                    scope.launch { try { cloudConnector?.stop() } catch (e: Exception) { SynheartLogger.log("[Synheart] Failed to stop cloud connector: $e") } }
-                }
-            }
+            SynheartFeature.CLOUD -> { }
             SynheartFeature.SYNI -> { }
         }
     }
@@ -733,14 +1055,29 @@ object Synheart {
             synchronized(sessionHsiBuffer) { sessionHsiBuffer.clear() }
             synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
 
+            // Phase 1: Clean up storage and artifact pipeline
+            artifactHsiJob?.cancel()
+            artifactHsiJob = null
+            storageManager?.close()
+            storageManager = null
+            artifactPipeline = null
+            storagePolicy = null
+            smk = null
+            currentSessionHandle = null
+            synheartConfig = null
+
+            // Phase 3
+            syncModule?.dispose()
+            syncModule = null
+            authModule?.logout()
+            authModule = null
+
             consentModule = null
             capabilityModule = null
             wearModule = null
             phoneModule = null
             behaviorModule = null
             runtimeModule = null
-            srmModule = null
-            cloudConnector = null
             platformIngestModule = null
             activationManager = null
             previousConsent = null

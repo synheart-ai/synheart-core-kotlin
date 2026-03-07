@@ -246,6 +246,56 @@ currentState?.emotion?.stress?.let { stressLevel ->
 
 Synheart integrates with Android lifecycle. When using the Cloud Connector and/or background collectors, modules may continue running beyond a single Activity lifecycle depending on your integration.
 
+## Batch Ingest Mode
+
+By default, the runtime module streams data in real-time. **Batch ingest mode** buffers all events during a session and runs a single `ingestBatch` call on stop.
+
+```kotlin
+val runtimeModule = RuntimeModule(
+    bridge = bridge,
+    wearModule = wearModule,
+    behaviorModule = behaviorModule,
+    batchIngestOnStop = true  // Enable batch mode
+)
+```
+
+## Platform Ingestion
+
+Send structured session and metadata payloads to the Synheart platform API.
+
+### Auto-Ingest
+
+```kotlin
+val config = SynheartConfig(
+    appId = "your_app_id",
+    apiKey = "your_api_key",
+    subjectId = "sub_user_123",
+    platformIngestConfig = PlatformIngestConfig(
+        apiKey = "your_platform_api_key",
+        autoIngest = true
+    )
+)
+```
+
+### Manual Ingestion
+
+```kotlin
+// Ingest current session data
+synheart.ingestSession()
+
+// Ingest app/user metadata
+synheart.ingestMetadata()
+```
+
+### Standalone Payload Builder
+
+```kotlin
+val payload = PlatformPayloadBuilder.buildSession(
+    sessionId = "sess_123",
+    // ... other params
+)
+```
+
 ## Data Models
 
 ### HumanStateVector

@@ -1,6 +1,7 @@
 package com.synheart.core.modules.runtime
 
 import com.synheart.core.models.PreprocessedWindow
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -333,5 +334,100 @@ class RuntimeBridgeTest {
         assertEquals(42.5, window.derivedFeatures.hrv!!.rmssdMs, 0.001)
         assertEquals(14, window.srmContext.totalCount)
         assertEquals(3, window.embeddings.signalEmbedding.dimension)
+    }
+
+    // -- Batch Ingest --
+
+    @Test
+    fun `ingestBatch with RR events produces HSI frames`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        val batch = org.json.JSONArray()
+
+        // Build batch of RR events spanning multiple windows
+        for (i in 0 until 30) {
+            batch.put(JSONObject().apply {
+                put("type", "rr")
+                put("ts_ms", now + i * 800L)
+                put("rr_ms", 800.0)
+            })
+        }
+        // Add HR events
+        for (i in 0 until 25) {
+            batch.put(JSONObject().apply {
+                put("type", "hr")
+                put("ts_ms", now + i * 1000L)
+                put("bpm", 72.0)
+            })
+        }
+
+        val result = b.ingestBatch(batch.toString(), now + 30_000L) ?: return // FFI not available
+
+        val parsed = JSONObject(result)
+        assertTrue("Batch ingest should succeed", parsed.optBoolean("ok"))
+
+        // Should have frames array or legacy hsi
+        val hasFrames = parsed.has("frames") && parsed.getJSONArray("frames").length() > 0
+        val hasHsi = parsed.has("hsi")
+        assertTrue("Result should contain frames array or hsi object", hasFrames || hasHsi)
+    }
+
+    @Test
+    fun `ingestBatch with behavior events produces HSI frames`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        val batch = org.json.JSONArray()
+
+        // RR baseline
+        for (i in 0 until 30) {
+            batch.put(JSONObject().apply {
+                put("type", "rr")
+                put("ts_ms", now + i * 800L)
+                put("rr_ms", 800.0)
+            })
+        }
+        for (i in 0 until 25) {
+            batch.put(JSONObject().apply {
+                put("type", "hr")
+                put("ts_ms", now + i * 1000L)
+                put("bpm", 72.0)
+            })
+        }
+        // Behavior events
+        for (i in 0 until 10) {
+            batch.put(JSONObject().apply {
+                put("type", "behavior")
+                put("ts_ms", now + i * 500L)
+                put("event", "touch")
+                put("provider", "behavior_app")
+            })
+        }
+        batch.put(JSONObject().apply {
+            put("type", "behavior")
+            put("ts_ms", now + 5000L)
+            put("event", "app_switch")
+            put("provider", "behavior_app")
+        })
+
+        val result = b.ingestBatch(batch.toString(), now + 30_000L) ?: return
+
+        val parsed = JSONObject(result)
+        assertTrue("Batch ingest with behavior should succeed", parsed.optBoolean("ok"))
+    }
+
+    @Test
+    fun `ingestBatch with empty array returns ok`() {
+        assumeNotNull(bridge)
+        val b = bridge!!
+
+        val now = System.currentTimeMillis()
+        val result = b.ingestBatch("[]", now) ?: return
+
+        val parsed = JSONObject(result)
+        assertTrue("Empty batch should succeed", parsed.optBoolean("ok"))
     }
 }
