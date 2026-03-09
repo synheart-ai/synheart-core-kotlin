@@ -27,12 +27,6 @@ enum class SleepStage {
 
 // MARK: - Wear Module
 
-/// Wear module feature provider
-interface WearFeatureProvider {
-    /// Get biosignal features for a specific window
-    fun features(window: WindowType): WearWindowFeatures?
-}
-
 /// Biosignal features from wearables
 data class WearWindowFeatures(
     /// Window duration
@@ -62,12 +56,6 @@ data class WearWindowFeatures(
 
 // MARK: - Phone Module
 
-/// Phone module feature provider
-interface PhoneFeatureProvider {
-    /// Get phone features for a specific window
-    fun features(window: WindowType): PhoneWindowFeatures?
-}
-
 /// Phone context features
 data class PhoneWindowFeatures(
     /// Motion level (0.0 - 1.0)
@@ -84,12 +72,6 @@ data class PhoneWindowFeatures(
 )
 
 // MARK: - Behavior Module
-
-/// Behavior module feature provider
-interface BehaviorFeatureProvider {
-    /// Get behavioral features for a specific window
-    fun features(window: WindowType): BehaviorWindowFeatures?
-}
 
 /// Behavioral interaction features
 data class BehaviorWindowFeatures(

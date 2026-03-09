@@ -5,8 +5,6 @@ import com.synheart.core.modules.interfaces.CapabilityLevel
 import com.synheart.core.modules.interfaces.CapabilityProvider
 import com.synheart.core.modules.interfaces.ConsentProvider
 import com.synheart.core.modules.interfaces.Module
-import com.synheart.core.modules.interfaces.PhoneFeatureProvider
-import com.synheart.core.modules.interfaces.PhoneWindowFeatures
 import com.synheart.core.modules.interfaces.RawPhoneDataProvider
 import com.synheart.core.modules.interfaces.WindowType
 import kotlinx.coroutines.flow.launchIn
@@ -24,7 +22,7 @@ import com.synheart.core.SynheartLogger
 class PhoneModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider
-) : BaseSynheartModule("phone"), PhoneFeatureProvider, RawPhoneDataProvider {
+) : BaseSynheartModule("phone"), RawPhoneDataProvider {
 
     private val motionCollector = MotionCollector()
     private val screenTracker = ScreenStateTracker()
@@ -34,14 +32,6 @@ class PhoneModule(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
-
-    // MARK: - PhoneFeatureProvider
-
-    override fun features(window: WindowType): PhoneWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return null
-    }
 
     // MARK: - RawPhoneDataProvider
 

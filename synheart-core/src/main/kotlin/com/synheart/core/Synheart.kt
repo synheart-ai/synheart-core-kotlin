@@ -69,11 +69,9 @@ import kotlinx.coroutines.launch
  * // Initialize
  * Synheart.initialize(
  *     context = context,
- *     userId = "anon_user_123",
  *     config = SynheartConfig(
- *         enableWear = true,
- *         enablePhone = true,
- *         enableBehavior = true
+ *         appId = "com.example.app",
+ *         subjectId = "anon_user_123"
  *     )
  * )
  *
@@ -144,17 +142,6 @@ object Synheart {
 
     /** The currently active session, if any. */
     val currentSession: SessionHandle? get() = currentSessionHandle
-
-    /** Configure the SDK using RFC-CORE-0007 config shape. */
-    suspend fun configure(context: Context, config: SynheartConfig) {
-        config.validate()
-        initialize(
-            context = context,
-            userId = config.subjectId,
-            config = config,
-            appKey = "configured"
-        )
-    }
 
     /**
      * Stream of HSI JSON updates produced by synheart-runtime.
@@ -412,27 +399,29 @@ object Synheart {
      * ```kotlin
      * Synheart.initialize(
      *     context = context,
-     *     userId = "anon_user_123",
      *     config = SynheartConfig(
-     *         enableWear = true,
-     *         enablePhone = true,
-     *         enableBehavior = true
+     *         appId = "com.example.app",
+     *         subjectId = "anon_user_123"
      *     )
      * )
      * ```
      */
     suspend fun initialize(
         context: Context,
-        userId: String,
         config: SynheartConfig? = null,
-        appKey: String = "mock_app_key"
+        userId: String? = null,
+        autoStart: Boolean = false
     ) {
         if (isConfigured) {
-            throw IllegalStateException("Synheart already configured")
+            return // No-op if already initialized
+        }
+
+        if (config != null) {
+            config.validate()
         }
 
         this.context = context.applicationContext
-        this.userId = userId
+        this.userId = userId ?: config?.subjectId
 
         try {
             SynheartLogger.log("[Synheart] Initializing...")
@@ -487,7 +476,7 @@ object Synheart {
             SynheartLogger.log("[Synheart] Initializing Runtime Module...")
             val runtimeBridge = RuntimeBridge.createIfAvailable(
                 RuntimeConfig(
-                    subjectId = userId,
+                    subjectId = this.userId ?: "",
                     sessionId = java.util.UUID.randomUUID().toString()
                 )
             )
@@ -600,10 +589,12 @@ object Synheart {
             }
 
             isConfigured = true
-            // Modules are initialized but NOT started.
-            // Call startSession() to begin data collection.
-            // Per RFC §5.1: initialize() must NOT start collecting signals.
             SynheartLogger.log("[Synheart] Initialization complete")
+
+            // Auto-start session if requested
+            if (autoStart) {
+                startSession()
+            }
         } catch (e: Exception) {
             SynheartLogger.log("[Synheart] Initialization failed: $e")
             e.printStackTrace()

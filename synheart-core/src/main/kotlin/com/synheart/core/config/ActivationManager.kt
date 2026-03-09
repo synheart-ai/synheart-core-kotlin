@@ -35,18 +35,15 @@ internal class ActivationManager {
     }
 
     /**
-     * Bulk-activate features based on SynheartConfig flags.
+     * Bulk-activate features based on SynheartConfig.
      *
-     * Maps config booleans/objects to the corresponding feature activations:
-     * - `enableWear` -> `WEAR`
-     * - `enablePhone` -> `PHONE_CONTEXT`
-     * - `enableBehavior` -> `BEHAVIOR`
-     * - `cloudConfig != null` -> `CLOUD`
+     * Activates all data-collection features by default.
+     * Cloud is activated when a cloud config is provided.
      */
     fun activateFromConfig(config: SynheartConfig) {
-        if (config.enableWear) activated.add(SynheartFeature.WEAR)
-        if (config.enablePhone) activated.add(SynheartFeature.PHONE_CONTEXT)
-        if (config.enableBehavior) activated.add(SynheartFeature.BEHAVIOR)
+        activated.add(SynheartFeature.WEAR)
+        activated.add(SynheartFeature.PHONE_CONTEXT)
+        activated.add(SynheartFeature.BEHAVIOR)
         if (config.cloudConfig != null) activated.add(SynheartFeature.CLOUD)
     }
 }

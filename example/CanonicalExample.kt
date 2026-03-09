@@ -31,17 +31,15 @@ class CanonicalExample : AppCompatActivity() {
             //    In production, replace allowUnsignedCapabilities with
             //    capabilityToken + capabilitySecret from your server.
             try {
-                Synheart.configure(
+                Synheart.initialize(
                     context = this@CanonicalExample,
                     config = SynheartConfig(
+                        appId = "com.synheart.example",
                         subjectId = "example_user_123",
-                        allowUnsignedCapabilities = true,
-                        enableWear = true,
-                        enablePhone = true,
-                        enableBehavior = true
+                        allowUnsignedCapabilities = true
                     )
                 )
-                println("[Synheart] SDK configured")
+                println("[Synheart] SDK initialized")
             } catch (e: IllegalStateException) {
                 println("[Synheart] Configuration failed: ${e.message}")
                 return@launch

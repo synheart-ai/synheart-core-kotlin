@@ -4,8 +4,6 @@ import com.synheart.core.modules.base.BaseSynheartModule
 import com.synheart.core.modules.interfaces.CapabilityProvider
 import com.synheart.core.modules.interfaces.ConsentProvider
 import com.synheart.core.modules.interfaces.RawWearDataProvider
-import com.synheart.core.modules.interfaces.WearFeatureProvider
-import com.synheart.core.modules.interfaces.WearWindowFeatures
 import com.synheart.core.modules.interfaces.WindowType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,7 +24,7 @@ class WearModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider,
     private val sources: List<WearSourceHandler>? = null
-) : BaseSynheartModule("wear"), WearFeatureProvider, RawWearDataProvider {
+) : BaseSynheartModule("wear"), RawWearDataProvider {
 
     private val actualSources = sources ?: listOf(MockWearSourceHandler())
     private val cache = WearCache()
@@ -37,14 +35,6 @@ class WearModule(
 
     /** Live stream of incoming wear samples for downstream consumers (e.g. RuntimeModule). */
     val sampleFlow: Flow<WearSample> = _sampleFlow.asSharedFlow()
-
-    // MARK: - WearFeatureProvider
-
-    override fun features(window: WindowType): WearWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return null
-    }
 
     // MARK: - RawWearDataProvider
 

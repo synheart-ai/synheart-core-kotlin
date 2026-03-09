@@ -42,10 +42,6 @@ data class SynheartConfig(
     val sync: SyncConfig = SyncConfig(),
     val privacy: PrivacyConfig = PrivacyConfig(),
 
-    // Legacy fields (backward-compatible)
-    val enableWear: Boolean = true,
-    val enablePhone: Boolean = true,
-    val enableBehavior: Boolean = true,
     val cloudConfig: CloudConfig? = null,
     val platformIngestConfig: PlatformIngestConfig? = null,
     /** Server-signed capability token for feature gating */

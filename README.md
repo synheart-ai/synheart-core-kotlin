@@ -1,6 +1,6 @@
 # Synheart Core SDK - Kotlin
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -125,12 +125,10 @@ class MainActivity : AppCompatActivity() {
             // Initialize the Core SDK
             Synheart.initialize(
                 context = this@MainActivity,
-                userId = "anon_user_123",
                 config = SynheartConfig(
-                    allowUnsignedCapabilities = true,  // Use capabilityToken + capabilitySecret in production
-                    enableWear = true,
-                    enablePhone = true,
-                    enableBehavior = true
+                    appId = "com.example.app",
+                    subjectId = "anon_user_123",
+                    allowUnsignedCapabilities = true  // Use capabilityToken + capabilitySecret in production
                 )
             )
 
@@ -354,7 +352,7 @@ For the modular architecture, features are collected in time windows:
 
 | Method | Description |
 |--------|-------------|
-| `initialize(context, userId, config, appKey)` | Initialize the SDK |
+| `initialize(context, config, userId, autoStart)` | Initialize the SDK |
 | `startSession()` | Start data collection |
 | `stopSession()` | Stop data collection |
 | `activate(feature)` | Enable a feature (focus, emotion, cloud, etc.) |
@@ -418,7 +416,7 @@ try {
     Synheart.startSession()
 } catch (e: IllegalStateException) {
     when {
-        e.message?.contains("already configured") == true -> {
+        e.message?.contains("already initialized") == true -> {
             println("SDK already initialized")
         }
         e.message?.contains("Capability token") == true -> {
@@ -435,7 +433,7 @@ try {
 
 | Exception | When |
 |-----------|------|
-| `IllegalStateException("Synheart already configured")` | `initialize()` called twice |
+| `IllegalStateException("Synheart already initialized")` | `initialize()` called twice |
 | `IllegalStateException("Capability token and secret are required...")` | No token and `allowUnsignedCapabilities = false` |
 | `IllegalStateException("Synheart must be initialized...")` | Method called before `initialize()` |
 | `ConsentRequiredError` | Cloud operation without `cloudUpload` consent |

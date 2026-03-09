@@ -2,8 +2,6 @@ package com.synheart.core.modules.behavior
 
 import com.synheart.core.SynheartDefaults
 import com.synheart.core.modules.base.BaseSynheartModule
-import com.synheart.core.modules.interfaces.BehaviorFeatureProvider
-import com.synheart.core.modules.interfaces.BehaviorWindowFeatures
 import com.synheart.core.modules.interfaces.CapabilityProvider
 import com.synheart.core.modules.interfaces.ConsentProvider
 import com.synheart.core.modules.interfaces.RawBehaviorDataProvider
@@ -26,7 +24,7 @@ import com.synheart.core.SynheartLogger
 class BehaviorModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider
-) : BaseSynheartModule("behavior"), BehaviorFeatureProvider, RawBehaviorDataProvider {
+) : BaseSynheartModule("behavior"), RawBehaviorDataProvider {
 
     private val eventStream = BehaviorEventStream()
     private val aggregator = WindowAggregator()
@@ -38,14 +36,6 @@ class BehaviorModule(
     /// Get the event stream for recording events
     val eventStreamInstance: BehaviorEventStream
         get() = eventStream
-
-    // MARK: - BehaviorFeatureProvider
-
-    override fun features(window: WindowType): BehaviorWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return null
-    }
 
     // MARK: - RawBehaviorDataProvider
 

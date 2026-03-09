@@ -19,13 +19,13 @@ class SimpleExample : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         lifecycleScope.launch {
-            // Configure with wearable data collection
-            Synheart.configure(
+            // Initialize with wearable data collection
+            Synheart.initialize(
                 context = this@SimpleExample,
                 config = SynheartConfig(
+                    appId = "com.synheart.example",
                     subjectId = "user_123",
-                    allowUnsignedCapabilities = true,
-                    enableWear = true
+                    allowUnsignedCapabilities = true
                 )
             )
 
