@@ -2,6 +2,7 @@ package com.synheart.core.artifacts
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class AxisStats(
@@ -41,12 +42,15 @@ data class BaselineData(
 @Serializable
 data class BaselineSnapshotArtifact(
     val header: ArtifactHeader,
-    val baseline: BaselineData
+    val baseline: BaselineData,
+    @SerialName("wearable_reference")
+    val wearableReference: JsonObject? = null
 ) {
     companion object {
         fun create(
             subjectId: String,
-            baseline: BaselineData
+            baseline: BaselineData,
+            wearableReference: JsonObject? = null
         ): BaselineSnapshotArtifact {
             val header = ArtifactHeader.create(
                 type = "baseline_snapshot",
@@ -57,7 +61,11 @@ data class BaselineSnapshotArtifact(
                 schemaName = "baseline_snapshot",
                 schemaVersion = "1"
             )
-            return BaselineSnapshotArtifact(header = header, baseline = baseline)
+            return BaselineSnapshotArtifact(
+                header = header,
+                baseline = baseline,
+                wearableReference = wearableReference
+            )
         }
     }
 }

@@ -407,6 +407,49 @@ class StorageManager private constructor(
         }
     }
 
+    // MARK: - Wearable Events
+
+    /** Insert a wearable event record. Silently ignores duplicates (CONFLICT_IGNORE). */
+    fun insertWearableEvent(record: ContentValues) {
+        db!!.insertWithOnConflict("wearable_events", null, record, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    /** Query wearable events by type within a date range (observed_at). */
+    fun queryWearableEvents(eventType: String, startDate: String, endDate: String): List<Map<String, Any>> {
+        val cursor = db!!.rawQuery(
+            "SELECT * FROM wearable_events WHERE event_type = ? AND observed_at >= ? AND observed_at <= ? ORDER BY observed_at ASC",
+            arrayOf(eventType, startDate, endDate)
+        )
+        val results = mutableListOf<Map<String, Any>>()
+        cursor.use {
+            val columnNames = it.columnNames
+            while (it.moveToNext()) {
+                val row = mutableMapOf<String, Any>()
+                for (col in columnNames) {
+                    val idx = it.getColumnIndex(col)
+                    if (idx >= 0 && !it.isNull(idx)) {
+                        row[col] = when (it.getType(idx)) {
+                            android.database.Cursor.FIELD_TYPE_INTEGER -> it.getLong(idx)
+                            android.database.Cursor.FIELD_TYPE_FLOAT -> it.getDouble(idx)
+                            else -> it.getString(idx)
+                        }
+                    }
+                }
+                results.add(row)
+            }
+        }
+        return results
+    }
+
+    /** Return the total number of wearable event rows. */
+    fun wearableEventCount(): Int {
+        val cursor = db!!.rawQuery("SELECT COUNT(*) FROM wearable_events", null)
+        cursor.use {
+            if (!it.moveToFirst()) return 0
+            return it.getInt(0)
+        }
+    }
+
     // MARK: - Wipe
 
     fun wipeAll() {
@@ -416,6 +459,7 @@ class StorageManager private constructor(
         db!!.execSQL("DELETE FROM artifacts")
         db!!.execSQL("DELETE FROM sessions")
         db!!.execSQL("DELETE FROM sync_state")
+        db!!.execSQL("DELETE FROM wearable_events")
     }
 
     // MARK: - Private helpers
@@ -545,6 +589,29 @@ class StorageManager private constructor(
                     value TEXT NOT NULL
                 )
             """)
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS wearable_events (
+                    event_id TEXT PRIMARY KEY,
+                    subject_id TEXT NOT NULL,
+                    device_install_id TEXT NOT NULL,
+                    event_class TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    provider_record_id TEXT,
+                    observed_at TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    effective_start TEXT,
+                    effective_end TEXT,
+                    payload TEXT NOT NULL,
+                    unit TEXT,
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    source_fidelity TEXT NOT NULL DEFAULT 'derived',
+                    provenance TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_wearable_events_type_date ON wearable_events(event_type, observed_at)")
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {

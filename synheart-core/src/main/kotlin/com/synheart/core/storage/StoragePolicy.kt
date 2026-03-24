@@ -7,6 +7,8 @@ interface StoragePolicy {
     fun canPersistArtifact(type: String): Boolean
     fun canPersistStream(streamType: String): Boolean
     fun canIncludeMetrics(): Boolean
+    /** Wearable events are always persisted regardless of mode. */
+    fun canPersistWearableEvent(): Boolean = true
 }
 
 fun storagePolicyForMode(mode: SynheartMode): StoragePolicy = when (mode) {

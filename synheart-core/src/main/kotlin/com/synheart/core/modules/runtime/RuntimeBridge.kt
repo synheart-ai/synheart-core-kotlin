@@ -82,6 +82,17 @@ interface RuntimeNative : Library {
     /** Load an SRM snapshot from JSON. Returns 0 on success, non-zero on failure. */
     fun synheart_runtime_load_srm_snapshot(handle: Pointer?, json: String?): Int
 
+    // -- SRM Wearable --
+
+    /** Push a daily wearable value into the SRM longitudinal baselines. Returns 0 on success. */
+    fun synheart_srm_push_wearable_daily_value(handle: Pointer?, dimension: String?, day_index: Int, value: Double, confidence: Double, fidelity: Int): Int
+
+    /** Trigger a wearable recompute. Returns 0 on success. */
+    fun synheart_srm_trigger_wearable_recompute(handle: Pointer?, trigger_type: Int, as_of_day: Int): Int
+
+    /** Return the current wearable reference JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_srm_get_wearable_reference(handle: Pointer?): Pointer?
+
     // -- Lab Session --
 
     /** Start a lab session. Returns null on success, error string on failure. Caller MUST free with [synheart_runtime_free_string]. */
@@ -283,6 +294,47 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
      *  Internal: used by RuntimeModule for auto-save/load lifecycle. */
     internal fun loadSrmSnapshot(json: String): Int {
         return native.synheart_runtime_load_srm_snapshot(handle, json)
+    }
+
+    // -- SRM Wearable --
+
+    /**
+     * Push a daily wearable value into the SRM longitudinal baselines.
+     *
+     * Returns 0 on success, or `null` if the native library is unavailable.
+     */
+    fun pushWearableDailyValue(
+        dimension: String,
+        dayIndex: Int,
+        value: Double,
+        confidence: Double,
+        fidelity: Int
+    ): Int? {
+        val lib = RuntimeNative.INSTANCE ?: return null
+        return lib.synheart_srm_push_wearable_daily_value(handle, dimension, dayIndex, value, confidence, fidelity)
+    }
+
+    /**
+     * Trigger a wearable recompute in the native SRM.
+     *
+     * Returns 0 on success, or `null` if the native library is unavailable.
+     */
+    fun triggerWearableRecompute(triggerType: Int, asOfDay: Int): Int? {
+        val lib = RuntimeNative.INSTANCE ?: return null
+        return lib.synheart_srm_trigger_wearable_recompute(handle, triggerType, asOfDay)
+    }
+
+    /**
+     * Return the current wearable reference JSON from the native SRM.
+     *
+     * Returns `null` if the native library is unavailable or no reference exists.
+     */
+    fun getWearableReference(): String? {
+        val lib = RuntimeNative.INSTANCE ?: return null
+        val ptr = lib.synheart_srm_get_wearable_reference(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
     }
 
     // -- Lab Session --
