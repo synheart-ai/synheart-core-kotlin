@@ -9,7 +9,7 @@ version = '1.2.0'
 description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
 
 android {
-    namespace 'com.synheart.core'
+    namespace 'ai.synheart.core'
     compileSdk 34
 
     defaultConfig {
