@@ -35,7 +35,7 @@ class ConsentAPIClient(
      */
     fun getAvailableProfiles(activeOnly: Boolean = true): List<ConsentProfile> {
         try {
-            val url = "${baseUrl}/consent/v1/apps/${appId}/consent-profiles?active_only=$activeOnly"
+            val url = "${baseUrl}${ApiEndpoints.consentProfilesPath(appId)}?active_only=$activeOnly"
 
             SynheartLogger.log("[ConsentAPI] Fetching profiles from: $url")
 
@@ -112,7 +112,7 @@ class ConsentAPIClient(
         userAgent: String? = null
     ): ConsentToken {
         try {
-            val url = "${baseUrl}/consent/v1/sdk/consent-token"
+            val url = "${baseUrl}${ApiEndpoints.CONSENT_TOKEN_PATH}"
 
             val bodyMap = buildMap {
                 put("app_id", appId)
@@ -195,7 +195,7 @@ class ConsentAPIClient(
      */
     fun revokeConsent(deviceId: String, profileId: String) {
         try {
-            val url = "${baseUrl}/consent/v1/sdk/consent-revoke"
+            val url = "${baseUrl}${ApiEndpoints.CONSENT_REVOKE_PATH}"
 
             val bodyJson = json.encodeToString(
                 kotlinx.serialization.json.JsonObject.serializer(),
