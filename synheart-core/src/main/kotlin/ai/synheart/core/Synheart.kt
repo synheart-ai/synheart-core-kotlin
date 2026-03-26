@@ -33,7 +33,12 @@ import ai.synheart.core.modules.platform_ingest.PlatformIngestModule
 import ai.synheart.core.modules.platform_ingest.PlatformIngestResponse
 import ai.synheart.core.modules.platform_ingest.PlatformPayloadBuilder
 import ai.synheart.core.modules.interfaces.WindowType
+import ai.synheart.core.modules.session.BehaviorModuleAdapter
+import ai.synheart.core.modules.session.SessionModule
+import ai.synheart.core.modules.session.WearModuleBiosignalAdapter
 import ai.synheart.core.modules.wear.WearSample
+import ai.synheart.session.SessionConfig
+import ai.synheart.session.SessionMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -131,11 +136,11 @@ object Synheart {
     private var authModule: ai.synheart.core.auth.AuthModule? = null
     private var syncModule: ai.synheart.core.sync.SyncModule? = null
 
-    // Session data buffers — accumulate during session, persist after stop
-    private val sessionHsiBuffer = mutableListOf<String>()
-    private val sessionWearBuffer = mutableListOf<WearSample>()
-    private var sessionHsiJob: Job? = null
-    private var sessionWearJob: Job? = null
+    // Session module (wraps SessionEngine from synheart-session)
+    private var sessionModule: SessionModule? = null
+    private var activeMainSessionId: String? = null
+    private var mainSessionJob: Job? = null
+    private var hsiToSessionJob: Job? = null
 
     // Streams
     private val _hsiJsonFlow = MutableStateFlow<String?>(null)
@@ -353,18 +358,16 @@ object Synheart {
     }
 
     /**
-     * Returns a snapshot of all HSI JSON windows accumulated during the current
-     * (or most recent) session. The list is cleared when [startSession] is called.
+     * Returns the session module status, if a session is active.
      */
-    fun getSessionHsiWindows(): List<String> =
-        synchronized(sessionHsiBuffer) { sessionHsiBuffer.toList() }
+    fun getSessionStatus(): Map<String, Any>? =
+        sessionModule?.getStatus()
 
     /**
-     * Returns a snapshot of all raw wear samples accumulated during the current
-     * (or most recent) session. The list is cleared when [startSession] is called.
+     * Returns raw wear samples from the wear module cache for the given window.
      */
     fun getSessionWearSamples(): List<WearSample> =
-        synchronized(sessionWearBuffer) { sessionWearBuffer.toList() }
+        wearModule?.rawSamples(WindowType.WINDOW_1H) ?: emptyList()
 
     // Activation API (RFC-0005)
 
@@ -522,6 +525,33 @@ object Synheart {
                 }
             }
 
+            // 10b. Create SessionModule with adapted providers
+            SynheartLogger.log("[Synheart] Initializing SessionModule...")
+            val biosignalAdapter = WearModuleBiosignalAdapter(wearModule!!)
+            val behaviorAdapter = BehaviorModuleAdapter(behaviorModule!!)
+            sessionModule = SessionModule(
+                biosignalProvider = biosignalAdapter,
+                behaviorProvider = behaviorAdapter
+            )
+
+            // Bridge HSI metrics from runtime -> session engine (HRV is authoritative
+            // from session-runtime; the session SDK no longer computes it locally).
+            hsiToSessionJob = scope.launch {
+                runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
+                    val sid = activeMainSessionId
+                    if (sid == null || sessionModule == null) return@collect
+                    try {
+                        val parsed = org.json.JSONObject(hsiJson)
+                        val metricsMap = mutableMapOf<String, Any>()
+                        parsed.keys().forEach { key ->
+                            parsed.opt(key)?.let { metricsMap[key] = it }
+                        }
+                        sessionModule?.ingestHsiMetrics(metricsMap)
+                    } catch (_: Exception) {}
+                }
+            }
+            SynheartLogger.log("[Synheart] SessionModule initialized")
+
             // 11. Create activation manager and auto-activate from config
             activationManager = ActivationManager()
             activationManager!!.activateFromConfig(resolvedConfig)
@@ -624,24 +654,38 @@ object Synheart {
         SynheartLogger.log("[Synheart] Starting session...")
         moduleManager.startAll()
 
-        // Clear session buffers and start accumulating
-        synchronized(sessionHsiBuffer) { sessionHsiBuffer.clear() }
-        synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
-        sessionHsiJob = scope.launch {
-            runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
-                if (consentModule?.current()?.biosignals != true) return@collect
-                synchronized(sessionHsiBuffer) { sessionHsiBuffer.add(hsiJson) }
-            }
-        }
-        sessionWearJob = scope.launch {
-            wearModule?.sampleFlow?.collect { sample ->
-                synchronized(sessionWearBuffer) { sessionWearBuffer.add(sample) }
+        // Open main collection session via Session SDK (RFC: session boundary)
+        val nowMs = System.currentTimeMillis()
+        val sessionId = "core_$nowMs"
+        val sessionConfig = SessionConfig(
+            sessionId = sessionId,
+            mode = SessionMode.FOCUS,
+            durationSec = 86400 // default 24h — long-lived; stop explicitly
+        )
+        activeMainSessionId = sessionId
+        mainSessionJob = scope.launch {
+            try {
+                sessionModule?.startSession(sessionConfig)?.collect { event ->
+                    val eventType = event["type"] as? String
+                    if (eventType == "session_summary" || eventType == "session_error") {
+                        activeMainSessionId = null
+                        if (isRunning) {
+                            isRunning = false
+                            reevaluateAllFeatures()
+                            moduleManager.stopAll()
+                            SynheartLogger.log(
+                                "[Synheart] Main session ended (duration or stream closed)"
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Main session stream error: $e")
+                activeMainSessionId = null
             }
         }
 
         // Phase 1: Create session record and start artifact pipeline
-        val nowMs = System.currentTimeMillis()
-        val sessionId = "core_$nowMs"
         val mode = synheartConfig?.mode ?: SynheartMode.PERSONAL
 
         if (storageManager?.isOpen == true) {
@@ -682,11 +726,13 @@ object Synheart {
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
-        // Cancel buffer collection jobs but keep buffers for post-session queries
-        sessionHsiJob?.cancel()
-        sessionHsiJob = null
-        sessionWearJob?.cancel()
-        sessionWearJob = null
+        // Close main collection session via Session SDK
+        if (activeMainSessionId != null) {
+            sessionModule?.stopSession(activeMainSessionId!!)
+            mainSessionJob?.cancel()
+            mainSessionJob = null
+            activeMainSessionId = null
+        }
 
         // Phase 1: Finalize session summary and baseline snapshot
         val handle = currentSessionHandle
@@ -745,7 +791,7 @@ object Synheart {
      * Auto-ingest a session payload built from SDK internal data.
      */
     private suspend fun autoIngestSession(session: SessionHandle) {
-        val wearSamples = synchronized(sessionWearBuffer) { sessionWearBuffer.toList() }
+        val wearSamples = wearModule?.rawSamples(WindowType.WINDOW_1H) ?: emptyList()
         val behaviorEvents = behaviorModule?.rawEvents(WindowType.WINDOW_1H) ?: emptyList()
         val phoneDataPoints = phoneModule?.rawDataPoints(WindowType.WINDOW_1H) ?: emptyList()
 
@@ -1039,12 +1085,12 @@ object Synheart {
             stop()
             moduleManager.disposeAll()
 
-            sessionHsiJob?.cancel()
-            sessionHsiJob = null
-            sessionWearJob?.cancel()
-            sessionWearJob = null
-            synchronized(sessionHsiBuffer) { sessionHsiBuffer.clear() }
-            synchronized(sessionWearBuffer) { sessionWearBuffer.clear() }
+            mainSessionJob?.cancel()
+            mainSessionJob = null
+            hsiToSessionJob?.cancel()
+            hsiToSessionJob = null
+            activeMainSessionId = null
+            sessionModule = null
 
             // Phase 1: Clean up storage and artifact pipeline
             artifactHsiJob?.cancel()

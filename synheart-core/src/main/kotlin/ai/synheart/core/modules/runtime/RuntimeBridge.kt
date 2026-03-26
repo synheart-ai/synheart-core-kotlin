@@ -109,6 +109,26 @@ interface RuntimeNative : Library {
 
     /** Finalize the lab session and return the complete payload JSON. Caller MUST free with [synheart_runtime_free_string]. */
     fun synheart_lab_finalize(handle: Pointer?, ended_at_ms: Long): Pointer?
+
+    /** Merge extra data into the active lab session. Returns result JSON or null. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_lab_merge_session_extra_data(handle: Pointer?, patch_json: String?): Pointer?
+
+    /** Set state overrides on a lab window. */
+    fun synheart_lab_set_window_state_overrides(handle: Pointer?, window_id: String?, overrides_json: String?)
+
+    // -- Diagnostics --
+
+    /** Push sleep stage data as JSON into the runtime. */
+    fun synheart_runtime_push_sleep_stages(handle: Pointer?, json: String?)
+
+    /** Return the last error code (0 = no error). */
+    fun synheart_runtime_last_error_code(handle: Pointer?): Int
+
+    /** Return diagnostics as JSON. Caller MUST free with [synheart_runtime_free_string]. */
+    fun synheart_runtime_diagnostics_json(handle: Pointer?): Pointer?
+
+    /** Clear accumulated diagnostics counters. */
+    fun synheart_runtime_clear_diagnostics(handle: Pointer?)
 }
 
 /**
@@ -388,6 +408,48 @@ class RuntimeBridge private constructor(private val handle: Pointer) {
         val json = ptr.getString(0)
         native.synheart_runtime_free_string(ptr)
         return json
+    }
+
+    // -- Lab extensions --
+
+    /** Merge extra data into the active lab session. Returns result JSON or null. */
+    fun labMergeSessionExtraData(patchJson: String): String? {
+        val ptr = native.synheart_lab_merge_session_extra_data(handle, patchJson) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /** Set state overrides on a lab window. */
+    fun labSetWindowStateOverrides(windowId: String, overridesJson: String) {
+        native.synheart_lab_set_window_state_overrides(handle, windowId, overridesJson)
+    }
+
+    // -- Sleep stages --
+
+    /** Push sleep stage data as JSON into the runtime. */
+    fun pushSleepStages(json: String) {
+        native.synheart_runtime_push_sleep_stages(handle, json)
+    }
+
+    // -- Diagnostics --
+
+    /** Return the last error code (0 = no error). */
+    fun lastErrorCode(): Int {
+        return native.synheart_runtime_last_error_code(handle)
+    }
+
+    /** Return diagnostics as JSON, or null. */
+    fun diagnosticsJson(): String? {
+        val ptr = native.synheart_runtime_diagnostics_json(handle) ?: return null
+        val json = ptr.getString(0)
+        native.synheart_runtime_free_string(ptr)
+        return json
+    }
+
+    /** Clear accumulated diagnostics counters. */
+    fun clearDiagnostics() {
+        native.synheart_runtime_clear_diagnostics(handle)
     }
 
     /**

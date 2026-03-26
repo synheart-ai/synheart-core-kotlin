@@ -38,6 +38,12 @@ class InvalidTenantError : CloudConnectorException("Tenant ID not found or inval
 class SchemaValidationError : CloudConnectorException("HSI 1.1 schema validation failed")
 
 /**
+ * Thrown when a consent token has expired
+ */
+class TokenExpiredError(message: String = "Consent token expired") :
+    CloudConnectorException(message)
+
+/**
  * Thrown on network errors or failed uploads after max retries
  */
 class NetworkError(message: String, cause: Throwable? = null) :

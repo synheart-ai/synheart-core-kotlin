@@ -38,11 +38,14 @@ data class SynheartConfig(
     val additionalAppMetadata: Map<String, Any> = emptyMap(),
     val deviceId: String = "",
     val platform: String = "android",
+    /** Device role — controls which modules are enabled. Defaults to PHONE. */
+    val deviceRole: DeviceRole = DeviceRole.PHONE,
     val storage: StorageConfig = StorageConfig(),
     val sync: SyncConfig = SyncConfig(),
     val privacy: PrivacyConfig = PrivacyConfig(),
 
     val cloudConfig: CloudConfig? = null,
+    val consentConfig: ConsentConfig? = null,
     val platformIngestConfig: PlatformIngestConfig? = null,
     /** Server-signed capability token for feature gating */
     val capabilityToken: ai.synheart.core.modules.capabilities.CapabilityToken? = null,
@@ -126,4 +129,45 @@ data class CloudConfig(
             "CloudConfig requires either hmacSecret or authProvider"
         }
     }
+}
+
+/**
+ * Consent service configuration.
+ *
+ * Required for cloud consent service integration (JWT-based consent tokens).
+ *
+ * Example:
+ * ```kotlin
+ * val consentConfig = ConsentConfig(
+ *     consentServiceUrl = "https://consent.synheart.ai",
+ *     appId = "your_app_id",
+ *     appApiKey = "your_app_api_key"
+ * )
+ * ```
+ */
+data class ConsentConfig(
+    /** Base URL for consent service */
+    val consentServiceUrl: String = ApiEndpoints.DEFAULT_CONSENT_BASE_URL,
+
+    /** App ID for consent service */
+    val appId: String? = null,
+
+    /** App API key for consent service authentication */
+    val appApiKey: String? = null,
+
+    /** Device ID (UUID for this device, auto-generated if not provided) */
+    val deviceId: String? = null,
+
+    /** Platform identifier ('android', 'ios', etc.) */
+    val platform: String = "android",
+
+    /** User ID (optional, for pseudonymous identification) */
+    val userId: String? = null,
+
+    /** Region code (e.g., "US", "EU") */
+    val region: String? = null
+) {
+    /** Check if consent service is configured */
+    val isConfigured: Boolean
+        get() = appId != null && appApiKey != null
 }
