@@ -112,8 +112,8 @@ Add required permissions to your `AndroidManifest.xml`:
 The Core SDK provides HSI (Human State Interface) as the core state representation, with optional interpretation modules for Focus and Emotion:
 
 ```kotlin
-import com.synheart.core.Synheart
-import com.synheart.core.models.SynheartConfig
+import ai.synheart.core.Synheart
+import ai.synheart.core.models.SynheartConfig
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -173,8 +173,8 @@ class MainActivity : AppCompatActivity() {
 The SDK also provides a modular architecture for windowed feature collection:
 
 ```kotlin
-import com.synheart.core.modules.*
-import com.synheart.core.modules.consent.ConsentStorage
+import ai.synheart.core.modules.*
+import ai.synheart.core.modules.consent.ConsentStorage
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 

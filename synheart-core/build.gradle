@@ -9,7 +9,7 @@ version = '1.2.0'
 description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
 
 android {
-    namespace 'com.synheart.core'
+    namespace 'ai.synheart.core'
     compileSdk 34
 
     defaultConfig {
@@ -65,10 +65,10 @@ dependencies {
     // JNA for synheart-runtime native library
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
 
-    // Synheart sibling SDKs (resolved via composite builds)
+    // Synheart sibling SDKs
+    // emotion and focus removed — now computed by synheart-runtime
+    // and accessed via RuntimeBridge.
     implementation 'ai.synheart:synheart-wear:0.3.0'
-    implementation 'ai.synheart:emotion:0.1.0'
-    implementation 'ai.synheart:focus:0.1.0'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
     implementation 'ai.synheart:session:0.1.0'
     

@@ -4,13 +4,13 @@
 // The absolute minimum to get HSI data flowing.
 // For a full-featured example, see CanonicalExample.kt.
 
-package com.synheart.core.example
+package ai.synheart.core.example
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.synheart.core.Synheart
-import com.synheart.core.config.SynheartConfig
+import ai.synheart.core.Synheart
+import ai.synheart.core.config.SynheartConfig
 import kotlinx.coroutines.launch
 
 class SimpleExample : AppCompatActivity() {
@@ -23,7 +23,7 @@ class SimpleExample : AppCompatActivity() {
             Synheart.initialize(
                 context = this@SimpleExample,
                 config = SynheartConfig(
-                    appId = "com.synheart.example",
+                    appId = "ai.synheart.example",
                     subjectId = "user_123",
                     allowUnsignedCapabilities = true
                 )

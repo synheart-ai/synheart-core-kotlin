@@ -12,13 +12,13 @@
 //
 // For a minimal example, see SimpleExample.kt.
 
-package com.synheart.core.example
+package ai.synheart.core.example
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.synheart.core.Synheart
-import com.synheart.core.config.SynheartConfig
+import ai.synheart.core.Synheart
+import ai.synheart.core.config.SynheartConfig
 import kotlinx.coroutines.launch
 
 class CanonicalExample : AppCompatActivity() {
@@ -34,7 +34,7 @@ class CanonicalExample : AppCompatActivity() {
                 Synheart.initialize(
                     context = this@CanonicalExample,
                     config = SynheartConfig(
-                        appId = "com.synheart.example",
+                        appId = "ai.synheart.example",
                         subjectId = "example_user_123",
                         allowUnsignedCapabilities = true
                     )
