@@ -136,7 +136,7 @@ class SyncModule(
 
         // 1. Try to fetch existing URK bundle from server
         try {
-            val conn = URL("$baseUrl/v1/sync/urk-bundle").openConnection() as HttpURLConnection
+            val conn = URL("$baseUrl/sync/v1/urk-bundle").openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.setRequestProperty("Authorization", "Bearer $token")
 
@@ -162,7 +162,7 @@ class SyncModule(
         val newUrk = URK.generate()
         try {
             val bundle = URK.encryptBundle(newUrk.bytes, secret, subject)
-            val conn = URL("$baseUrl/v1/sync/urk-bundle").openConnection() as HttpURLConnection
+            val conn = URL("$baseUrl/sync/v1/urk-bundle").openConnection() as HttpURLConnection
             conn.requestMethod = "PUT"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Authorization", "Bearer $token")

@@ -283,7 +283,7 @@ object Synheart {
         val auth = authModule
         if (auth != null && auth.isAuthenticated && auth.accessToken != null) {
             try {
-                val conn = java.net.URL("https://api.synheart.ai/v1/account/delete")
+                val conn = java.net.URL("https://api.synheart.ai/account/v1/delete")
                     .openConnection() as java.net.HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
@@ -308,7 +308,7 @@ object Synheart {
         val auth = authModule ?: return false
         if (!auth.isAuthenticated || auth.accessToken == null) return false
         return try {
-            val conn = java.net.URL("https://api.synheart.ai/v1/account/delete/cancel")
+            val conn = java.net.URL("https://api.synheart.ai/account/v1/delete/cancel")
                 .openConnection() as java.net.HttpURLConnection
             conn.requestMethod = "POST"
             conn.setRequestProperty("Authorization", "Bearer ${auth.accessToken}")

@@ -41,7 +41,7 @@ class HMACSigner(private val hmacSecret: String) {
      * Compute HMAC-SHA256 signature
      *
      * @param method HTTP method (e.g., "POST")
-     * @param path Request path (e.g., "/v1/ingest/hsi")
+     * @param path Request path (e.g., "/ingest/v1/hsi")
      * @param tenantId Tenant identifier
      * @param timestamp Unix timestamp (seconds)
      * @param nonce Time-windowed nonce

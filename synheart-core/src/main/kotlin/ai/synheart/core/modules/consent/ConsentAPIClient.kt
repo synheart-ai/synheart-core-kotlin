@@ -31,11 +31,11 @@ class ConsentAPIClient(
     /**
      * Fetch available consent profiles for this app.
      *
-     * GET /api/v1/apps/{app_id}/consent-profiles?active_only=true
+     * GET /consent/v1/apps/{app_id}/consent-profiles?active_only=true
      */
     fun getAvailableProfiles(activeOnly: Boolean = true): List<ConsentProfile> {
         try {
-            val url = "${baseUrl}/api/v1/apps/${appId}/consent-profiles?active_only=$activeOnly"
+            val url = "${baseUrl}/consent/v1/apps/${appId}/consent-profiles?active_only=$activeOnly"
 
             SynheartLogger.log("[ConsentAPI] Fetching profiles from: $url")
 
@@ -100,7 +100,7 @@ class ConsentAPIClient(
     /**
      * Issue SDK token after user consent.
      *
-     * POST /api/v1/sdk/consent-token
+     * POST /consent/v1/sdk/consent-token
      */
     fun issueToken(
         deviceId: String,
@@ -112,7 +112,7 @@ class ConsentAPIClient(
         userAgent: String? = null
     ): ConsentToken {
         try {
-            val url = "${baseUrl}/api/v1/sdk/consent-token"
+            val url = "${baseUrl}/consent/v1/sdk/consent-token"
 
             val bodyMap = buildMap {
                 put("app_id", appId)
@@ -189,13 +189,13 @@ class ConsentAPIClient(
     /**
      * Revoke consent (notify cloud service).
      *
-     * POST /api/v1/sdk/consent-revoke
+     * POST /consent/v1/sdk/consent-revoke
      *
      * This is best-effort -- errors are logged but not thrown.
      */
     fun revokeConsent(deviceId: String, profileId: String) {
         try {
-            val url = "${baseUrl}/api/v1/sdk/consent-revoke"
+            val url = "${baseUrl}/consent/v1/sdk/consent-revoke"
 
             val bodyJson = json.encodeToString(
                 kotlinx.serialization.json.JsonObject.serializer(),

@@ -94,7 +94,7 @@ interface DeviceSigner {
      *
      * @param appId Application identifier
      * @param method HTTP method (e.g., "POST")
-     * @param path Request path (e.g., "/v1/ingest/hsi")
+     * @param path Request path (e.g., "/ingest/v1/hsi")
      * @param bodyBytes Serialized request body
      * @return Header name-value pairs (e.g., X-App-ID, X-Device-ID, X-Synheart-Signature)
      */
