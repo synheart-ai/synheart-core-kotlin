@@ -57,8 +57,8 @@ class PlatformIngestModule(
 
         return _client.ingestSession(
             payload = payload,
-            hmacSecret = config.hmacSecret,
-            apiKey = config.apiKey
+            hmacSecret = config.hmacSecret ?: "",
+            apiKey = config.apiKey ?: ""
         )
     }
 
@@ -77,8 +77,8 @@ class PlatformIngestModule(
 
         return _client.ingestMetadata(
             payload = payload,
-            hmacSecret = config.hmacSecret,
-            apiKey = config.apiKey
+            hmacSecret = config.hmacSecret ?: "",
+            apiKey = config.apiKey ?: ""
         )
     }
 }

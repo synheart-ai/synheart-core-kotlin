@@ -19,10 +19,12 @@ data class PlatformIngestConfig(
     val baseUrl: String = ApiEndpoints.DEFAULT_PLATFORM_INGEST_BASE_URL,
 
     /// API key for authentication (X-API-Key header).
-    val apiKey: String,
+    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    val apiKey: String? = null,
 
     /// HMAC secret for request signing.
-    val hmacSecret: String,
+    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    val hmacSecret: String? = null,
 
     /// HTTP request timeout in milliseconds (default: 30 seconds).
     val timeoutMs: Long = 30_000,

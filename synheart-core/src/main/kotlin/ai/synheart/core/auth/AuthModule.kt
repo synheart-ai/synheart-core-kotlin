@@ -64,7 +64,7 @@ class AuthModule(
 
     /** Token-based auth — exchanges a provider token for Synheart credentials. */
     fun authenticate(provider: String, token: String): AuthResult {
-        val conn = URL("$baseUrl/v1/auth/exchange").openConnection() as HttpURLConnection
+        val conn = URL("$baseUrl/v1/exchange").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
         conn.doOutput = true
@@ -106,7 +106,7 @@ class AuthModule(
         val rt = tokenStorage.loadRefreshToken()
             ?: throw AuthError("No refresh token available")
 
-        val conn = URL("$baseUrl/v1/auth/refresh").openConnection() as HttpURLConnection
+        val conn = URL("$baseUrl/v1/refresh").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
         conn.doOutput = true

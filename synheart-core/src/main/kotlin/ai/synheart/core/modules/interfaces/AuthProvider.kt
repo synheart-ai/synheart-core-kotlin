@@ -17,7 +17,7 @@ interface AuthProvider {
      * Typical headers: `Authorization`, `X-Device-Signature`, etc.
      *
      * @param method HTTP method (e.g., "POST")
-     * @param path Request path (e.g., "/v1/ingest/hsi")
+     * @param path Request path (e.g., "/ingest/v1/hsi")
      * @param bodyBytes Serialized request body
      * @return Header name-value pairs to attach to the request
      * @throws Exception if signing fails (e.g., keystore unavailable)

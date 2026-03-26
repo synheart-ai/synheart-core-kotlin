@@ -44,7 +44,7 @@ class PlatformIngestClient(
     }
 
     /**
-     * POST a session payload to `/v1/platform/session/ingest`.
+     * POST a session payload to `/platform/v1/session/ingest`.
      */
     suspend fun ingestSession(
         payload: Map<String, Any?>,
@@ -62,7 +62,7 @@ class PlatformIngestClient(
     }
 
     /**
-     * POST a metadata payload to `/v1/platform/metadata/ingest`.
+     * POST a metadata payload to `/platform/v1/metadata/ingest`.
      */
     suspend fun ingestMetadata(
         payload: Map<String, Any?>,

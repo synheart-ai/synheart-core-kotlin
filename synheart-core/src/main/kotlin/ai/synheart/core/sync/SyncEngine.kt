@@ -67,7 +67,7 @@ class SyncEngine(
             envelopesArray.put(env.toJson())
         }
 
-        val conn = URL("$baseUrl/v1/sync/push").openConnection() as HttpURLConnection
+        val conn = URL("$baseUrl/sync/v1/push").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("Authorization", "Bearer $token")
@@ -93,7 +93,7 @@ class SyncEngine(
 
         while (true) {
             val urlStr = buildString {
-                append("$baseUrl/v1/sync/pull?subject_id=$subjectId&limit=100")
+                append("$baseUrl/sync/v1/pull?subject_id=$subjectId&limit=100")
                 currentCursor?.let { append("&cursor=$it") }
             }
 
