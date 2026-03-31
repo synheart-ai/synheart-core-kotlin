@@ -42,4 +42,9 @@ includeBuild('../synheart-session-kotlin') {
         substitute module('ai.synheart:session') using project(':')
     }
 }
+includeBuild('../synheart-auth-kotlin') {
+    dependencySubstitution {
+        substitute module('ai.synheart:synheart-auth') using project(':lib')
+    }
+}
 

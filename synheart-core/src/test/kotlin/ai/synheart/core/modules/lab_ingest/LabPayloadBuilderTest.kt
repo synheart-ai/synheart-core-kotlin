@@ -1,4 +1,4 @@
-package ai.synheart.core.modules.platform_ingest
+package ai.synheart.core.modules.lab_ingest
 
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.modules.behavior.BehaviorEvent
@@ -8,7 +8,7 @@ import ai.synheart.core.modules.wear.WearSample
 import org.junit.Assert.*
 import org.junit.Test
 
-class PlatformPayloadBuilderTest {
+class LabPayloadBuilderTest {
 
     // ---------------------------------------------------------------
     // Helper factories
@@ -31,7 +31,7 @@ class PlatformPayloadBuilderTest {
         previousSessionEndMs: Long? = null
     ): Map<String, Any?> {
         val startMs = 1_700_000_000_000L
-        return PlatformPayloadBuilder.buildSession(
+        return LabPayloadBuilder.buildSession(
             sessionId = "session-1",
             deviceId = "device-A",
             appId = "com.test.app",
@@ -89,7 +89,7 @@ class PlatformPayloadBuilderTest {
 
     @Test
     fun `buildMetadata produces correct top-level keys`() {
-        val result = PlatformPayloadBuilder.buildMetadata(
+        val result = LabPayloadBuilder.buildMetadata(
             config = defaultConfig(),
             deviceId = "dev-1",
             platform = "android",
@@ -105,7 +105,7 @@ class PlatformPayloadBuilderTest {
     @Test
     fun `buildMetadata uses config fields correctly`() {
         val cfg = defaultConfig()
-        val result = PlatformPayloadBuilder.buildMetadata(
+        val result = LabPayloadBuilder.buildMetadata(
             config = cfg,
             deviceId = "dev-1",
             platform = "android",
@@ -123,7 +123,7 @@ class PlatformPayloadBuilderTest {
     @Suppress("UNCHECKED_CAST")
     @Test
     fun `buildMetadata handles null userInfo gracefully`() {
-        val result = PlatformPayloadBuilder.buildMetadata(
+        val result = LabPayloadBuilder.buildMetadata(
             config = defaultConfig(),
             deviceId = "dev-1",
             platform = "android",
@@ -141,7 +141,7 @@ class PlatformPayloadBuilderTest {
     @Suppress("UNCHECKED_CAST")
     @Test
     fun `buildMetadata populates devices list`() {
-        val result = PlatformPayloadBuilder.buildMetadata(
+        val result = LabPayloadBuilder.buildMetadata(
             config = defaultConfig(),
             deviceId = "dev-1",
             platform = "ios",
@@ -167,7 +167,7 @@ class PlatformPayloadBuilderTest {
             "device_type" to "Tablet"
         )
 
-        val result = PlatformPayloadBuilder.buildMetadata(
+        val result = LabPayloadBuilder.buildMetadata(
             config = defaultConfig(),
             deviceId = "dev-1",
             platform = "android",
@@ -703,7 +703,7 @@ class PlatformPayloadBuilderTest {
     fun `session with cohortId includes it in metadata`() {
         val startMs = 1_700_000_000_000L
         @Suppress("UNCHECKED_CAST")
-        val session = PlatformPayloadBuilder.buildSession(
+        val session = LabPayloadBuilder.buildSession(
             sessionId = "session-1",
             deviceId = "device-A",
             appId = "com.test.app",

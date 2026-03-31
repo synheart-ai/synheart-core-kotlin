@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import ai.synheart.core.modules.interfaces.ConsentSnapshot
+import ai.synheart.core.modules.interfaces.ConsentTier
 import org.json.JSONObject
 import java.time.Instant
 
@@ -35,6 +36,13 @@ class ConsentStorage(context: Context) {
             put("focusEstimation", consent.focusEstimation)
             put("emotionEstimation", consent.emotionEstimation)
             put("syni", consent.syni)
+            put("vendorSync", consent.vendorSync)
+            put("tier", consent.tier.name)
+            if (consent.channels != null) {
+                put("channels", kotlinx.serialization.json.Json.encodeToString(
+                    ConsentChannels.serializer(), consent.channels
+                ))
+            }
             put("timestamp", consent.timestamp.toString())
             put("version", consent.version)
         }
@@ -50,6 +58,17 @@ class ConsentStorage(context: Context) {
             val jsonString = sharedPreferences.getString(STORAGE_KEY, null) ?: return null
             val json = JSONObject(jsonString)
 
+            val tierStr = json.optString("tier", "LOCAL")
+            val tier = try { ConsentTier.valueOf(tierStr) } catch (_: Exception) { ConsentTier.LOCAL }
+
+            val channels: ConsentChannels? = if (json.has("channels")) {
+                try {
+                    val channelsJson = json.getString("channels")
+                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                        .decodeFromString(ConsentChannels.serializer(), channelsJson)
+                } catch (_: Exception) { null }
+            } else null
+
             ConsentSnapshot(
                 biosignals = json.getBoolean("biosignals"),
                 phoneContext = when {
@@ -62,6 +81,9 @@ class ConsentStorage(context: Context) {
                 focusEstimation = json.optBoolean("focusEstimation", false),
                 emotionEstimation = json.optBoolean("emotionEstimation", false),
                 syni = json.getBoolean("syni"),
+                vendorSync = json.optBoolean("vendorSync", false),
+                tier = tier,
+                channels = channels,
                 timestamp = Instant.parse(json.getString("timestamp")),
                 version = json.optString("version", "1.0.0")
             )

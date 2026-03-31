@@ -1,7 +1,7 @@
 package ai.synheart.core.sync
 
 import android.content.Context
-import ai.synheart.core.auth.AuthModule
+import ai.synheart.core.modules.consent.ConsentModule
 import ai.synheart.core.crypto.SMK
 import ai.synheart.core.crypto.URK
 import ai.synheart.core.storage.StorageManager
@@ -10,35 +10,52 @@ import java.net.HttpURLConnection
 import java.net.URL
 import org.json.JSONObject
 
-/** High-level sync orchestrator (RFC-CORE-0005). */
+/**
+ * High-level sync orchestrator (RFC-CORE-0005).
+ *
+ * Uses ConsentModule for access tokens (scoped JWT from consent-service).
+ * session_secret and subjectId are provided directly by the Synheart entry point.
+ */
 class SyncModule(
-    private val auth: AuthModule,
+    private val consent: ConsentModule,
     private val storage: StorageManager,
     private val smk: SMK?,
     private val context: Context,
-    baseUrl: String
+    baseUrl: String,
+    private val subjectId: String? = null,
+    private val sessionSecret: String? = null
 ) {
     private val baseUrl: String = baseUrl
     private val engine = SyncEngine(storage, baseUrl)
     private var urk: URK? = null
     var enabled: Boolean = false
         private set
+    var syncReady: Boolean = false
+        private set
+
+    /** Get the current access token from ConsentModule. */
+    private val accessToken: String?
+        get() = consent.getCurrentToken()?.token
+
+    /** Check if we have a valid consent token. */
+    private val hasValidToken: Boolean
+        get() = consent.getCurrentToken() != null
 
     /** Enable or disable sync. */
     fun setSyncEnabled(enabled: Boolean) {
         this.enabled = enabled
         storage.setSyncState("sync_enabled", if (enabled) "true" else "false")
 
-        if (enabled && urk == null && auth.isAuthenticated) {
+        if (enabled && urk == null && hasValidToken) {
             provisionURK()
         }
     }
 
     /** Execute a sync cycle (push + pull). */
     fun syncNow(): SyncResult {
-        if (!enabled || !auth.isAuthenticated) return SyncResult()
+        if (!enabled || !hasValidToken) return SyncResult()
 
-        engine.accessToken = auth.accessToken
+        engine.accessToken = accessToken
 
         if (urk == null) {
             urk = URK.unwrap(context)
@@ -65,8 +82,8 @@ class SyncModule(
                     e.message?.contains("auth", ignoreCase = true) == true
                 if (isAuthError && !authRefreshed) {
                     try {
-                        auth.refreshToken()
-                        engine.accessToken = auth.accessToken
+                        kotlinx.coroutines.runBlocking { consent.refreshTokenIfNeeded() }
+                        engine.accessToken = accessToken
                         authRefreshed = true
                     } catch (_: Exception) {}
                 }
@@ -86,7 +103,7 @@ class SyncModule(
                 pulled = engine.pull(
                     urk = currentUrk.bytes,
                     smk = currentSmk,
-                    subjectId = auth.subjectId ?: "",
+                    subjectId = subjectId ?: "",
                     cursor = cursor
                 )
                 break
@@ -95,8 +112,8 @@ class SyncModule(
                     e.message?.contains("auth", ignoreCase = true) == true
                 if (isAuthError && !authRefreshed) {
                     try {
-                        auth.refreshToken()
-                        engine.accessToken = auth.accessToken
+                        kotlinx.coroutines.runBlocking { consent.refreshTokenIfNeeded() }
+                        engine.accessToken = accessToken
                         authRefreshed = true
                     } catch (_: Exception) {}
                 }
@@ -130,9 +147,9 @@ class SyncModule(
     }
 
     private fun provisionURK() {
-        val secret = auth.sessionSecret ?: return
-        val subject = auth.subjectId ?: return
-        val token = auth.accessToken ?: return
+        val secret = sessionSecret ?: return
+        val subject = subjectId ?: return
+        val token = accessToken ?: return
 
         // 1. Try to fetch existing URK bundle from server
         try {
@@ -151,7 +168,7 @@ class SyncModule(
                 val restored = URK.decryptBundle(bundle, secret, subject)
                 restored.wrapAndStore(context)
                 this.urk = restored
-                auth.markSyncReady()
+                syncReady = true
                 return
             }
         } catch (_: Exception) {
@@ -178,7 +195,7 @@ class SyncModule(
 
         newUrk.wrapAndStore(context)
         this.urk = newUrk
-        auth.markSyncReady()
+        syncReady = true
     }
 
     fun dispose() {

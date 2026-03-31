@@ -257,7 +257,7 @@ val runtimeModule = RuntimeModule(
 )
 ```
 
-## Platform Ingestion
+## Lab Ingestion
 
 Send structured session and metadata payloads to the Synheart platform API.
 
@@ -268,7 +268,7 @@ val config = SynheartConfig(
     appId = "your_app_id",
     apiKey = "your_api_key",
     subjectId = "sub_user_123",
-    platformIngestConfig = PlatformIngestConfig(
+    labIngestConfig = LabIngestConfig(
         apiKey = "your_platform_api_key",
         autoIngest = true
     )
@@ -288,7 +288,7 @@ synheart.ingestMetadata()
 ### Standalone Payload Builder
 
 ```kotlin
-val payload = PlatformPayloadBuilder.buildSession(
+val payload = LabPayloadBuilder.buildSession(
     sessionId = "sess_123",
     // ... other params
 )
@@ -551,7 +551,7 @@ val config = SynheartConfig(
     appId = "your_app_id",
     subjectId = "user_123",
     allowUnsignedCapabilities = true,
-    platformIngestConfig = PlatformIngestConfig(
+    labIngestConfig = LabIngestConfig(
         baseUrl = "http://10.0.2.2:8083",  // Android emulator → host localhost
         apiKey = "mock-dev-api-key-2026",
     )

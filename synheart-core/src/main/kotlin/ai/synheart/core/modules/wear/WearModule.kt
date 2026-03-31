@@ -1,5 +1,6 @@
 package ai.synheart.core.modules.wear
 
+import ai.synheart.core.models.CanonicalWearableEvent
 import ai.synheart.core.modules.base.BaseSynheartModule
 import ai.synheart.core.modules.interfaces.CapabilityProvider
 import ai.synheart.core.modules.interfaces.ConsentProvider
@@ -7,7 +8,10 @@ import ai.synheart.core.modules.interfaces.RawWearDataProvider
 import ai.synheart.core.modules.interfaces.WindowType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +34,15 @@ class WearModule(
     private val cache = WearCache()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
+
+    // Wearable event processor (set externally after storage/runtime are ready)
+    private var eventProcessor: WearableEventProcessor? = null
+
+    private val _vendorSyncState = MutableStateFlow(false)
+
+    /** Emits `true`/`false` when vendor sync consent changes.
+     *  The wear SDK (synheart_wear) subscribes to this to start/stop RAMEN. */
+    val vendorSyncState: StateFlow<Boolean> = _vendorSyncState.asStateFlow()
 
     private val _sampleFlow = MutableSharedFlow<WearSample>()
 
@@ -56,6 +69,13 @@ class WearModule(
                 }
             }
         }
+
+        // Initialize vendor sync state from current consent
+        val initialVendorSync = consent.current().vendorSync
+        _vendorSyncState.value = initialVendorSync
+        if (initialVendorSync) {
+            SynheartLogger.log("[WearModule] Vendor sync enabled at init")
+        }
     }
 
     override suspend fun onStart() {
@@ -78,7 +98,62 @@ class WearModule(
             }
         }
 
+        // Track vendor sync consent changes
+        val consentJob = consent.observe()
+            .onEach { snapshot ->
+                val vendorSyncNow = snapshot.vendorSync
+                if (vendorSyncNow != _vendorSyncState.value) {
+                    _vendorSyncState.value = vendorSyncNow
+                    SynheartLogger.log(
+                        "[WearModule] Vendor sync ${if (vendorSyncNow) "enabled" else "disabled"}"
+                    )
+                }
+            }
+            .launchIn(scope)
+        jobSet.add(consentJob)
+
         SynheartLogger.log("[WearModule] Started ${jobSet.size} wear sources")
+    }
+
+    /**
+     * Attach an event processor for RAMEN vendor events.
+     *
+     * Called by [Synheart] after storage and runtime are initialized,
+     * so the processor has access to StorageManager and RuntimeBridge.
+     */
+    fun setEventProcessor(processor: WearableEventProcessor) {
+        this.eventProcessor = processor
+        SynheartLogger.log("[WearModule] Event processor attached")
+    }
+
+    /**
+     * Process a raw RAMEN vendor event through the attached processor.
+     *
+     * @return the canonical event if processed, null if skipped or no processor.
+     */
+    fun processVendorEvent(
+        provider: String,
+        eventType: String,
+        payload: Map<String, Any?>,
+        eventId: String,
+        seq: Int
+    ): CanonicalWearableEvent? {
+        if (!_vendorSyncState.value) {
+            SynheartLogger.log("[WearModule] Vendor sync consent not granted — dropping $provider/$eventType")
+            return null
+        }
+        val processor = eventProcessor
+        if (processor == null) {
+            SynheartLogger.log("[WearModule] No event processor attached -- ignoring vendor event")
+            return null
+        }
+        return processor.processRamenEvent(
+            provider = provider,
+            eventType = eventType,
+            payload = payload,
+            eventId = eventId,
+            seq = seq
+        )
     }
 
     override suspend fun onStop() {

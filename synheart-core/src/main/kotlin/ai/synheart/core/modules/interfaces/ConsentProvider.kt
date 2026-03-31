@@ -1,7 +1,20 @@
 package ai.synheart.core.modules.interfaces
 
+import ai.synheart.core.modules.consent.ConsentChannels
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
+
+/// Consent tier level
+enum class ConsentTier {
+    /// Local-only processing, no cloud upload
+    LOCAL,
+
+    /// Cloud upload enabled
+    CLOUD,
+
+    /// Research-grade data sharing
+    RESEARCH
+}
 
 /// Types of consent
 enum class ConsentType {
@@ -24,7 +37,10 @@ enum class ConsentType {
     EMOTION_ESTIMATION,
 
     /// Consent for Syni personalization
-    SYNI
+    SYNI,
+
+    /// Consent for vendor-side wearable sync (RAMEN connection)
+    VENDOR_SYNC
 }
 
 /// Snapshot of user consent at a point in time
@@ -50,6 +66,15 @@ data class ConsentSnapshot(
     /// Consent for Syni personalization
     val syni: Boolean,
 
+    /// Consent for vendor-side wearable sync (RAMEN connection)
+    val vendorSync: Boolean = false,
+
+    /// Consent tier level
+    val tier: ConsentTier = ConsentTier.LOCAL,
+
+    /// Granular channel-level consent (optional; falls back to module booleans when null)
+    val channels: ConsentChannels? = null,
+
     /// Timestamp when this consent was given
     val timestamp: Instant = Instant.now(),
 
@@ -66,6 +91,64 @@ data class ConsentSnapshot(
             ConsentType.FOCUS_ESTIMATION -> focusEstimation
             ConsentType.EMOTION_ESTIMATION -> emotionEstimation
             ConsentType.SYNI -> syni
+            ConsentType.VENDOR_SYNC -> vendorSync
+        }
+    }
+
+    /// Check if a specific granular channel is allowed.
+    /// If [channels] is non-null, looks up the channel in the granular map.
+    /// Otherwise falls back to the module-level boolean based on channel prefix.
+    /// Channel format: "biosignals.vitals", "behavior.digital_activity", etc.
+    fun allowsChannel(channel: String): Boolean {
+        // If granular channels are present, check them directly
+        if (channels != null) {
+            val prefix = channel.substringBefore(".")
+            val sub = channel.substringAfter(".", "")
+            return when (prefix) {
+                "biosignals" -> when (sub) {
+                    "vitals" -> channels.biosignals.vitals
+                    "sleep" -> channels.biosignals.sleep
+                    "cardio_advanced" -> channels.biosignals.cardioAdvanced
+                    "neuromuscular" -> channels.biosignals.neuromuscular
+                    "wearable_motion" -> channels.biosignals.wearableMotion
+                    else -> false
+                }
+                "phone_context" -> when (sub) {
+                    "device_motion" -> channels.phoneContext.deviceMotion
+                    "device_context" -> channels.phoneContext.deviceContext
+                    "system_state" -> channels.phoneContext.systemState
+                    else -> false
+                }
+                "behavior" -> when (sub) {
+                    "digital_activity" -> channels.behavior.digitalActivity
+                    "notification_patterns" -> channels.behavior.notificationPatterns
+                    "app_context" -> channels.behavior.appContext
+                    else -> false
+                }
+                "interpretation" -> when (sub) {
+                    "focus_estimation" -> channels.interpretation.focusEstimation
+                    "emotion_estimation" -> channels.interpretation.emotionEstimation
+                    else -> false
+                }
+                else -> false
+            }
+        }
+
+        // Fallback to module-level booleans based on channel prefix
+        val prefix = channel.substringBefore(".")
+        return when (prefix) {
+            "biosignals" -> biosignals
+            "phone_context" -> phoneContext
+            "behavior" -> behavior
+            "interpretation" -> {
+                val sub = channel.substringAfter(".", "")
+                when (sub) {
+                    "focus_estimation" -> focusEstimation
+                    "emotion_estimation" -> emotionEstimation
+                    else -> false
+                }
+            }
+            else -> false
         }
     }
 
@@ -78,6 +161,9 @@ data class ConsentSnapshot(
         focusEstimation: Boolean? = null,
         emotionEstimation: Boolean? = null,
         syni: Boolean? = null,
+        vendorSync: Boolean? = null,
+        tier: ConsentTier? = null,
+        channels: ConsentChannels? = this.channels,
         timestamp: Instant? = null,
         version: String? = null
     ): ConsentSnapshot {
@@ -89,6 +175,9 @@ data class ConsentSnapshot(
             focusEstimation = focusEstimation ?: this.focusEstimation,
             emotionEstimation = emotionEstimation ?: this.emotionEstimation,
             syni = syni ?: this.syni,
+            vendorSync = vendorSync ?: this.vendorSync,
+            tier = tier ?: this.tier,
+            channels = channels,
             timestamp = timestamp ?: this.timestamp,
             version = version ?: this.version
         )
@@ -104,7 +193,8 @@ data class ConsentSnapshot(
                 cloudUpload = false,
                 focusEstimation = false,
                 emotionEstimation = false,
-                syni = false
+                syni = false,
+                vendorSync = false
             )
         }
 
@@ -117,7 +207,8 @@ data class ConsentSnapshot(
                 cloudUpload = true,
                 focusEstimation = true,
                 emotionEstimation = true,
-                syni = true
+                syni = true,
+                vendorSync = true
             )
         }
     }
