@@ -2,6 +2,7 @@ package ai.synheart.core.modules.consent
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Consent profile from consent service.
@@ -41,6 +42,7 @@ data class ConsentChannels(
     val biosignals: BiosignalsConsent = BiosignalsConsent(),
 
     /** Phone context consent configuration */
+    @SerialName("phone_context")
     val phoneContext: PhoneContextConsent = PhoneContextConsent(),
 
     /** Behavior consent configuration */
@@ -59,7 +61,18 @@ data class BiosignalsConsent(
     val vitals: Boolean = false,
 
     /** Consent for sleep data */
-    val sleep: Boolean = false
+    val sleep: Boolean = false,
+
+    /** Consent for advanced cardiac metrics (ECG morphology, arrhythmia flags) */
+    @SerialName("cardio_advanced")
+    val cardioAdvanced: Boolean = false,
+
+    /** Consent for neuromuscular data (EMG, grip force) */
+    val neuromuscular: Boolean = false,
+
+    /** Consent for wearable motion data (accelerometer, gyroscope) */
+    @SerialName("wearable_motion")
+    val wearableMotion: Boolean = false
 )
 
 /**
@@ -67,21 +80,54 @@ data class BiosignalsConsent(
  */
 @Serializable
 data class PhoneContextConsent(
-    /** Consent for motion data */
-    val motion: Boolean = false,
+    /** Consent for device motion (accelerometer, gyroscope) */
+    @SerialName("device_motion")
+    val deviceMotion: Boolean = false,
 
-    /** Consent for screen state */
-    val screenState: Boolean = false
-)
+    /** Consent for device context (locale, timezone, display metrics) */
+    @SerialName("device_context")
+    val deviceContext: Boolean = false,
+
+    /** Consent for system state (screen on/off, charging, connectivity) */
+    @SerialName("system_state")
+    val systemState: Boolean = false
+) {
+    /** Backward-compatible alias for [deviceMotion]. */
+    @Suppress("unused")
+    @Deprecated("Use deviceMotion instead", ReplaceWith("deviceMotion"))
+    @Transient
+    val motion: Boolean get() = deviceMotion
+
+    /** Backward-compatible alias for [systemState]. */
+    @Suppress("unused")
+    @Deprecated("Use systemState instead", ReplaceWith("systemState"))
+    @Transient
+    val screenState: Boolean get() = systemState
+}
 
 /**
  * Behavior consent configuration.
  */
 @Serializable
 data class BehaviorConsent(
-    /** Consent for behavior tracking */
-    val enabled: Boolean = false
-)
+    /** Consent for digital activity tracking (typing cadence, app usage) */
+    @SerialName("digital_activity")
+    val digitalActivity: Boolean = false,
+
+    /** Consent for notification pattern analysis */
+    @SerialName("notification_patterns")
+    val notificationPatterns: Boolean = false,
+
+    /** Consent for app context collection (foreground app category) */
+    @SerialName("app_context")
+    val appContext: Boolean = false
+) {
+    /** Backward-compatible aggregate flag: true if any behavior channel is enabled. */
+    @Suppress("unused")
+    @Deprecated("Check individual channels instead", ReplaceWith("digitalActivity || notificationPatterns || appContext"))
+    @Transient
+    val enabled: Boolean get() = digitalActivity || notificationPatterns || appContext
+}
 
 /**
  * Interpretation consent configuration.

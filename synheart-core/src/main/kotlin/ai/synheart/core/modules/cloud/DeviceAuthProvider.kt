@@ -8,7 +8,7 @@ import ai.synheart.core.modules.interfaces.AuthProvider
  *
  * Wraps a device auth implementation to produce the signed header set
  * (X-App-ID, X-Device-ID, X-Synheart-Signature, etc.) for every
- * outgoing request to cloud and platform ingest services.
+ * outgoing request to cloud and lab ingest services.
  *
  * This is the Kotlin equivalent of the Dart `DeviceAuthProvider` which
  * wraps `SynheartAuth.signRequest`.

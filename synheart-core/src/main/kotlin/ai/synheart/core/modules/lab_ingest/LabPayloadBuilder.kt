@@ -1,4 +1,4 @@
-package ai.synheart.core.modules.platform_ingest
+package ai.synheart.core.modules.lab_ingest
 
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.modules.behavior.BehaviorEvent
@@ -13,12 +13,12 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * Builds platform ingestion payloads from SDK internal data.
+ * Builds lab ingestion payloads from SDK internal data.
  *
  * Aggregates raw wear samples, behavior events, and phone context
- * into the structured format expected by the platform ingestion API.
+ * into the structured format expected by the lab ingestion API.
  */
-object PlatformPayloadBuilder {
+object LabPayloadBuilder {
 
     private val isoFormatter = DateTimeFormatter.ISO_INSTANT
 

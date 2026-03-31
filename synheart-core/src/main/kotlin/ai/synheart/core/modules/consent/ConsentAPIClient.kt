@@ -1,6 +1,7 @@
 package ai.synheart.core.modules.consent
 
 import ai.synheart.core.SynheartLogger
+import ai.synheart.core.modules.interfaces.ConsentTier
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -14,11 +15,19 @@ import java.util.concurrent.TimeUnit
 /**
  * REST client for consent service API.
  */
+/**
+ * Callback type for device request signing.
+ * Returns a map of signed headers (X-Synheart-Signature, etc.)
+ */
+typealias DeviceRequestSigner = (method: String, path: String, bodyBytes: ByteArray) -> Map<String, String>
+
 class ConsentAPIClient(
     private val baseUrl: String,
     private val appId: String,
     private val appApiKey: String,
-    httpClient: OkHttpClient? = null
+    httpClient: OkHttpClient? = null,
+    /** Optional device signer for adding X-Synheart-* headers to consent requests. */
+    var deviceSigner: DeviceRequestSigner? = null
 ) {
     private val client = httpClient ?: OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -109,37 +118,58 @@ class ConsentAPIClient(
         userId: String? = null,
         region: String? = null,
         ipAddress: String? = null,
-        userAgent: String? = null
+        userAgent: String? = null,
+        grantedChannels: ConsentChannels? = null,
+        tier: ConsentTier? = null,
+        cloud: Boolean? = null,
+        vendorSync: Boolean? = null,
+        research: Boolean = false
     ): ConsentToken {
         try {
             val url = "${baseUrl}${ApiEndpoints.CONSENT_TOKEN_PATH}"
 
-            val bodyMap = buildMap {
-                put("app_id", appId)
-                put("device_id", deviceId)
-                put("platform", platform)
-                put("consent_profile_id", consentProfileId)
-                userId?.let { put("user_id", it) }
-                region?.let { put("region", it) }
-                ipAddress?.let { put("ip_address", it) }
-                userAgent?.let { put("user_agent", it) }
-            }
-
             val bodyJson = json.encodeToString(
                 kotlinx.serialization.json.JsonObject.serializer(),
                 kotlinx.serialization.json.buildJsonObject {
-                    bodyMap.forEach { (k, v) ->
-                        put(k, kotlinx.serialization.json.JsonPrimitive(v))
+                    put("app_id", kotlinx.serialization.json.JsonPrimitive(appId))
+                    put("device_id", kotlinx.serialization.json.JsonPrimitive(deviceId))
+                    put("platform", kotlinx.serialization.json.JsonPrimitive(platform))
+                    put("consent_profile_id", kotlinx.serialization.json.JsonPrimitive(consentProfileId))
+                    userId?.let { put("user_id", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    region?.let { put("region", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    ipAddress?.let { put("ip_address", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    userAgent?.let { put("user_agent", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    grantedChannels?.let {
+                        put("granted_channels", json.encodeToJsonElement(ConsentChannels.serializer(), it))
+                    }
+                    tier?.let { put("consent_tier", kotlinx.serialization.json.JsonPrimitive(it.name)) }
+                    cloud?.let { put("cloud", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    vendorSync?.let { put("vendor_sync", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    if (research) {
+                        put("research", kotlinx.serialization.json.JsonPrimitive(true))
                     }
                 }
             )
 
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(url)
                 .post(bodyJson.toRequestBody("application/json".toMediaType()))
                 .header("Authorization", "Bearer $appApiKey")
                 .header("Content-Type", "application/json")
-                .build()
+
+            // Sign the request with device identity if available
+            deviceSigner?.let { signer ->
+                val deviceHeaders = signer(
+                    "POST",
+                    ApiEndpoints.CONSENT_TOKEN_PATH,
+                    bodyJson.toByteArray(Charsets.UTF_8)
+                )
+                for ((key, value) in deviceHeaders) {
+                    requestBuilder.header(key, value)
+                }
+            }
+
+            val request = requestBuilder.build()
 
             val response = client.newCall(request).execute()
 

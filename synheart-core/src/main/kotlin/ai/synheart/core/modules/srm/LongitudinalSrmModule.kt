@@ -23,7 +23,8 @@ class LongitudinalSrmModule {
         private val EVENT_DIMENSION_MAP: Map<String, List<DimensionExtractor>> = mapOf(
             "sleep.summary.recorded" to listOf(
                 DimensionExtractor("sleep_need", "duration_seconds"),
-                DimensionExtractor("sleep_regularity", "midpoint_time")
+                DimensionExtractor("sleep_regularity", "midpoint_time"),
+                DimensionExtractor("sleep_efficiency", "efficiency_pct")
             ),
             "hrv.recorded" to listOf(
                 DimensionExtractor("hrv_rmssd", "rmssd_ms")
@@ -32,7 +33,15 @@ class LongitudinalSrmModule {
                 DimensionExtractor("resting_hr", "bpm")
             ),
             "recovery.summary.recorded" to listOf(
-                DimensionExtractor("recovery_score", "score")
+                DimensionExtractor("recovery_score", "score"),
+                DimensionExtractor("hrv_rmssd", "hrv_rmssd_ms"),
+                DimensionExtractor("resting_hr", "resting_hr_bpm")
+            ),
+            "workout.summary.recorded" to listOf(
+                DimensionExtractor("strain_score", "strain_score")
+            ),
+            "stress.summary.recorded" to listOf(
+                DimensionExtractor("stress_score", "score")
             )
         )
 

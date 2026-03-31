@@ -34,7 +34,7 @@ data class SynheartConfig(
     val category: String = "",
     /** Developer name or organization. */
     val developer: String = "",
-    /** Additional app-level metadata for platform ingestion. */
+    /** Additional app-level metadata for lab ingestion. */
     val additionalAppMetadata: Map<String, Any> = emptyMap(),
     val deviceId: String = "",
     val platform: String = "android",
@@ -46,7 +46,7 @@ data class SynheartConfig(
 
     val cloudConfig: CloudConfig? = null,
     val consentConfig: ConsentConfig? = null,
-    val platformIngestConfig: PlatformIngestConfig? = null,
+    val labIngestConfig: LabIngestConfig? = null,
     /** Server-signed capability token for feature gating */
     val capabilityToken: ai.synheart.core.modules.capabilities.CapabilityToken? = null,
     /** HMAC secret for verifying the capability token signature */

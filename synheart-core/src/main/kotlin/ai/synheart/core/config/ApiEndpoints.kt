@@ -13,10 +13,10 @@ object ApiEndpoints {
     // ── Cloud / HSI Ingest ──────────────────────────────────────────
     const val INGEST_PATH = "/v1/hsi/ingest"
 
-    // ── Platform Ingest (lab/raw data) ──────────────────────────────
-    const val DEFAULT_PLATFORM_INGEST_BASE_URL = "https://api.synheart.ai"
-    const val PLATFORM_SESSION_INGEST_PATH = "/v1/platform/session/ingest"
-    const val PLATFORM_METADATA_INGEST_PATH = "/v1/platform/metadata/ingest"
+    // ── Lab Ingest (lab/raw data) ──────────────────────────────
+    const val DEFAULT_LAB_INGEST_BASE_URL = "https://api.synheart.ai"
+    const val LAB_SESSION_INGEST_PATH = "/v1/lab/session/ingest"
+    const val LAB_METADATA_INGEST_PATH = "/v1/lab/metadata/ingest"
 
     // ── Consent Service ─────────────────────────────────────────────
     const val DEFAULT_CONSENT_BASE_URL = "https://api.synheart.ai"

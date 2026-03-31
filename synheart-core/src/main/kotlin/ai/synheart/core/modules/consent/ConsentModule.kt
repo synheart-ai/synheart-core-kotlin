@@ -6,6 +6,7 @@ import ai.synheart.core.config.ConsentConfig
 import ai.synheart.core.modules.base.BaseSynheartModule
 import ai.synheart.core.modules.interfaces.ConsentProvider
 import ai.synheart.core.modules.interfaces.ConsentSnapshot
+import ai.synheart.core.modules.interfaces.ConsentTier
 import ai.synheart.core.modules.interfaces.ConsentType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,15 @@ class ConsentModule(
                 appApiKey = consentConfig.appApiKey!!
             )
         }
+    }
+
+    /**
+     * Set the device request signer on the internal ConsentAPIClient.
+     * Called by Synheart entry point once device auth is initialized,
+     * so that all consent-token requests are signed with device identity.
+     */
+    fun setDeviceSigner(signer: DeviceRequestSigner) {
+        apiClient?.deviceSigner = signer
     }
 
     // MARK: - ConsentProvider
@@ -252,7 +262,12 @@ class ConsentModule(
     suspend fun requestConsentByProfileId(
         profileId: String,
         ipAddress: String? = null,
-        userAgent: String? = null
+        userAgent: String? = null,
+        grantedChannels: ConsentChannels? = null,
+        tier: ConsentTier? = null,
+        cloud: Boolean? = null,
+        vendorSync: Boolean? = null,
+        research: Boolean = false
     ): ConsentToken {
         val client = apiClient ?: error(
             "Consent service not configured. Provide ConsentConfig with appId and appApiKey."
@@ -268,7 +283,12 @@ class ConsentModule(
             userId = config.userId,
             region = config.region,
             ipAddress = ipAddress,
-            userAgent = userAgent
+            userAgent = userAgent,
+            grantedChannels = grantedChannels,
+            tier = tier,
+            cloud = cloud,
+            vendorSync = vendorSync,
+            research = research
         )
 
         tokenStorage?.saveToken(token)
@@ -398,14 +418,22 @@ class ConsentModule(
 
     /** Update local consent snapshot from profile */
     private suspend fun updateConsentFromProfile(profile: ConsentProfile) {
+        val profileTier = when {
+            profile.cloudEnabled -> ConsentTier.CLOUD
+            else -> ConsentTier.LOCAL
+        }
+
+        @Suppress("DEPRECATION")
         val snapshot = ConsentSnapshot(
             biosignals = profile.channels.biosignals.vitals || profile.channels.biosignals.sleep,
             behavior = profile.channels.behavior.enabled,
             phoneContext = profile.channels.phoneContext.motion || profile.channels.phoneContext.screenState,
             cloudUpload = profile.cloudEnabled,
             syni = false,
-            focusEstimation = false,
-            emotionEstimation = false,
+            focusEstimation = profile.channels.interpretation.focusEstimation,
+            emotionEstimation = profile.channels.interpretation.emotionEstimation,
+            tier = profileTier,
+            channels = profile.channels,
             timestamp = Instant.now()
         )
         updateConsent(snapshot)
@@ -504,6 +532,7 @@ class ConsentModule(
             Triple("focusEstimation", oldConsent.focusEstimation, newConsent.focusEstimation),
             Triple("emotionEstimation", oldConsent.emotionEstimation, newConsent.emotionEstimation),
             Triple("cloudUpload", oldConsent.cloudUpload, newConsent.cloudUpload),
+            Triple("vendorSync", oldConsent.vendorSync, newConsent.vendorSync),
             Triple("syni", oldConsent.syni, newConsent.syni),
         )
         for ((name, oldVal, newVal) in fields) {

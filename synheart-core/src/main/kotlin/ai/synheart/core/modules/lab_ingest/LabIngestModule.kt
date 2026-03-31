@@ -1,29 +1,29 @@
-package ai.synheart.core.modules.platform_ingest
+package ai.synheart.core.modules.lab_ingest
 
 import ai.synheart.core.SynheartLogger
-import ai.synheart.core.config.PlatformIngestConfig
+import ai.synheart.core.config.LabIngestConfig
 import ai.synheart.core.modules.base.BaseSynheartModule
 import ai.synheart.core.modules.consent.ConsentModule
 
 /**
  * Module for custom platform session and metadata ingestion.
  *
- * Wraps [PlatformIngestClient] with consent gating via [ConsentModule].
+ * Wraps [LabIngestClient] with consent gating via [ConsentModule].
  * Uploads are on-demand (not streaming), so [onStart]/[onStop] are no-ops.
  */
-class PlatformIngestModule(
+class LabIngestModule(
     private val consentModule: ConsentModule,
-    private val config: PlatformIngestConfig
-) : BaseSynheartModule("platform_ingest") {
+    private val config: LabIngestConfig
+) : BaseSynheartModule("lab_ingest") {
 
-    private lateinit var _client: PlatformIngestClient
+    private lateinit var _client: LabIngestClient
 
     /** The underlying client — exposed for standalone/background usage. */
-    val client: PlatformIngestClient
+    val client: LabIngestClient
         get() = _client
 
     override suspend fun onInitialize() {
-        _client = PlatformIngestClient(
+        _client = LabIngestClient(
             baseUrl = config.baseUrl,
             timeoutMs = config.timeoutMs,
             maxRetries = config.maxRetries
@@ -45,10 +45,10 @@ class PlatformIngestModule(
     /**
      * Ingest a session payload. Requires `behavior` consent.
      */
-    suspend fun ingestSession(payload: Map<String, Any?>): PlatformIngestResponse {
+    suspend fun ingestSession(payload: Map<String, Any?>): LabIngestResponse {
         val consent = consentModule.current()
         if (!consent.behavior) {
-            return PlatformIngestResponse(
+            return LabIngestResponse(
                 success = false,
                 statusCode = 0,
                 errorMessage = "Behavior consent not granted"
@@ -65,10 +65,10 @@ class PlatformIngestModule(
     /**
      * Ingest a metadata payload. Requires `biosignals` consent.
      */
-    suspend fun ingestMetadata(payload: Map<String, Any?>): PlatformIngestResponse {
+    suspend fun ingestMetadata(payload: Map<String, Any?>): LabIngestResponse {
         val consent = consentModule.current()
         if (!consent.biosignals) {
-            return PlatformIngestResponse(
+            return LabIngestResponse(
                 success = false,
                 statusCode = 0,
                 errorMessage = "Biosignals consent not granted"

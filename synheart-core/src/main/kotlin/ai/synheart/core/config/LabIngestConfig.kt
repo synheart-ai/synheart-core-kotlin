@@ -1,22 +1,22 @@
 package ai.synheart.core.config
 
 /**
- * Configuration for the Platform Ingest module.
+ * Configuration for the Lab Ingest module.
  *
  * Used to send custom session and metadata payloads to the
- * Synheart platform ingestion service.
+ * Synheart lab ingestion service.
  *
  * Example:
  * ```kotlin
- * val platformIngestConfig = PlatformIngestConfig(
+ * val labIngestConfig = LabIngestConfig(
  *     apiKey = "synheart_sk_live_...",
  *     hmacSecret = "synheart_whsec_..."
  * )
  * ```
  */
-data class PlatformIngestConfig(
-    /// Base URL for the platform ingestion service.
-    val baseUrl: String = ApiEndpoints.DEFAULT_PLATFORM_INGEST_BASE_URL,
+data class LabIngestConfig(
+    /// Base URL for the lab ingestion service.
+    val baseUrl: String = ApiEndpoints.DEFAULT_LAB_INGEST_BASE_URL,
 
     /// API key for authentication (X-API-Key header).
     /// Optional when device auth is configured (DeviceAuthProvider signs requests).

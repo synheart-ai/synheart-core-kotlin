@@ -1,4 +1,4 @@
-package ai.synheart.core.modules.platform_ingest
+package ai.synheart.core.modules.lab_ingest
 
 import ai.synheart.core.SynheartLogger
 import ai.synheart.core.config.ApiEndpoints
@@ -26,8 +26,8 @@ import kotlin.random.Random
  * Uses a simpler HMAC signing scheme than the cloud connector:
  * `HMAC-SHA256(timestamp_bytes + body_bytes, secret)`
  */
-class PlatformIngestClient(
-    private val baseUrl: String = ApiEndpoints.DEFAULT_PLATFORM_INGEST_BASE_URL,
+class LabIngestClient(
+    private val baseUrl: String = ApiEndpoints.DEFAULT_LAB_INGEST_BASE_URL,
     private val timeoutMs: Long = 30_000,
     private val maxRetries: Int = 3,
     httpClient: OkHttpClient? = null
@@ -51,9 +51,9 @@ class PlatformIngestClient(
         hmacSecret: String,
         apiKey: String,
         consentToken: String? = null
-    ): PlatformIngestResponse {
+    ): LabIngestResponse {
         return post(
-            path = ApiEndpoints.PLATFORM_SESSION_INGEST_PATH,
+            path = ApiEndpoints.LAB_SESSION_INGEST_PATH,
             payload = payload,
             hmacSecret = hmacSecret,
             apiKey = apiKey,
@@ -69,9 +69,9 @@ class PlatformIngestClient(
         hmacSecret: String,
         apiKey: String,
         consentToken: String? = null
-    ): PlatformIngestResponse {
+    ): LabIngestResponse {
         return post(
-            path = ApiEndpoints.PLATFORM_METADATA_INGEST_PATH,
+            path = ApiEndpoints.LAB_METADATA_INGEST_PATH,
             payload = payload,
             hmacSecret = hmacSecret,
             apiKey = apiKey,
@@ -85,7 +85,7 @@ class PlatformIngestClient(
         hmacSecret: String,
         apiKey: String,
         consentToken: String?
-    ): PlatformIngestResponse {
+    ): LabIngestResponse {
         val bodyJson = mapToJson(payload)
         var attempts = 0
 
@@ -122,7 +122,7 @@ class PlatformIngestClient(
                 if (response.isSuccessful) {
                     val responseBody = response.body?.string()
                     val parsedBody = tryParseJson(responseBody)
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success = true,
                         statusCode = response.code,
                         body = parsedBody
@@ -132,7 +132,7 @@ class PlatformIngestClient(
                 // 4xx — don't retry client errors
                 if (response.code in 400..499) {
                     val errorBody = response.body?.string()
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success = false,
                         statusCode = response.code,
                         errorMessage = "Client error: HTTP ${response.code}",
@@ -148,7 +148,7 @@ class PlatformIngestClient(
                 }
 
                 val errorBody = response.body?.string()
-                return PlatformIngestResponse(
+                return LabIngestResponse(
                     success = false,
                     statusCode = response.code,
                     errorMessage = "Server error: HTTP ${response.code}",
@@ -156,7 +156,7 @@ class PlatformIngestClient(
                 )
             } catch (e: Exception) {
                 if (attempts >= maxRetries) {
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success = false,
                         statusCode = 0,
                         errorMessage = "Request failed after $maxRetries attempts: ${e.message}"
@@ -167,7 +167,7 @@ class PlatformIngestClient(
             }
         }
 
-        return PlatformIngestResponse(
+        return LabIngestResponse(
             success = false,
             statusCode = 0,
             errorMessage = "Request failed: max retries exceeded"
@@ -175,7 +175,7 @@ class PlatformIngestClient(
     }
 
     /**
-     * Compute HMAC-SHA256 signature for platform ingestion.
+     * Compute HMAC-SHA256 signature for lab ingestion.
      *
      * Formula: HMAC-SHA256(timestamp_bytes + body_bytes, secret)
      */

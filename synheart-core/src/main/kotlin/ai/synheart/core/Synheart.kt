@@ -28,10 +28,10 @@ import ai.synheart.core.storage.StorageManager
 import ai.synheart.core.storage.StoragePolicy
 import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.storage.storagePolicyForMode
-import ai.synheart.core.modules.platform_ingest.PlatformIngestClient
-import ai.synheart.core.modules.platform_ingest.PlatformIngestModule
-import ai.synheart.core.modules.platform_ingest.PlatformIngestResponse
-import ai.synheart.core.modules.platform_ingest.PlatformPayloadBuilder
+import ai.synheart.core.modules.lab_ingest.LabIngestClient
+import ai.synheart.core.modules.lab_ingest.LabIngestModule
+import ai.synheart.core.modules.lab_ingest.LabIngestResponse
+import ai.synheart.core.modules.lab_ingest.LabPayloadBuilder
 import ai.synheart.core.modules.interfaces.WindowType
 import ai.synheart.core.modules.session.BehaviorModuleAdapter
 import ai.synheart.core.modules.session.SessionModule
@@ -111,7 +111,7 @@ object Synheart {
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
     private var runtimeModule: RuntimeModule? = null
-    private var platformIngestModule: PlatformIngestModule? = null
+    private var labIngestModule: LabIngestModule? = null
 
     // Activation manager (RFC-0005 four-authority model)
     private var activationManager: ActivationManager? = null
@@ -132,8 +132,7 @@ object Synheart {
     private var artifactHsiJob: Job? = null
     private var synheartConfig: SynheartConfig? = null
 
-    // Phase 3: Auth & Sync
-    private var authModule: ai.synheart.core.auth.AuthModule? = null
+    // Phase 3: Sync (AuthModule removed — ConsentModule is the single auth/token path)
     private var syncModule: ai.synheart.core.sync.SyncModule? = null
 
     // Session module (wraps SessionEngine from synheart-session)
@@ -265,11 +264,9 @@ object Synheart {
         context?.let { ai.synheart.core.crypto.SMK.delete(it) }
         context?.let { ai.synheart.core.crypto.URK.delete(it) }
 
-        // Phase 3: Clear auth/sync state
+        // Phase 3: Clear sync state
         syncModule?.dispose()
         syncModule = null
-        authModule?.logout()
-        authModule = null
 
         artifactPipeline = null
         storagePolicy = null
@@ -279,22 +276,19 @@ object Synheart {
 
     /** Request account deletion — wipes local data and requests server-side deletion. */
     suspend fun requestAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
-        // POST server-side deletion request if authenticated
-        val auth = authModule
-        if (auth != null && auth.isAuthenticated && auth.accessToken != null) {
+        val token = consentModule?.getCurrentToken()
+        if (token != null && token.isValid) {
             try {
-                val conn = java.net.URL("https://api.synheart.ai/account/v1/delete")
+                val conn = java.net.URL("https://api.synheart.ai/auth/v1/delete")
                     .openConnection() as java.net.HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("Authorization", "Bearer ${auth.accessToken}")
+                conn.setRequestProperty("Authorization", "Bearer ${token.token}")
                 conn.doOutput = true
                 val body = org.json.JSONObject().put("confirmation", "DELETE_MY_ACCOUNT")
                 java.io.OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-                conn.responseCode // trigger request
-            } catch (_: Exception) {
-                // Best-effort; still wipe locally
-            }
+                conn.responseCode
+            } catch (_: Exception) {}
         }
         wipeLocalData()
         return ai.synheart.core.models.DeletionRequestResult(
@@ -305,13 +299,13 @@ object Synheart {
 
     /** Cancel a pending account deletion request. */
     fun cancelAccountDeletion(): Boolean {
-        val auth = authModule ?: return false
-        if (!auth.isAuthenticated || auth.accessToken == null) return false
+        val token = consentModule?.getCurrentToken() ?: return false
+        if (!token.isValid) return false
         return try {
-            val conn = java.net.URL("https://api.synheart.ai/account/v1/delete/cancel")
+            val conn = java.net.URL("https://api.synheart.ai/auth/v1/delete/cancel")
                 .openConnection() as java.net.HttpURLConnection
             conn.requestMethod = "POST"
-            conn.setRequestProperty("Authorization", "Bearer ${auth.accessToken}")
+            conn.setRequestProperty("Authorization", "Bearer ${token.token}")
             conn.doOutput = false
             conn.responseCode == 200
         } catch (_: Exception) {
@@ -319,22 +313,10 @@ object Synheart {
         }
     }
 
-    // Phase 3: Auth API
-
-    /** Authenticate with a provider token. */
-    fun authenticate(provider: String, token: String): ai.synheart.core.auth.AuthResult {
-        val auth = authModule ?: throw IllegalStateException("SDK not initialized")
-        return auth.authenticate(provider, token)
-    }
-
-    /** Get current auth status. */
-    val authStatus: ai.synheart.core.auth.AuthStatus?
-        get() = authModule?.status
-
-    /** Log out and clear auth state. */
+    /** Log out — revoke consent, dispose sync, clear URK. */
     fun logout() {
         syncModule?.dispose()
-        authModule?.logout()
+        try { consentModule?.revokeConsent() } catch (_: Exception) {}
         context?.let { ai.synheart.core.crypto.URK.delete(it) }
     }
 
@@ -368,6 +350,27 @@ object Synheart {
      */
     fun getSessionWearSamples(): List<WearSample> =
         wearModule?.rawSamples(WindowType.WINDOW_1H) ?: emptyList()
+
+    /**
+     * Process a raw RAMEN vendor event (from the wear SDK) through the
+     * wearable event pipeline: normalize -> store -> SRM push -> runtime.
+     *
+     * @param provider e.g. "whoop", "garmin", "oura"
+     * @param eventType e.g. "sleep.updated", "recovery.updated"
+     * @param payload decoded JSON payload from the RAMEN EventEnvelope
+     * @param eventId RAMEN event ID (used for dedup)
+     * @param seq RAMEN sequence number
+     * @return the canonical event if processed, null if skipped
+     */
+    fun processVendorEvent(
+        provider: String,
+        eventType: String,
+        payload: Map<String, Any?>,
+        eventId: String,
+        seq: Int
+    ): ai.synheart.core.models.CanonicalWearableEvent? {
+        return wearModule?.processVendorEvent(provider, eventType, payload, eventId, seq)
+    }
 
     // Activation API (RFC-0005)
 
@@ -447,6 +450,22 @@ object Synheart {
             val consentStorage = ConsentStorage(context = this.context!!)
             consentModule = ConsentModule(storage = consentStorage)
 
+            // Wire device signing into consent module so all consent-token requests
+            // are signed with device identity (X-Synheart-* headers).
+            consentModule!!.setDeviceSigner { method, path, bodyBytes ->
+                try {
+                    ai.synheart.auth.SynheartAuth.shared.signRequest(
+                        appId = resolvedConfig.appId,
+                        method = method,
+                        path = path,
+                        bodyBytes = bodyBytes
+                    ).toMap()
+                } catch (e: Exception) {
+                    SynheartLogger.log("[Synheart] Device signing unavailable for consent: ${e.message}")
+                    emptyMap()
+                }
+            }
+
             // 3. Register modules
             moduleManager.registerModule(capabilityModule!!)
             moduleManager.registerModule(consentModule!!)
@@ -493,16 +512,16 @@ object Synheart {
                 dependsOn = listOf("wear", "behavior")
             )
 
-            // 7. Initialize Platform Ingest (optional, depends on config)
-            val platformConfig = config?.platformIngestConfig
+            // 7. Initialize Lab Ingest (optional, depends on config)
+            val platformConfig = config?.labIngestConfig
             if (platformConfig != null) {
-                SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
-                platformIngestModule = PlatformIngestModule(
+                SynheartLogger.log("[Synheart] Initializing Lab Ingest...")
+                labIngestModule = LabIngestModule(
                     consentModule = consentModule!!,
                     config = platformConfig
                 )
                 moduleManager.registerModule(
-                    platformIngestModule!!,
+                    labIngestModule!!,
                     dependsOn = listOf("consent")
                 )
             }
@@ -591,31 +610,56 @@ object Synheart {
                     }
 
                     SynheartLogger.log("[Synheart] Storage and artifact pipeline initialized")
+
+                    // Attach WearableEventProcessor to WearModule (requires storage + runtime)
+                    if (wearModule != null) {
+                        val processor = ai.synheart.core.modules.wear.WearableEventProcessor(
+                            storage = storageManager!!,
+                            bridge = runtimeBridge,
+                            subjectId = resolvedConfig.subjectId,
+                            deviceInstallId = resolvedConfig.deviceId
+                        )
+                        wearModule!!.setEventProcessor(processor)
+                    }
                 } catch (e: Exception) {
                     SynheartLogger.log("[Synheart] Storage init failed (non-fatal): $e")
                 }
             }
 
-            // Phase 3: Initialize auth and sync modules
+            // Phase 3: Initialize sync module (uses ConsentModule's token)
             val appId = resolvedConfig.appId
             if (appId.isNotEmpty() && this.context != null) {
-                val tokenStorage = ai.synheart.core.auth.TokenStorage(this.context!!)
-                authModule = ai.synheart.core.auth.AuthModule(
-                    appId = appId,
-                    tokenStorage = tokenStorage
-                )
-                authModule!!.restoreSession()
+                // Configure synheart-auth for device attestation + signing
+                ai.synheart.auth.SynheartAuth.shared.configure("https://api.synheart.ai/auth")
 
-                if (storageManager?.isOpen == true) {
+                // Generate or load session_secret for URK derivation (local, not from server)
+                var sessionSecret: String? = null
+                try {
+                    val prefs = this.context!!.getSharedPreferences("synheart_session", android.content.Context.MODE_PRIVATE)
+                    sessionSecret = prefs.getString("session_secret", null)
+                    if (sessionSecret == null) {
+                        val bytes = ByteArray(32)
+                        java.security.SecureRandom().nextBytes(bytes)
+                        sessionSecret = java.util.Base64.getEncoder().encodeToString(bytes)
+                        prefs.edit().putString("session_secret", sessionSecret).apply()
+                    }
+                } catch (e: Exception) {
+                    SynheartLogger.log("[Synheart] session_secret init failed (non-fatal): $e")
+                }
+
+                // SyncModule uses ConsentModule's token — no separate AuthModule needed.
+                if (storageManager?.isOpen == true && consentModule != null) {
                     syncModule = ai.synheart.core.sync.SyncModule(
-                        auth = authModule!!,
+                        consent = consentModule!!,
                         storage = storageManager!!,
                         smk = smk,
                         context = this.context!!,
-                        baseUrl = "https://api.synheart.ai"
+                        baseUrl = "https://api.synheart.ai",
+                        subjectId = resolvedConfig.subjectId,
+                        sessionSecret = sessionSecret
                     )
                 }
-                SynheartLogger.log("[Synheart] Auth and sync modules initialized")
+                SynheartLogger.log("[Synheart] Sync module initialized")
             }
 
             isConfigured = true
@@ -760,8 +804,8 @@ object Synheart {
             }
         }
         // Auto-ingest session to platform (opt-in)
-        val piConfig = synheartConfig?.platformIngestConfig
-        if (piConfig?.autoIngest == true && handle != null && platformIngestModule != null) {
+        val piConfig = synheartConfig?.labIngestConfig
+        if (piConfig?.autoIngest == true && handle != null && labIngestModule != null) {
             try {
                 autoIngestSession(handle)
                 SynheartLogger.log("[Synheart] Auto-ingest completed")
@@ -785,7 +829,7 @@ object Synheart {
 
 
 
-    // MARK: - Platform Ingestion
+    // MARK: - Lab Ingestion
 
     /**
      * Auto-ingest a session payload built from SDK internal data.
@@ -795,7 +839,7 @@ object Synheart {
         val behaviorEvents = behaviorModule?.rawEvents(WindowType.WINDOW_1H) ?: emptyList()
         val phoneDataPoints = phoneModule?.rawDataPoints(WindowType.WINDOW_1H) ?: emptyList()
 
-        val payload = PlatformPayloadBuilder.buildSession(
+        val payload = LabPayloadBuilder.buildSession(
             sessionId = session.sessionId,
             deviceId = synheartConfig?.deviceId ?: "",
             appId = synheartConfig?.appId ?: "",
@@ -807,48 +851,48 @@ object Synheart {
             behaviorEvents = behaviorEvents,
             phoneDataPoints = phoneDataPoints
         )
-        platformIngestModule!!.ingestSession(payload)
+        labIngestModule!!.ingestSession(payload)
     }
 
     /**
-     * Ingest a session payload via the Platform Ingest module.
+     * Ingest a session payload via the Lab Ingest module.
      *
      * Requires `behavior` consent.
      *
-     * @throws IllegalStateException if SDK not initialized or platform ingest not configured
+     * @throws IllegalStateException if SDK not initialized or lab ingest not configured
      */
-    suspend fun ingestSession(payload: Map<String, Any?>): PlatformIngestResponse {
+    suspend fun ingestSession(payload: Map<String, Any?>): LabIngestResponse {
         if (!isConfigured) {
             throw IllegalStateException("Synheart must be initialized before ingesting sessions")
         }
-        val module = platformIngestModule
+        val module = labIngestModule
             ?: throw IllegalStateException("Platform ingest not configured")
         return module.ingestSession(payload)
     }
 
     /**
-     * Ingest a metadata payload via the Platform Ingest module.
+     * Ingest a metadata payload via the Lab Ingest module.
      *
      * Requires `biosignals` consent.
      *
-     * @throws IllegalStateException if SDK not initialized or platform ingest not configured
+     * @throws IllegalStateException if SDK not initialized or lab ingest not configured
      */
-    suspend fun ingestMetadata(payload: Map<String, Any?>): PlatformIngestResponse {
+    suspend fun ingestMetadata(payload: Map<String, Any?>): LabIngestResponse {
         if (!isConfigured) {
             throw IllegalStateException("Synheart must be initialized before ingesting metadata")
         }
-        val module = platformIngestModule
+        val module = labIngestModule
             ?: throw IllegalStateException("Platform ingest not configured")
         return module.ingestMetadata(payload)
     }
 
     /**
-     * Get the underlying PlatformIngestClient for standalone/background usage.
+     * Get the underlying LabIngestClient for standalone/background usage.
      *
-     * Returns null if platform ingest is not configured.
+     * Returns null if lab ingest is not configured.
      */
-    val platformIngestClient: PlatformIngestClient?
-        get() = platformIngestModule?.client
+    val labIngestClient: LabIngestClient?
+        get() = labIngestModule?.client
 
     /**
      * Check if user has granted a specific consent
@@ -1106,8 +1150,7 @@ object Synheart {
             // Phase 3
             syncModule?.dispose()
             syncModule = null
-            authModule?.logout()
-            authModule = null
+            // AuthModule removed — consent handles token lifecycle
 
             consentModule = null
             capabilityModule = null
@@ -1115,7 +1158,7 @@ object Synheart {
             phoneModule = null
             behaviorModule = null
             runtimeModule = null
-            platformIngestModule = null
+            labIngestModule = null
             activationManager = null
             previousConsent = null
             isConfigured = false
