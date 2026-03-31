@@ -1,6 +1,7 @@
 package ai.synheart.core.modules.cloud
 
 import ai.synheart.core.config.ApiEndpoints
+import ai.synheart.core.modules.consent.ConsentToken
 import ai.synheart.core.modules.interfaces.AuthProvider
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -12,13 +13,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * HTTP client for uploading HSI 1.1 snapshots to Synheart Platform
+ * HTTP client for uploading HSI snapshots to Synheart Platform.
  *
- * Features:
- * - HMAC-SHA256 authentication
- * - Exponential backoff retry (1s, 2s, 4s)
- * - Max 3 retry attempts
- * - Specific error handling per status code
+ * Auth model:
+ *   Authorization: Bearer {consentToken}   — standard JWT from ConsentModule
+ *   + device signature headers              — defense-in-depth (optional)
+ *
+ * HMAC signing removed — device attestation at token issuance replaces it.
  */
 class UploadClient(
     private val baseUrl: String,
@@ -35,54 +36,35 @@ class UploadClient(
         encodeDefaults = true
     }
 
-    /**
-     * Upload HSI 1.1 snapshots to the platform
-     *
-     * @param payload Upload request containing subject and snapshots
-     * @param signer HMAC signer instance (null when authProvider is used)
-     * @param tenantId Tenant identifier
-     * @param authProvider Optional custom auth provider (takes precedence over HMAC)
-     * @return UploadResponse on success
-     * @throws CloudConnectorException on failure
-     */
     suspend fun upload(
         payload: UploadRequest,
-        signer: HMACSigner?,
-        tenantId: String,
-        authProvider: AuthProvider? = null
+        consentToken: ConsentToken?,
+        deviceAuth: AuthProvider? = null
     ): UploadResponse {
         val method = "POST"
         val path = ApiEndpoints.INGEST_PATH
-
-        // Serialize payload
         val bodyJson = json.encodeToString(payload)
 
-        // Upload with retry logic
         return uploadWithRetry(
             method = method,
             path = path,
             bodyJson = bodyJson,
-            signer = signer,
-            tenantId = tenantId,
             maxAttempts = 3,
-            authProvider = authProvider
+            consentToken = consentToken,
+            deviceAuth = deviceAuth
         )
     }
 
-    /**
-     * Upload with exponential backoff retry
-     */
     private suspend fun uploadWithRetry(
         method: String,
         path: String,
         bodyJson: String,
-        signer: HMACSigner?,
-        tenantId: String,
         maxAttempts: Int,
-        authProvider: AuthProvider?
+        consentToken: ConsentToken?,
+        deviceAuth: AuthProvider?
     ): UploadResponse {
         var attempts = 0
-        val baseDelay = 1000L // 1 second
+        val baseDelay = 1000L
 
         while (attempts < maxAttempts) {
             attempts++
@@ -95,39 +77,22 @@ class UploadClient(
                 val requestBuilder = Request.Builder()
                     .url(url)
                     .post(requestBody)
+                    .header("Content-Type", "application/json")
 
-                if (authProvider != null) {
-                    // AuthProvider path — provider controls all auth headers
-                    val authHeaders = authProvider.signRequest(method, path, bodyBytes)
-                    for ((key, value) in authHeaders) {
+                // Bearer token from consent module
+                if (consentToken != null && consentToken.isValid) {
+                    requestBuilder.header("Authorization", "Bearer ${consentToken.token}")
+                }
+
+                // Device signature headers (defense-in-depth)
+                if (deviceAuth != null) {
+                    val deviceHeaders = deviceAuth.signRequest(method, path, bodyBytes)
+                    for ((key, value) in deviceHeaders) {
                         requestBuilder.header(key, value)
                     }
-                    requestBuilder.header("Content-Type", "application/json")
-                } else {
-                    // Existing HMAC path (unchanged)
-                    val nonce = signer!!.generateNonce()
-                    val timestamp = System.currentTimeMillis() / 1000
-                    val signature = signer.computeSignature(
-                        method = method,
-                        path = path,
-                        tenantId = tenantId,
-                        timestamp = timestamp,
-                        nonce = nonce,
-                        bodyJson = bodyJson
-                    )
-
-                    requestBuilder
-                        .header("Content-Type", "application/json")
-                        .header("X-Synheart-Tenant", tenantId)
-                        .header("X-Synheart-Signature", signature)
-                        .header("X-Synheart-Nonce", nonce)
-                        .header("X-Synheart-Timestamp", timestamp.toString())
-                        .header("X-Synheart-SDK-Version", "1.0.0")
                 }
 
                 val request = requestBuilder.build()
-
-                // Execute request
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
@@ -136,7 +101,6 @@ class UploadClient(
                     return json.decodeFromString<UploadResponse>(responseBody)
                 }
 
-                // Parse error response (API may return JSON or plain text e.g. "404 page not found")
                 val errorBodyStr = response.body?.string()
                     ?: throw NetworkError("Empty error response body")
                 val error: UploadErrorResponse
@@ -148,47 +112,35 @@ class UploadClient(
                     )
                 }
 
-                // Handle 401 with AuthProvider retry
-                if (response.code == 401 && authProvider != null) {
+                // Handle 401 with device auth retry
+                if (response.code == 401 && deviceAuth != null) {
                     val responseHeaders = response.headers.toMultimap().mapValues { it.value.first() }
-                    val handled = authProvider.onAuthError(401, responseHeaders)
+                    val handled = deviceAuth.onAuthError(401, responseHeaders)
                     if (handled && attempts < maxAttempts) {
-                        continue // Retry with corrected auth
+                        continue
                     }
                 }
 
-                // Handle specific errors (non-retryable)
                 when {
-                    response.code == 401 && error.code == "invalid_signature" -> {
-                        throw InvalidSignatureError()
-                    }
-                    response.code == 403 && error.code == "invalid_tenant" -> {
-                        throw InvalidTenantError()
-                    }
-                    response.code == 400 && error.code == "schema_validation_failed" -> {
+                    response.code == 401 -> throw InvalidSignatureError()
+                    response.code == 403 -> throw InvalidTenantError()
+                    response.code == 400 && (error.code == "schema_validation_failed" || error.code == "hsi_schema_validation_failed") ->
                         throw SchemaValidationError()
-                    }
-                    response.code == 429 -> {
-                        throw RateLimitExceededError(error.retryAfter ?: 60)
-                    }
+                    response.code == 429 -> throw RateLimitExceededError(error.retryAfter ?: 60)
                 }
 
-                // Generic error - retry if attempts remaining
                 if (attempts >= maxAttempts) {
                     throw CloudConnectorException("Upload failed: ${error.message}")
                 }
 
             } catch (e: CloudConnectorException) {
-                // Don't retry on known exceptions
                 throw e
             } catch (e: Exception) {
-                // Network or parsing error - retry if attempts remaining
                 if (attempts >= maxAttempts) {
                     throw NetworkError("Upload failed after $maxAttempts attempts: ${e.message}", e)
                 }
             }
 
-            // Exponential backoff: 1s, 2s, 4s
             if (attempts < maxAttempts) {
                 val delayMs = baseDelay * (1 shl (attempts - 1))
                 delay(delayMs)
@@ -198,9 +150,6 @@ class UploadClient(
         throw NetworkError("Upload failed after $maxAttempts attempts")
     }
 
-    /**
-     * Close the HTTP client
-     */
     fun dispose() {
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()

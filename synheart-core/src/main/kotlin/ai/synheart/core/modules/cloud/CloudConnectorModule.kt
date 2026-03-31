@@ -55,7 +55,6 @@ class CloudConnectorModule(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // Components
-    private var hmacSigner: HMACSigner? = null
     private lateinit var uploadClient: UploadClient
     private lateinit var uploadQueue: UploadQueue
     private lateinit var rateLimiter: RateLimiter
@@ -94,9 +93,6 @@ class CloudConnectorModule(
         SynheartLogger.log("[CloudConnector] Initializing...")
 
         // 1. Initialize components
-        if (config.hmacSecret != null) {
-            hmacSigner = HMACSigner(hmacSecret = config.hmacSecret)
-        }
         uploadClient = UploadClient(baseUrl = config.baseUrl)
         uploadQueue = UploadQueue(context = context, maxSize = config.maxQueueSize)
         rateLimiter = RateLimiter(capabilityProvider = capabilities)
@@ -243,12 +239,12 @@ class CloudConnectorModule(
                 null
             }
 
-            // Sign and upload -- use authProvider from config (may be DeviceAuthProvider)
+            // Upload with Bearer token + optional device signing
+            val consentToken = consent.getCurrentToken()
             val response = uploadClient.upload(
                 payload = payload,
-                signer = hmacSigner,
-                tenantId = config.tenantId,
-                authProvider = config.authProvider
+                consentToken = consentToken,
+                deviceAuth = config.authProvider
             )
 
             // Success - remove from queue

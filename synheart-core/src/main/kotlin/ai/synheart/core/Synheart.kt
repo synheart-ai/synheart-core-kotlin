@@ -132,7 +132,7 @@ object Synheart {
     private var artifactHsiJob: Job? = null
     private var synheartConfig: SynheartConfig? = null
 
-    // Phase 3: Sync (AuthModule removed — ConsentModule is the single auth/token path)
+    // Phase 3: Sync
     private var syncModule: ai.synheart.core.sync.SyncModule? = null
 
     // Session module (wraps SessionEngine from synheart-session)
@@ -647,7 +647,7 @@ object Synheart {
                     SynheartLogger.log("[Synheart] session_secret init failed (non-fatal): $e")
                 }
 
-                // SyncModule uses ConsentModule's token — no separate AuthModule needed.
+                // Sync uses ConsentModule's token for Bearer auth.
                 if (storageManager?.isOpen == true && consentModule != null) {
                     syncModule = ai.synheart.core.sync.SyncModule(
                         consent = consentModule!!,
@@ -1150,7 +1150,6 @@ object Synheart {
             // Phase 3
             syncModule?.dispose()
             syncModule = null
-            // AuthModule removed — consent handles token lifecycle
 
             consentModule = null
             capabilityModule = null
