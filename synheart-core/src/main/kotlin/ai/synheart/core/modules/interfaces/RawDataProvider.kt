@@ -7,8 +7,8 @@ import ai.synheart.core.modules.wear.WearSample
 /**
  * Protocols for modules to expose raw buffered data to the runtime pipeline.
  *
- * RFC-CORE-0007: Core caches buffer raw data only. Feature computation,
- * fusion, embedding, and HSV construction are delegated to synheart-runtime.
+ * Core caches buffer raw data only. Feature computation,
+ * fusion, embedding, and HSV construction are delegated to synheart-engine.
  */
 
 /** Provides raw wear samples for a given window. */

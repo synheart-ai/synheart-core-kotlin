@@ -4,20 +4,35 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, and integrate with Syni. Human state inference is computed by the on-device synheart-runtime engine.
+Android/Kotlin platform SDK for Synheart. This is a thin wrapper around **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** — the shared implementation that owns all business logic (storage, crypto, sync, consent, capabilities, artifact pipeline, session orchestration, and cloud integration).
 
-> **📦 SDK Implementations**: This is the Android/Kotlin implementation. For documentation and other platforms, see the repositories below.
+Human state inference is computed on-device by `synheart-engine` (deterministic signal processing pipeline), which runs inside `synheart-core-runtime`. This SDK communicates with the runtime via JNA (`libsynheart_core_runtime.so`).
 
-## 📦 Repository Structure
+This SDK handles platform-specific concerns only: sensor collection (Health Connect, BLE), Android Keystore key management, EncryptedSharedPreferences, Kotlin Flow reactive streams, and Jetpack integration.
 
-The Synheart Core SDK is organized across multiple repositories:
+## Architecture
+
+```
+Android App
+    |
+synheart-core-kotlin (this SDK)
+    |-- Wear/Phone/Behavior modules (platform sensor collection)
+    |-- CoreRuntimeBridge (JNA to C ABI)
+    |
+libsynheart_core_runtime.so (per ABI: arm64-v8a, armeabi-v7a, x86_64)
+    |-- synheart-engine (HSI computation)
+    |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
+    |-- 67 C ABI functions
+```
+
+## Repositories
 
 | Repository | Purpose |
 |------------|---------|
-| **[synheart-core](https://github.com/synheart-ai/synheart-core)** | Main repository (source of truth for documentation) |
-| **[synheart-core-dart](https://github.com/synheart-ai/synheart-core-dart)** | Flutter/Dart implementation |
-| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin implementation (this repository) |
-| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift implementation |
+| **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** | Shared implementation (all business logic) |
+| **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
+| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK (this repository) |
+| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK |
 
 ## Overview
 
@@ -26,7 +41,7 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSI Runtime** → Signal fusion + state computation (via synheart-runtime Rust engine)
+- **HSI Runtime** → Signal fusion + state computation (via synheart-engine)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
 - **Cloud Connector** → Secure HSI snapshot uploads
@@ -38,12 +53,12 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 
 ### Core Principle
 
-> **All inference is computed by synheart-runtime (Rust).**
+> **All inference is computed by synheart-engine.**
 >
 > **SDKs coordinate data collection and distribution.**
 
 The Core SDK strictly separates:
-- **Computation** — synheart-runtime (Rust) computes HSV
+- **Computation** — synheart-engine computes HSV
 - **Collection** — Core SDK modules (Wear, Phone, Behavior, Consent, Capability)
 - **Distribution** — HSI JSON export, cloud upload, raw HSV diagnostics
 
@@ -54,7 +69,7 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via synheart-runtime)
+6. **HSI Runtime** - Signal fusion and state computation (via synheart-engine)
 7. **Cloud Connector** - Secure HSI snapshot uploads
 
 ### Optional Interpretation Modules
@@ -67,7 +82,7 @@ The Core SDK strictly separates:
 ```
 Wear, Phone, Behavior Modules (raw samples)
     ↓
-RuntimeModule → RuntimeBridge → synheart-runtime (Rust via JNA)
+RuntimeModule → RuntimeBridge → synheart-engine (via JNA)
     ↓                              ↓
     ↓                   session → state → HSI JSON
     ↓                              ↓
@@ -132,7 +147,7 @@ class MainActivity : AppCompatActivity() {
                 )
             )
 
-            // Subscribe to HSI updates (raw JSON from synheart-runtime)
+            // Subscribe to HSI updates (raw JSON from synheart-engine)
             launch {
                 Synheart.onHSIUpdate.collect { hsiJson ->
                     println("HSI JSON: $hsiJson")
@@ -191,7 +206,7 @@ val wearModule = WearModule(capabilities = capabilities, consent = consent)
 val phoneModule = PhoneModule(capabilities = capabilities, consent = consent)
 val behaviorModule = BehaviorModule(capabilities = capabilities, consent = consent)
 
-// Create RuntimeBridge (wraps synheart-runtime Rust engine)
+// Create RuntimeBridge (wraps synheart-engine)
 val bridge = RuntimeBridge.createIfAvailable(context)
 
 // Create Runtime Module
@@ -226,7 +241,7 @@ lifecycleScope.launch {
 // Subscribe to final HSV
 lifecycleScope.launch {
     runtime.hsiFlow.collect { hsiJson ->
-        // Handle HSI JSON frames from synheart-runtime
+        // Handle HSI JSON frames from synheart-engine
     }
 }
 ```
@@ -368,7 +383,7 @@ For the modular architecture, features are collected in time windows:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `onHSIUpdate` | `Flow<String>` | HSI JSON frames from synheart-runtime |
+| `onHSIUpdate` | `Flow<String>` | HSI JSON frames from synheart-engine |
 | `onEmotionUpdate` | `Flow<EmotionState>` | Stream of emotion updates |
 | `onFocusUpdate` | `Flow<FocusState>` | Stream of focus updates |
 | `currentState` | `String?` | Latest HSI JSON frame |
@@ -444,7 +459,7 @@ try {
 The SDK follows a pipeline architecture:
 
 ```
-Raw Signals → synheart-runtime (Rust) → HSI JSON
+Raw Signals → synheart-engine → HSI JSON
                 ↓
      session → state → HSI 1.x
                 ↓
@@ -455,7 +470,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 
 ## Features
 
-- **On-device state computation**: synheart-runtime (Rust) fuses signals into HSI
+- **On-device state computation**: synheart-engine fuses signals into HSI
 - **SRM baseline persistence**: Self-Reference Model snapshots automatically saved/restored across app restarts
 - **Thread-safe FFI**: All native runtime calls serialized on a single-thread dispatcher
 - **Emotion Head**: Predicts emotion state (stress, calm, engagement, activation, valence)
@@ -513,7 +528,7 @@ Synheart.onHSIUpdate.collect { hsiJson ->
 
 This Android implementation is part of a multi-platform SDK:
 
-- **Flutter:** `synheart-core-dart` (reference implementation)
+- **Flutter:** `synheart-core-flutter` (reference implementation)
 - **iOS:** `synheart-core-swift` (Swift implementation)
 - **Android:** `synheart-core-kotlin` (this repository)
 

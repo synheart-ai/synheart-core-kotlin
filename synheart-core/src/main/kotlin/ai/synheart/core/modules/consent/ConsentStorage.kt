@@ -9,7 +9,7 @@ import ai.synheart.core.modules.interfaces.ConsentTier
 import org.json.JSONObject
 import java.time.Instant
 
-/// Encrypted storage for consent snapshots using Android Keystore
+/** Encrypted storage for consent snapshots using Android Keystore. */
 class ConsentStorage(context: Context) {
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -23,15 +23,13 @@ class ConsentStorage(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
-    /// Save consent snapshot (encrypted via Android Keystore)
+    /** Save consent snapshot (encrypted via Android Keystore). */
     fun save(consent: ConsentSnapshot) {
         val json = JSONObject().apply {
             put("biosignals", consent.biosignals)
             put("behavior", consent.behavior)
-            // RFC-0002: phoneContext
             put("phoneContext", consent.phoneContext)
-            // Back-compat alias for older builds that stored `motion`
-            put("motion", consent.phoneContext)
+            put("motion", consent.phoneContext) // back-compat alias
             put("cloudUpload", consent.cloudUpload)
             put("focusEstimation", consent.focusEstimation)
             put("emotionEstimation", consent.emotionEstimation)
@@ -52,7 +50,7 @@ class ConsentStorage(context: Context) {
             .apply()
     }
 
-    /// Load consent snapshot from encrypted storage
+    /** Load consent snapshot from encrypted storage. */
     fun load(): ConsentSnapshot? {
         return try {
             val jsonString = sharedPreferences.getString(STORAGE_KEY, null) ?: return null
@@ -94,14 +92,14 @@ class ConsentStorage(context: Context) {
         }
     }
 
-    /// Clear consent data
+    /** Clear consent data. */
     fun clear() {
         sharedPreferences.edit()
             .remove(STORAGE_KEY)
             .apply()
     }
 
-    /// Check if consent data exists
+    /** Check if consent data exists. */
     fun exists(): Boolean {
         return sharedPreferences.contains(STORAGE_KEY)
     }

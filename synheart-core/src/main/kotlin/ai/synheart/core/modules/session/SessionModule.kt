@@ -108,7 +108,7 @@ class SessionModule(
     }
 
     /**
-     * Forward pre-computed HSI metrics from synheart-runtime to the session
+     * Forward pre-computed HSI metrics from synheart-engine to the session
      * engine. HRV metrics (SDNN, RMSSD, pNN50) come from the Rust runtime
      * which applies artifact filtering -- the session SDK does not compute
      * HRV locally.

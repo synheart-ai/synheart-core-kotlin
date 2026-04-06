@@ -1,8 +1,7 @@
 package ai.synheart.core.modules.srm
 
+import ai.synheart.core.bridge.CoreRuntimeBridge
 import ai.synheart.core.models.CanonicalWearableEvent
-import ai.synheart.core.modules.runtime.RuntimeBridge
-import ai.synheart.core.storage.StorageManager
 import java.time.Instant
 
 /**
@@ -10,7 +9,7 @@ import java.time.Instant
  *
  * Maps recognised event types to SRM dimension names, extracts a daily
  * scalar value from the event payload, and pushes it to the native
- * runtime via [RuntimeBridge].
+ * runtime via [CoreRuntimeBridge].
  */
 class LongitudinalSrmModule {
 
@@ -60,14 +59,15 @@ class LongitudinalSrmModule {
      */
     fun ingestEvent(
         event: CanonicalWearableEvent,
-        storage: StorageManager,
-        bridge: RuntimeBridge?
+        bridge: CoreRuntimeBridge?
     ) {
         val extractors = EVENT_DIMENSION_MAP[event.type]
         if (extractors == null || bridge == null) return
 
         val dayIndex = (Instant.parse(event.observedAt).toEpochMilli() / 86400000).toInt()
+        val nowMs = System.currentTimeMillis()
 
+        val dimensions = mutableListOf<org.json.JSONObject>()
         for (extractor in extractors) {
             val rawValue = event.payload[extractor.payloadKey] ?: continue
 
@@ -76,21 +76,28 @@ class LongitudinalSrmModule {
                 else -> rawValue.toString().toDoubleOrNull() ?: continue
             }
 
-            bridge.pushWearableDailyValue(
-                extractor.dimension,
-                dayIndex,
-                value,
-                event.confidence,
-                fidelityToInt(event.sourceFidelity)
-            )
+            dimensions.add(org.json.JSONObject().apply {
+                put("dimension", extractor.dimension)
+                put("day_index", dayIndex)
+                put("value", value)
+                put("confidence", event.confidence)
+                put("fidelity", fidelityToInt(event.sourceFidelity))
+            })
         }
 
-        val todayDayIndex = (System.currentTimeMillis() / 86400000).toInt()
-        bridge.triggerWearableRecompute(0, todayDayIndex)
+        if (dimensions.isNotEmpty()) {
+            val batchJson = org.json.JSONObject().apply {
+                put("type", "wearable_daily_values")
+                put("dimensions", org.json.JSONArray(dimensions))
+                put("recompute_from", 0)
+                put("recompute_to", (nowMs / 86400000).toInt())
+            }.toString()
+            bridge.ingestBatch(batchJson, nowMs)
+        }
     }
 
     /** Return the current wearable reference JSON from the native SRM, or null. */
-    fun getWearableReference(bridge: RuntimeBridge?): String? {
-        return bridge?.getWearableReference()
+    fun getWearableReference(bridge: CoreRuntimeBridge?): String? {
+        return bridge?.baselinesJson()
     }
 }

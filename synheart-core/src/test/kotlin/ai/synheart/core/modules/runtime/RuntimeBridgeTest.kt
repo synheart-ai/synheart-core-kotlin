@@ -10,11 +10,11 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Integration tests for the synheart-runtime native bridge via JNA.
+ * Integration tests for the synheart-engine native bridge via JNA.
  *
  * These tests require the native library (libsynheart_runtime.dylib on macOS,
  * .so on Linux) to be on the JNA library path. For macOS host testing, set:
- *   -Djna.library.path=/path/to/synheart-runtime/target/release
+ *   -Djna.library.path=/path/to/synheart-engine/target/release
  *
  * When the native library is unavailable, tests that depend on it are skipped
  * via JUnit's Assume mechanism.

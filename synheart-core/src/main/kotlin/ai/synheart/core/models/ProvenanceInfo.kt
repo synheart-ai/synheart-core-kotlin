@@ -3,9 +3,9 @@ package ai.synheart.core.models
 import kotlinx.serialization.Serializable
 
 /**
- * Data provenance tracking aligned with synheart-runtime HSV.
+ * Data provenance tracking aligned with synheart-engine HSV.
  *
- * Mirrors Rust `ProvenanceInfo` from synheart-runtime — records the origin and lineage of data
+ * Mirrors Rust `ProvenanceInfo` from synheart-engine — records the origin and lineage of data
  * that contributed to the Human State Vector.
  */
 @Serializable

@@ -1,26 +1,23 @@
 package ai.synheart.core.modules.behavior
 
 import ai.synheart.core.SynheartDefaults
+import ai.synheart.core.SynheartLogger
 import ai.synheart.core.modules.base.BaseSynheartModule
 import ai.synheart.core.modules.interfaces.CapabilityProvider
 import ai.synheart.core.modules.interfaces.ConsentProvider
 import ai.synheart.core.modules.interfaces.RawBehaviorDataProvider
 import ai.synheart.core.modules.interfaces.WindowType
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import ai.synheart.core.SynheartLogger
 
-/// Behavior Module
-///
-/// Captures user-device interaction patterns.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
+/** Captures user-device interaction patterns. */
 class BehaviorModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider
@@ -33,11 +30,8 @@ class BehaviorModule(
     private var eventJob: kotlinx.coroutines.Job? = null
     private var cleanupJob: kotlinx.coroutines.Job? = null
 
-    /// Get the event stream for recording events
     val eventStreamInstance: BehaviorEventStream
         get() = eventStream
-
-    // MARK: - RawBehaviorDataProvider
 
     override fun rawEvents(window: WindowType): List<BehaviorEvent> {
         if (!consent.current().behavior) return emptyList()
@@ -71,10 +65,8 @@ class BehaviorModule(
 
     override suspend fun onStop() {
         SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
-
         eventJob?.cancel()
         eventJob = null
-
         cleanupJob?.cancel()
         cleanupJob = null
     }

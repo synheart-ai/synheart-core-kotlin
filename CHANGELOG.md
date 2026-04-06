@@ -5,6 +5,21 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
+  migrated to synheart-core-runtime (Rust). SDK is now a thin FFI shell.
+- RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
+- HSI state updates delivered via native callback mechanism instead of platform-specific streams
+- Lab protocol API now routes through CoreRuntimeBridge
+
+### Removed
+- StorageManager, ArtifactCrypto, SMK, URK, SyncEngine, SyncModule, ArtifactPipeline
+- RuntimeBridge, RuntimeModule (replaced by CoreRuntimeBridge)
+- CloudConnector, UploadQueue, UploadClient, HsiSchemaTransformer
+- SRM computation modules (SRMModule, SRMBuffer, SRMSnapshotStorage)
+
 ## [1.3.0] - 2026-03-07
 
 ### Removed
@@ -22,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **FeatureExtractor** — Deleted empty `BehaviorFeatureExtractor` placeholder class (`modules/behavior/FeatureExtractor.kt`). All feature computation lives in synheart-runtime per RFC-CORE-0007.
+- **FeatureExtractor** — Deleted empty `BehaviorFeatureExtractor` placeholder class (`modules/behavior/FeatureExtractor.kt`). All feature computation lives in synheart-engine per RFC-CORE-0007.
 
 ### Changed
 
@@ -34,20 +49,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SRM snapshot persistence** — SRM baseline model is now persisted to `EncryptedSharedPreferences` (AES256-GCM) and automatically restored on SDK initialization. Prevents baseline loss on app restart. New `SRMSnapshotStorage` class mirrors the `ConsentStorage` pattern.
 - **HSI stream consent gating** — Local `onHSIUpdate` Flow now checks `biosignals` consent before forwarding HSI frames to consumers. Previously only cloud upload was gated; now local streams respect consent too.
-- **Single-thread FFI dispatcher** — `RuntimeModule` now uses `Dispatchers.Default.limitedParallelism(1)` to serialize all FFI calls to synheart-runtime, preventing concurrent native access from multiple coroutines (RFC §8.2).
+- **Single-thread FFI dispatcher** — `RuntimeModule` now uses `Dispatchers.Default.limitedParallelism(1)` to serialize all FFI calls to synheart-engine, preventing concurrent native access from multiple coroutines (RFC §8.2).
 - **JSON serialization for SRM types** — `SRMSnapshot`, `StratumSnapshot`, `BufferEntry`, and `MetricReference` now have `toJson()`/`fromJson()` methods for persistence.
 - **HSI consent gate tests** — New `ConsentGateTest.kt` with 3 JUnit tests verifying HSI frames are blocked when biosignal consent is denied.
-- **synheart-runtime installed** — Android `.so` files (4 ABIs) now bundled in `jniLibs/` via `make install-kotlin`.
+- **synheart-engine installed** — Android `.so` files (4 ABIs) now bundled in `jniLibs/` via `make install-kotlin`.
 
 ## [1.1.0] - 2026-02-22
 
 ### Changed
 
-- **RuntimeBridge** (renamed from `FluxFFIProvider`) — now wraps synheart-runtime C ABI via JNA instead of calling synheart-flux directly. synheart-runtime composes the full session → state → flux pipeline internally.
-  - `synheart_runtime_new(config_json)` replaces `flux_processor_create()`
-  - `synheart_runtime_push_rr()`, `push_hr()`, `push_accel()`, `push_behavior()` for signal ingestion
-  - `synheart_runtime_tick(now_ms)` returns HSI JSON when a window completes
-  - `synheart_runtime_free_string()` for memory management
+- **RuntimeBridge** (renamed from `FluxFFIProvider`) — now wraps synheart-engine C ABI via JNA instead of calling synheart-flux directly. synheart-engine composes the full session → state → flux pipeline internally.
+  - `synheart_engine_new(config_json)` replaces `flux_processor_create()`
+  - `synheart_engine_push_rr()`, `push_hr()`, `push_accel()`, `push_behavior()` for signal ingestion
+  - `synheart_engine_tick(now_ms)` returns HSI JSON when a window completes
+  - `synheart_engine_free_string()` for memory management
   - Backward-compatible: `createIfAvailable()` still returns null when native library is absent
 - **RuntimeModule** (renamed from `HSVRuntimeModule`) — orchestrates signal collection and pipeline execution via RuntimeBridge.
 - Updated stale comments across 10 source files to reference current module names.

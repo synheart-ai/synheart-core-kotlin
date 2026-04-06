@@ -1,9 +1,9 @@
 package ai.synheart.core.config
 
 /**
- * RFC-0005 Section 6: Synheart feature identifiers for the four-authority activation model.
+ * Feature identifiers for the four-authority activation model.
  *
- * A feature is **operational** when all four conditions hold:
+ * A feature is operational when all four conditions hold:
  * ```
  * FeatureOperational = Activation AND Consent AND Capability AND SessionActive
  * ```

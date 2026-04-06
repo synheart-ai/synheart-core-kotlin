@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
  * A single HSV axis reading: optional score with associated confidence.
  *
  * Mirrors Rust `HsvAxisValue { score: Option<f32>, confidence: f32 }` from
- * synheart-runtime. Score is null when the signal is unavailable;
+ * synheart-engine. Score is null when the signal is unavailable;
  * confidence reflects measurement quality independent of the score value.
  */
 @Serializable
@@ -29,7 +29,7 @@ data class HsvAxisValue(
  * Physiology domain of the Human State Vector.
  *
  * Contains all wearable-derived physiological readings, each paired with
- * a confidence score. Mirrors Rust `PhysiologyState` from synheart-runtime.
+ * a confidence score. Mirrors Rust `PhysiologyState` from synheart-engine.
  *
  * Populated by wearable adapters (WHOOP, Garmin, etc.) via the biosignal
  * pipeline. Emotion and Focus heads in external SDKs (synheart-emotion,

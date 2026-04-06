@@ -15,24 +15,21 @@ package ai.synheart.core.config
  * ```
  */
 data class LabIngestConfig(
-    /// Base URL for the lab ingestion service.
+    /** Base URL for the lab ingestion service. */
     val baseUrl: String = ApiEndpoints.DEFAULT_LAB_INGEST_BASE_URL,
 
-    /// API key for authentication (X-API-Key header).
-    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    /** API key for authentication (X-API-Key header). Optional when device auth is configured. */
     val apiKey: String? = null,
 
-    /// HMAC secret for request signing.
-    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    /** HMAC secret for request signing. Optional when device auth is configured. */
     val hmacSecret: String? = null,
 
-    /// HTTP request timeout in milliseconds (default: 30 seconds).
+    /** HTTP request timeout in milliseconds (default: 30 seconds). */
     val timeoutMs: Long = 30_000,
 
-    /// Maximum retry attempts for failed requests.
+    /** Maximum retry attempts for failed requests. */
     val maxRetries: Int = 3,
 
-    /// When true, automatically build and ingest a session payload after
-    /// stopSession(). Defaults to false (manual ingestion).
+    /** When true, automatically build and ingest a session payload after stopSession(). */
     val autoIngest: Boolean = false
 )

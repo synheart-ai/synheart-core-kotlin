@@ -6,14 +6,10 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.hours
 
-/// Cache for phone raw data points
-///
-/// RFC-CORE-0007 compliant: buffers raw data only.
-/// Feature computation is delegated to synheart-runtime.
+/** Cache for phone raw data points. Buffers raw data only; feature computation is delegated to synheart-engine. */
 class PhoneCache {
     private val windowData = mutableMapOf<WindowType, MutableList<PhoneDataPoint>>()
 
-    /// Add motion data
     fun addMotionData(motion: MotionData) {
         addDataPoint(PhoneDataPoint(
             timestamp = motion.timestamp,
@@ -24,7 +20,6 @@ class PhoneCache {
         ))
     }
 
-    /// Add screen state change
     fun addScreenState(state: ScreenState, timestamp: Long) {
         addDataPoint(PhoneDataPoint(
             timestamp = timestamp,
@@ -35,7 +30,6 @@ class PhoneCache {
         ))
     }
 
-    /// Add app switch event
     fun addAppSwitch(timestamp: Long) {
         addDataPoint(PhoneDataPoint(
             timestamp = timestamp,
@@ -46,7 +40,6 @@ class PhoneCache {
         ))
     }
 
-    /// Add notification event
     fun addNotification(event: NotificationEvent) {
         addDataPoint(PhoneDataPoint(
             timestamp = event.timestamp,
@@ -57,12 +50,10 @@ class PhoneCache {
         ))
     }
 
-    /// Get raw data points for a window
     fun getDataPoints(window: WindowType): List<PhoneDataPoint> {
         return windowData[window]?.toList() ?: emptyList()
     }
 
-    /// Add a data point to all windows
     private fun addDataPoint(point: PhoneDataPoint) {
         val now = point.timestamp
 
@@ -89,7 +80,6 @@ class PhoneCache {
     }
 }
 
-/// Data point for phone data
 data class PhoneDataPoint(
     val timestamp: Long,
     val motionLevel: Double?,

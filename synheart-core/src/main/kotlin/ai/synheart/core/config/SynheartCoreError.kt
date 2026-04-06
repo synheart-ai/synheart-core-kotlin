@@ -1,6 +1,6 @@
 package ai.synheart.core.config
 
-/** RFC-compliant error codes for the Synheart SDK. */
+/** Error codes for the Synheart SDK. */
 sealed class SynheartCoreError(
     val code: String,
     message: String
