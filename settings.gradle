@@ -17,34 +17,26 @@ dependencyResolutionManagement {
 rootProject.name = "synheart-core-android"
 include ':synheart-core'
 
-includeBuild('../synheart-wear-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:synheart-wear') using project(':')
-    }
-}
-includeBuild('../synheart-emotion-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:emotion') using project(':')
-    }
-}
-includeBuild('../synheart-focus-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:focus') using project(':')
-    }
-}
-includeBuild('../synheart-behavior-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:synheart-behavior') using project(':')
-    }
-}
-includeBuild('../synheart-session-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:session') using project(':')
-    }
-}
-includeBuild('../synheart-auth-kotlin') {
-    dependencySubstitution {
-        substitute module('ai.synheart:synheart-auth') using project(':lib')
-    }
-}
+// Sibling SDK composite builds — only wire them in when the sibling checkout
+// exists next to this repo (local multi-repo workspace). In CI / fresh clones
+// the sibling dirs aren't present, so the corresponding Maven Central artifacts
+// are used instead.
+def siblings = [
+        'synheart-wear-kotlin'    : [module: 'ai.synheart:synheart-wear', project: ':'],
+        'synheart-emotion-kotlin' : [module: 'ai.synheart:synheart-emotion', project: ':'],
+        'synheart-focus-kotlin'   : [module: 'ai.synheart:synheart-focus', project: ':'],
+        'synheart-behavior-kotlin': [module: 'ai.synheart:synheart-behavior', project: ':'],
+        'synheart-session-kotlin' : [module: 'ai.synheart:synheart-session', project: ':'],
+        'synheart-auth-kotlin'    : [module: 'ai.synheart:synheart-auth', project: ':lib'],
+]
 
+siblings.each { dir, info ->
+    def siblingDir = file("../${dir}")
+    if (siblingDir.exists() && (new File(siblingDir, 'settings.gradle').exists() || new File(siblingDir, 'settings.gradle.kts').exists())) {
+        includeBuild("../${dir}") {
+            dependencySubstitution {
+                substitute module(info.module) using project(info.project)
+            }
+        }
+    }
+}

@@ -2,18 +2,30 @@ plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.plugin.serialization'
     id 'maven-publish'
+    id 'signing'
 }
 
-group = 'ai.synheart'
-version = '1.2.0'
+import java.util.Base64
+
+group = (project.findProperty('GROUP') ?: 'ai.synheart') as String
+version = (project.findProperty('VERSION_NAME') ?: '1.2.0') as String
+def POM_ARTIFACT_ID = (project.findProperty('POM_ARTIFACT_ID') ?: 'synheart-core') as String
+
 description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
 
 android {
     namespace 'ai.synheart.core'
     compileSdk 34
 
+    lint {
+        // CI runs `lint` separately; don't fail `build`/publishing on lint issues.
+        abortOnError false
+    }
+
     defaultConfig {
         minSdk 24
+        versionCode 1
+        versionName project.version as String
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
@@ -25,15 +37,22 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-    
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
+            withJavadocJar()
         }
     }
 }
@@ -41,15 +60,15 @@ android {
 dependencies {
     // AndroidX Core
     implementation 'androidx.core:core-ktx:1.12.0'
-    
+
     // Kotlin Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
-    
+
     // AndroidX Lifecycle
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
     implementation 'androidx.lifecycle:lifecycle-service:2.6.2'
-    
+
     // Kotlinx Serialization
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0'
 
@@ -58,7 +77,7 @@ dependencies {
 
     // WorkManager
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
-    
+
     // AndroidX Security (for encrypted storage)
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
@@ -70,9 +89,9 @@ dependencies {
     // and accessed via RuntimeBridge.
     implementation 'ai.synheart:synheart-wear:0.3.0'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
-    implementation 'ai.synheart:session:0.1.0'
+    implementation 'ai.synheart:synheart-session:0.2.0'
     implementation 'ai.synheart:synheart-auth:0.1.0'
-    
+
     // JNA (non-Android JAR for host unit tests)
     testImplementation 'net.java.dev.jna:jna:5.14.0'
     // Real org.json for host unit tests (Android stubs throw at runtime)
@@ -98,23 +117,96 @@ afterEvaluate {
         publications {
             release(MavenPublication) {
                 from components.release
-                groupId = 'ai.synheart'
-                artifactId = 'synheart-core'
-                version = project.version
+
+                groupId = project.group as String
+                artifactId = POM_ARTIFACT_ID
+                version = project.version as String
 
                 pom {
                     name = 'Synheart Core SDK'
                     description = project.description
                     url = 'https://github.com/synheart-ai/synheart-core-kotlin'
+
                     licenses {
                         license {
-                            name = 'Apache License 2.0'
+                            name = 'Apache-2.0'
                             url = 'https://www.apache.org/licenses/LICENSE-2.0'
                         }
+                    }
+
+                    developers {
+                        developer {
+                            id = 'israel-goytom'
+                            name = 'Israel Goytom'
+                            email = 'israel@synheart.ai'
+                        }
+                        developer {
+                            id = 'synheart-ai'
+                            name = 'Synheart AI Team'
+                            email = 'dev@synheart.ai'
+                        }
+                    }
+
+                    scm {
+                        connection = 'scm:git:git://github.com/synheart-ai/synheart-core-kotlin.git'
+                        developerConnection = 'scm:git:ssh://github.com/synheart-ai/synheart-core-kotlin.git'
+                        url = 'https://github.com/synheart-ai/synheart-core-kotlin'
                     }
                 }
             }
         }
     }
-}
 
+    signing {
+        // Support both `GPG_*` and `SIGNING_*` naming (CI commonly uses ORG_GRADLE_PROJECT_SIGNING_*).
+        def signingKey =
+                project.findProperty('GPG_PRIVATE_KEY')
+                        ?: project.findProperty('SIGNING_KEY')
+                        ?: System.getenv('GPG_PRIVATE_KEY')
+                        ?: System.getenv('SIGNING_KEY')
+                        ?: ''
+        def signingKeyBase64 =
+                project.findProperty('GPG_PRIVATE_KEY_BASE64')
+                        ?: project.findProperty('SIGNING_KEY_BASE64')
+                        ?: System.getenv('GPG_PRIVATE_KEY_BASE64')
+                        ?: System.getenv('SIGNING_KEY_BASE64')
+                        ?: ''
+        def signingPassword =
+                project.findProperty('GPG_PASSPHRASE')
+                        ?: project.findProperty('SIGNING_PASSWORD')
+                        ?: System.getenv('GPG_PASSPHRASE')
+                        ?: System.getenv('SIGNING_PASSWORD')
+                        ?: ''
+
+        // Prefer base64 when provided (robust for CI / dotenv / shells).
+        if (signingKeyBase64) {
+            def normalized = signingKeyBase64.toString().replaceAll('\\s+', '')
+            signingKey = new String(Base64.getMimeDecoder().decode(normalized), 'UTF-8')
+        }
+
+        // Support `.env`-style single-line values with escaped newlines.
+        signingKey = (signingKey ?: '')
+                .toString()
+                .replace('\r\n', '\n')
+                .replace('\r', '\n')
+                .replace('\\n', '\n')
+                .trim()
+        signingPassword = (signingPassword ?: '').toString()
+
+        def hasSigning = signingKey && signingPassword
+
+        if (hasSigning) {
+            useInMemoryPgpKeys(signingKey, signingPassword)
+        }
+
+        // Don't require signing for local `publishToMavenLocal` tests.
+        // Require signing when publishing to Sonatype (Maven Central requirement).
+        required {
+            hasSigning && gradle.taskGraph.allTasks.any { t ->
+                def n = t.name.toLowerCase()
+                n.contains('sonatype') || n.contains('close') || n.contains('release')
+            }
+        }
+        sign publishing.publications.release
+    }
+}
