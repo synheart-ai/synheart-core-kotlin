@@ -78,8 +78,6 @@ data class SynheartConfig(
  * Example:
  * ```kotlin
  * val cloudConfig = CloudConfig(
- *     tenantId = "your_tenant_id",
- *     hmacSecret = "your_hmac_secret",
  *     subjectId = "pseudonymous_user_123",
  *     instanceId = UUID.randomUUID().toString()
  * )
@@ -87,9 +85,11 @@ data class SynheartConfig(
  */
 data class CloudConfig(
     val baseUrl: String = ApiEndpoints.DEFAULT_CLOUD_BASE_URL,
-    val tenantId: String,
-    val hmacSecret: String? = null,
-    /** Custom auth provider for request signing. When set, takes precedence over HMAC. */
+    /**
+     * Auth provider for request signing. The runtime signs every ingest
+     * request with the device's hardware-backed ECDSA P-256 key; this is
+     * an override hook for hosts that need to stub it (e.g. in tests).
+     */
     val authProvider: AuthProvider? = null,
     val subjectId: String,
     val subjectType: String = "pseudonymous_user",
@@ -99,13 +99,7 @@ data class CloudConfig(
     val uploadIntervalMs: Long = 300_000,
     val maxRetries: Int = 3,
     val enableBacklog: Boolean = true
-) {
-    init {
-        require(hmacSecret != null || authProvider != null) {
-            "CloudConfig requires either hmacSecret or authProvider"
-        }
-    }
-}
+)
 
 /**
  * Consent service configuration.

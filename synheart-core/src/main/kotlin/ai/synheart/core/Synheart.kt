@@ -65,20 +65,18 @@ import kotlinx.coroutines.launch
  *     )
  * )
  *
- * // Subscribe to HSI JSON updates from synheart-engine
+ * // Activate modules
+ * Synheart.activate(SynheartFeature.WEAR)
+ * Synheart.activate(SynheartFeature.BEHAVIOR)
+ *
+ * // Subscribe to HSI JSON updates from the runtime
  * Synheart.onHSIUpdate.collect { hsiJson ->
  *     SynheartLogger.log("HSI frame: $hsiJson")
  * }
  *
- * // Optional: Enable interpretation modules
- * Synheart.enableFocus()
- * Synheart.onFocusUpdate.collect { focus ->
- *     SynheartLogger.log("Focus Score: ${focus.score}")
- * }
- *
- * Synheart.enableEmotion()
- * Synheart.onEmotionUpdate.collect { emotion ->
- *     SynheartLogger.log("Stress Index: ${emotion.stress}")
+ * // Or use the typed projection
+ * Synheart.onStateUpdate.collect { state ->
+ *     SynheartLogger.log("HSI state: $state")
  * }
  * ```
  */

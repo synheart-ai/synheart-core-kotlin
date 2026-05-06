@@ -1,12 +1,12 @@
 # Synheart Core SDK - Kotlin
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
 Android/Kotlin platform SDK for Synheart. This is a thin wrapper around **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** — the shared implementation that owns all business logic (storage, crypto, sync, consent, capabilities, artifact pipeline, session orchestration, and cloud integration).
 
-Human state inference is computed on-device by `synheart-engine` (deterministic signal processing pipeline), which runs inside `synheart-core-runtime`. This SDK communicates with the runtime via JNA (`libsynheart_core_runtime.so`).
+Human state inference is computed on-device by the runtime, loaded by this SDK as a native binary at startup.
 
 This SDK handles platform-specific concerns only: sensor collection (Health Connect, BLE), Android Keystore key management, EncryptedSharedPreferences, Kotlin Flow reactive streams, and Jetpack integration.
 
@@ -17,12 +17,11 @@ Android App
     |
 synheart-core-kotlin (this SDK)
     |-- Wear/Phone/Behavior modules (platform sensor collection)
-    |-- CoreRuntimeBridge (JNA to C ABI)
+    |-- CoreRuntimeBridge (loads the runtime native binary)
     |
-libsynheart_core_runtime.so (per ABI: arm64-v8a, armeabi-v7a, x86_64)
-    |-- synheart-engine (HSI computation)
+synheart-core-runtime native binary (per ABI: arm64-v8a, armeabi-v7a, x86_64)
+    |-- HSI computation
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
-    |-- 67 C ABI functions
 ```
 
 ## Repositories
@@ -69,27 +68,21 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via synheart-engine)
+6. **HSI Runtime** - Signal fusion and state computation (via the runtime native binary)
 7. **Cloud Connector** - Secure HSI snapshot uploads
-
-### Optional Interpretation Modules
-
-- **Synheart Focus** - Focus/engagement estimation (optional, explicit enable)
-- **Synheart Emotion** - Affect modeling (optional, explicit enable)
 
 ### Data Flow
 
 ```
 Wear, Phone, Behavior Modules (raw samples)
     ↓
-RuntimeModule → RuntimeBridge → synheart-engine (via JNA)
-    ↓                              ↓
-    ↓                   session → state → HSI JSON
-    ↓                              ↓
-    ←──── HumanStateVector ←───────┘
+CoreRuntimeBridge → runtime native binary
+    ↓                       ↓
+    ↓             session → state → HSI 1.3 JSON
+    ↓                       ↓
+    ←──── HSI JSON ←────────┘
     ↓
-Optional: Focus Module → Focus Estimates
-Optional: Emotion Module → Emotion Estimates
+Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 ```
 
 ## Setup
@@ -102,7 +95,7 @@ Add the library to your `build.gradle`:
 dependencies {
     implementation project(':synheart-core')
     // Or if published to Maven:
-    // implementation 'ai.synheart:core-sdk:1.0.0'
+    // implementation 'ai.synheart:synheart-core:1.2.0'
 }
 ```
 
@@ -124,11 +117,12 @@ Add required permissions to your `AndroidManifest.xml`:
 
 ### Basic Usage
 
-The Core SDK provides HSI (Human State Interface) as the core state representation, with optional interpretation modules for Focus and Emotion:
+The Core SDK exposes HSI (Human State Interface) as the canonical state representation. Apps subscribe to `onHSIUpdate` (raw JSON) or `onStateUpdate` (typed projection) — there are no separate Focus / Emotion subscriptions.
 
 ```kotlin
 import ai.synheart.core.Synheart
-import ai.synheart.core.models.SynheartConfig
+import ai.synheart.core.config.SynheartConfig
+import ai.synheart.core.config.SynheartFeature
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -147,25 +141,14 @@ class MainActivity : AppCompatActivity() {
                 )
             )
 
-            // Subscribe to HSI updates (raw JSON from synheart-engine)
+            // Activate modules
+            Synheart.activate(SynheartFeature.WEAR)
+            Synheart.activate(SynheartFeature.BEHAVIOR)
+
+            // Subscribe to HSI updates (raw JSON from the runtime)
             launch {
                 Synheart.onHSIUpdate.collect { hsiJson ->
                     println("HSI JSON: $hsiJson")
-                }
-            }
-
-            // Optional: Enable interpretation modules (activate API preferred)
-            Synheart.activate(SynheartFeature.FOCUS)
-            launch {
-                Synheart.onFocusUpdate.collect { focus ->
-                    println("Focus Score: ${focus.score}")
-                }
-            }
-
-            Synheart.activate(SynheartFeature.EMOTION)
-            launch {
-                Synheart.onEmotionUpdate.collect { emotion ->
-                    println("Stress Index: ${emotion.stress}")
                 }
             }
 
@@ -206,15 +189,8 @@ val wearModule = WearModule(capabilities = capabilities, consent = consent)
 val phoneModule = PhoneModule(capabilities = capabilities, consent = consent)
 val behaviorModule = BehaviorModule(capabilities = capabilities, consent = consent)
 
-// Create RuntimeBridge (wraps synheart-engine)
-val bridge = RuntimeBridge.createIfAvailable(context)
-
-// Create Runtime Module
-val runtime = RuntimeModule(
-    bridge = bridge,
-    wearModule = wearModule,
-    behaviorModule = behaviorModule,
-)
+// Create the runtime bridge (loads the on-device runtime artifact)
+val bridge = CoreRuntimeBridge.create(context)
 
 // Initialize and start modules
 lifecycleScope.launch {
@@ -238,10 +214,10 @@ lifecycleScope.launch {
     runtime.start()
 }
 
-// Subscribe to final HSV
+// Subscribe to HSI updates from the runtime
 lifecycleScope.launch {
-    runtime.hsiFlow.collect { hsiJson ->
-        // Handle HSI JSON frames from synheart-engine
+    Synheart.onHSIUpdate.collect { hsiJson ->
+        // Handle HSI 1.3 JSON frames
     }
 }
 ```
@@ -249,10 +225,9 @@ lifecycleScope.launch {
 ### Access Current State
 
 ```kotlin
-val currentState = Synheart.currentState
-currentState?.emotion?.stress?.let { stressLevel ->
-    // Handle stress level
-}
+// `currentState` is the latest raw HSI JSON string emitted by the runtime.
+// Parse it (or use `onStateUpdate` for the typed projection) to read axes.
+val hsiJson: String? = Synheart.currentState
 ```
 
 ### Lifecycle Integration
@@ -261,99 +236,37 @@ Synheart integrates with Android lifecycle. When using the Cloud Connector and/o
 
 ## Batch Ingest Mode
 
-By default, the runtime module streams data in real-time. **Batch ingest mode** buffers all events during a session and runs a single `ingestBatch` call on stop.
+By default the runtime streams data in real time. **Batch ingest mode** buffers all events during a session and runs a single ingest call when the session stops:
 
 ```kotlin
-val runtimeModule = RuntimeModule(
-    bridge = bridge,
-    wearModule = wearModule,
-    behaviorModule = behaviorModule,
-    batchIngestOnStop = true  // Enable batch mode
+val config = SynheartConfig(
+    appId = "com.example.app",
+    subjectId = "anon_user_123",
+    batchIngestOnStop = true,
 )
 ```
 
 ## Lab Ingestion
 
-Send structured session and metadata payloads to the Synheart platform API.
-
-### Auto-Ingest
+Lab session and metadata payloads are produced by the `Synheart.lab*` API and uploaded automatically when `research` consent is granted and `cloudConfig` is wired up.
 
 ```kotlin
-val config = SynheartConfig(
-    appId = "your_app_id",
-    apiKey = "your_api_key",
-    subjectId = "sub_user_123",
-    labIngestConfig = LabIngestConfig(
-        apiKey = "your_platform_api_key",
-        autoIngest = true
-    )
+val now = { System.currentTimeMillis() }
+
+val sessionId = Synheart.labStart(protocolJson, now())
+val windowId = Synheart.labOpenWindow(
+    windowType = "baseline",
+    startedAtMs = now(),
 )
-```
+// ... collect data ...
+Synheart.labCloseWindow(windowId, now())
 
-### Manual Ingestion
-
-```kotlin
-// Ingest current session data
-synheart.ingestSession()
-
-// Ingest app/user metadata
-synheart.ingestMetadata()
-```
-
-### Standalone Payload Builder
-
-```kotlin
-val payload = LabPayloadBuilder.buildSession(
-    sessionId = "sess_123",
-    // ... other params
-)
+val payload = Synheart.labFinalize(now())  // returns JSON; auto-enqueued for upload
 ```
 
 ## Data Models
 
-### HumanStateVector
-
-The main data structure containing all state information:
-
-```kotlin
-data class HumanStateVector(
-    val timestamp: Long,
-    val meta: MetaState,
-    val heartRate: Float?,
-    val hrv: Float?,
-    val hrvSdnn: Float?,
-    val hsiEmbedding: List<Float>,
-    val emotion: EmotionState?,
-    val focus: FocusState?,
-    val behavior: BehaviorState?,
-    val context: ContextState?
-)
-```
-
-### EmotionState
-
-```kotlin
-data class EmotionState(
-    val stress: Float,      // 0.0 - 1.0
-    val calm: Float,         // 0.0 - 1.0
-    val engagement: Float,  // 0.0 - 1.0
-    val activation: Float,  // 0.0 - 1.0
-    val valence: Float      // -1.0 to 1.0
-)
-```
-
-### FocusState
-
-```kotlin
-data class FocusState(
-    val score: Float,           // 0.0 - 1.0
-    val cognitiveLoad: Float,   // 0.0 - 1.0
-    val clarity: Float,          // 0.0 - 1.0
-    val distraction: Float       // 0.0 - 1.0
-)
-```
-
-### Window Features
+The runtime emits **HSI 1.3 JSON** as its public output — apps subscribe via `Synheart.onHSIUpdate` and parse the JSON, or use `onStateUpdate` for the typed projection. Internal types (`Hsv` and friends) are not part of the public SDK API.
 
 For the modular architecture, features are collected in time windows:
 
@@ -368,14 +281,14 @@ For the modular architecture, features are collected in time windows:
 | Method | Description |
 |--------|-------------|
 | `initialize(context, config, userId, autoStart)` | Initialize the SDK |
-| `startSession()` | Start data collection |
-| `stopSession()` | Stop data collection |
-| `activate(feature)` | Enable a feature (focus, emotion, cloud, etc.) |
+| `activate(feature)` | Enable a `SynheartFeature` (`WEAR`, `BEHAVIOR`, `PHONE_CONTEXT`, `CLOUD`, `SYNI`) |
 | `deactivate(feature)` | Disable a feature |
-| `uploadNow()` | Force upload queued snapshots |
-| `grantConsent(consentType)` | Grant consent for a data type |
-| `revokeConsent(consentType)` | Revoke consent for a data type |
-| `hasConsent(consentType)` | Check if consent is granted |
+| `requestConsent()` | Open the cloud consent flow; returns a `ConsentToken?` |
+| `hasConsent(consentType)` | Check if a wire-string consent is granted |
+| `revokeConsentType(consentType)` | Revoke a single consent type |
+| `revokeConsent()` | Revoke all consent types |
+| `labStart` / `labOpenWindow` / `labCloseWindow` / `labFinalize` | Lab protocol APIs |
+| `syncNow()` | Force a sync of pending uploads |
 | `stop()` | Stop the session |
 | `dispose()` | Release all resources |
 
@@ -383,9 +296,8 @@ For the modular architecture, features are collected in time windows:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `onHSIUpdate` | `Flow<String>` | HSI JSON frames from synheart-engine |
-| `onEmotionUpdate` | `Flow<EmotionState>` | Stream of emotion updates |
-| `onFocusUpdate` | `Flow<FocusState>` | Stream of focus updates |
+| `onHSIUpdate` | `Flow<String>` | HSI 1.3 JSON frames from the runtime |
+| `onStateUpdate` | `Flow<HSIState>` | Typed projection of `onHSIUpdate` |
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 

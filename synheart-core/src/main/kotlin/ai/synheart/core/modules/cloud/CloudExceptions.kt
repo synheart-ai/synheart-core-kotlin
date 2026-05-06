@@ -28,11 +28,6 @@ class RateLimitExceededError(val retryAfter: Int) :
     CloudConnectorException("Rate limit exceeded, retry after $retryAfter seconds")
 
 /**
- * Thrown when tenant ID is invalid or not found (403 invalid_tenant)
- */
-class InvalidTenantError : CloudConnectorException("Tenant ID not found or invalid")
-
-/**
  * Thrown when HSI 1.1 schema validation fails (400 schema_validation_failed)
  */
 class SchemaValidationError : CloudConnectorException("HSI 1.1 schema validation failed")

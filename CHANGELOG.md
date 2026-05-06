@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed (BREAKING) — 2026-05-05
+- **`CloudConfig.tenantId`** — dead field. The cloud resolves `(org_id, tenant_id, project_id)` from `app_id` server-side; the SDK never sent it on the wire. Drop the `tenantId =` argument from your `CloudConfig(...)` calls.
+- **`CloudConfig.hmacSecret`** — dead field. Request signing is performed by the runtime's hardware-backed ECDSA key, not by HMAC.
+- **`require(hmacSecret != null || authProvider != null)`** init precondition — removed alongside `hmacSecret`. `authProvider` is now optional; pass it only when you need to override the runtime's default signer.
+- **`InvalidTenantError`** exception class — never raised on the SDK→ingest path.
+
+### Changed (docs) — 2026-05-05
+- README: removed fictional `SynheartFeature.FOCUS` / `.EMOTION`, `Synheart.onFocusUpdate` / `onEmotionUpdate`, `RuntimeBridge.createIfAvailable()`, `RuntimeModule(...)`, `runtime.hsiFlow`, `Synheart.currentState?.emotion?.stress`, `synheart.ingestSession()` / `ingestMetadata()`, `LabPayloadBuilder.buildSession(...)`, `HumanStateVector` / `EmotionState` / `FocusState` data-class examples, `uploadNow()` API entry.
+- README: corrected import — `ai.synheart.core.config.SynheartConfig` (not `models.SynheartConfig`).
+- README: corrected install snippet — `ai.synheart:synheart-core:1.2.0` (not `ai.synheart:core-sdk:1.0.0`).
+- README: version badge `1.3.0` → `1.2.0`.
+- README: low-level / internal-language wording ("JNA", "C ABI") removed from user-facing copy; runtime native binary referenced abstractly.
+- `Synheart.kt` KDoc cleaned: removed `enableFocus()` / `enableEmotion()` / `onFocusUpdate` / `onEmotionUpdate` examples that referenced symbols not on the object.
+
+### Added — Loot #3 + Loot #4 (open-wearables recon, 2026-05-01)
+
+Two new public Kotlin APIs in `ai.synheart.core.priority` and
+`ai.synheart.core.resilience`, both routing through new JNA decls
+in `bridge.CoreRuntimeNative`. Both fall back to a pure-Kotlin
+in-memory path when the native library isn't loaded.
+
+| Class | Loot | Native symbols |
+|---|---|---|
+| `SynheartPriority` | #3 multi-source priority | `synheart_core_priority_set_provider`, `_set_metric_override`, `_effective_rank`, `_resolve` |
+| `SynheartResilience` | #4 HRV-CV resilience | `synheart_core_resilience_compute_v1` |
+
+**Loot #5 (Apple Health XML backfill) is intentionally NOT bound on
+Android.** `export.zip` is iOS-only; Android's equivalent is the
+Health Connect export, which is a different format and idempotency
+recipe. A future `HealthConnectBackfillSink.kt` can reuse the same
+underlying runtime ingest symbols with a format-tagged payload
+variant.
+
 ### Changed
 - Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
   migrated to synheart-core-runtime (Rust). SDK is now a thin FFI shell.
