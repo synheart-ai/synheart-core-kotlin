@@ -4,9 +4,9 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-Android/Kotlin platform SDK for Synheart. This is a thin wrapper around **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** — the shared implementation that owns all business logic (storage, crypto, sync, consent, capabilities, artifact pipeline, session orchestration, and cloud integration).
+Android/Kotlin platform SDK for Synheart. This is a thin wrapper around the Synheart runtime — a native binary that owns the on-device business logic and is loaded by this SDK at startup.
 
-Human state inference is computed on-device by the runtime, loaded by this SDK as a native binary at startup.
+Human state inference is computed on-device by the runtime.
 
 This SDK handles platform-specific concerns only: sensor collection (Health Connect, BLE), Android Keystore key management, EncryptedSharedPreferences, Kotlin Flow reactive streams, and Jetpack integration.
 
@@ -19,7 +19,7 @@ synheart-core-kotlin (this SDK)
     |-- Wear/Phone/Behavior modules (platform sensor collection)
     |-- CoreRuntimeBridge (loads the runtime native binary)
     |
-synheart-core-runtime native binary (per ABI: arm64-v8a, armeabi-v7a, x86_64)
+Synheart runtime native binary (per ABI: arm64-v8a, armeabi-v7a, x86_64)
     |-- HSI computation
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
 ```
@@ -28,7 +28,6 @@ synheart-core-runtime native binary (per ABI: arm64-v8a, armeabi-v7a, x86_64)
 
 | Repository | Purpose |
 |------------|---------|
-| **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** | Shared implementation (all business logic) |
 | **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
 | **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK (this repository) |
 | **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK |
@@ -373,7 +372,7 @@ The SDK follows a pipeline architecture:
 ```
 Raw Signals → synheart-engine → HSI JSON
                 ↓
-     session → state → HSI 1.x
+     session → state → HSI 1.3
                 ↓
 Optional: Focus/Emotion Heads → Semantic Estimates
 ```
@@ -505,8 +504,14 @@ baseUrl = "http://192.168.1.100:8083"  // your machine's LAN IP
 
 ### Default credentials
 
-- **API Key:** `mock-dev-api-key-2026`
-- **HMAC Secret:** `mock-dev-hmac-secret-2026`
+Production cloud ingest is signed with **ECDSA P-256** via
+`X-Synheart-Proof` (compact JWS) plus a `X-Consent-Token` JWT — see
+[`synheart-auth`](https://github.com/synheart-ai/synheart-auth) and
+RFC-AUTH-MOBILE-0001. The `synheart local` server below ships
+development-only mock keys for offline iteration.
+
+- **API Key:** `mock-dev-api-key-2026` (mock platform only)
+- **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only — production is ECDSA, not a shared secret)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
 
