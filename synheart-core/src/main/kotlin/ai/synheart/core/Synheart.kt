@@ -146,6 +146,26 @@ object Synheart {
         } catch (_: Exception) {}
     }
 
+    /** Record a batch of metric events. Loops over the singular path. */
+    fun recordMetrics(events: List<ai.synheart.core.models.MetricEvent>) {
+        for (event in events) {
+            recordMetric(event)
+        }
+    }
+
+    /**
+     * Enable/disable ambient capture: when on, the runtime forwards every
+     * closed HSI window to the host's HSI callback regardless of session
+     * state. When off (default), windows are forwarded only while a session
+     * is active.
+     */
+    fun setAmbientCapture(enabled: Boolean) {
+        coreRuntime?.setAmbientCapture(enabled)
+    }
+
+    /** Read the ambient-capture flag. */
+    fun getAmbientCapture(): Boolean = coreRuntime?.getAmbientCapture() ?: false
+
     /** List stored sessions with optional filters. */
     fun listLocalSessions(range: ai.synheart.core.models.SessionRange? = null): List<SessionRecord> {
         val cr = coreRuntime ?: return emptyList()

@@ -247,6 +247,19 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun flushUploads(): String? =
         readAndFreeString(lib.synheart_core_flush_uploads(requireHandle()))
 
+    // ------------------------------------------------------------------ //
+    // Ambient capture                                                    //
+    // ------------------------------------------------------------------ //
+
+    /** Enable/disable ambient capture (HSI windows forwarded regardless of session state). */
+    fun setAmbientCapture(enabled: Boolean) {
+        lib.synheart_core_set_ambient_capture(requireHandle(), if (enabled) 1 else 0)
+    }
+
+    /** Read the ambient-capture flag. */
+    fun getAmbientCapture(): Boolean =
+        lib.synheart_core_get_ambient_capture(requireHandle()) != 0
+
     /** Upload platform metadata. Returns result JSON or null. */
     fun uploadMetadata(): String? =
         readAndFreeString(lib.synheart_core_upload_metadata(requireHandle()))

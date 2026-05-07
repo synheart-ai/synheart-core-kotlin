@@ -76,6 +76,12 @@ interface CoreRuntimeNative : Library {
     /** Ingest a pre-built batch (JSON). Returns result JSON or null. */
     fun synheart_core_ingest_batch(handle: Pointer?, batch_json: String?, now_ms: Long): Pointer?
 
+    /** Enable/disable ambient capture mode. */
+    fun synheart_core_set_ambient_capture(handle: Pointer?, enabled: Int)
+
+    /** Read the ambient-capture flag. Returns 1 when enabled, 0 otherwise. */
+    fun synheart_core_get_ambient_capture(handle: Pointer?): Int
+
     // ------------------------------------------------------------------ //
     // Consent                                                            //
     // ------------------------------------------------------------------ //

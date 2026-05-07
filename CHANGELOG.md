@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — cross-SDK API parity (2026-05-07)
+- **`Synheart.recordMetrics(events: List<MetricEvent>)`** — batch wrapper over `recordMetric` for hosts that capture bursts of metrics.
+- **`Synheart.setAmbientCapture(enabled: Boolean)` / `Synheart.getAmbientCapture()`** — surface for the runtime's ambient-capture mode (forwards every closed HSI window to the host's HSI callback regardless of session state). New JNA bindings to `synheart_core_set_ambient_capture` / `synheart_core_get_ambient_capture`, surfaced through `CoreRuntimeBridge`.
+
 ## [0.0.4] - 2026-05-07
 
 Initial open-source release of the Synheart Core SDK for Android.
