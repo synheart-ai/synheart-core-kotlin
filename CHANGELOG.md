@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`require(hmacSecret != null || authProvider != null)`** init precondition — removed alongside `hmacSecret`. `authProvider` is now optional; pass it only when you need to override the runtime's default signer.
 - **`InvalidTenantError`** exception class — never raised on the SDK→ingest path.
 
+### Changed (BREAKING) — 2026-05-07
+- **`Synheart.cancelAccountDeletion()`** is now `suspend` and returns `DeletionRequestResult` instead of `Boolean`, mirroring `requestAccountDeletion()` and the Dart/Swift counterparts. Same operation, structured return: `status` is `"cancelled"` on success or `"error"` on failure, with a human-readable `message`. Wrap call sites in a coroutine and update `Boolean` consumers.
+
 ### Changed (docs) — 2026-05-05
 - README: removed fictional `SynheartFeature.FOCUS` / `.EMOTION`, `Synheart.onFocusUpdate` / `onEmotionUpdate`, `RuntimeBridge.createIfAvailable()`, `RuntimeModule(...)`, `runtime.hsiFlow`, `Synheart.currentState?.emotion?.stress`, `synheart.ingestSession()` / `ingestMetadata()`, `LabPayloadBuilder.buildSession(...)`, `HumanStateVector` / `EmotionState` / `FocusState` data-class examples, `uploadNow()` API entry.
 - README: corrected import — `ai.synheart.core.config.SynheartConfig` (not `models.SynheartConfig`).
