@@ -243,6 +243,57 @@ interface CoreRuntimeNative : Library {
 
     /** Finalize the lab protocol. Returns a pointer to the result JSON string, or null on failure. */
     fun synheart_core_lab_finalize(handle: Pointer?, ended_at_ms: Long): Pointer?
+
+    // ------------------------------------------------------------------ //
+    // Loot #3 — Multi-source priority resolver                            //
+    // Process-global store; no handle. Lower rank wins.                  //
+    // ------------------------------------------------------------------ //
+
+    /** Set the global rank for a provider. Returns 0 on success, -1 on bad input. */
+    fun synheart_core_priority_set_provider(provider: String?, rank: Int): Int
+
+    /**
+     * Set or clear a per-metric rank override for `(metric, provider)`.
+     * Pass `rankPresent = 0` to clear the override; `1` to set to `rank`.
+     * Returns 0 on success, -1 on bad input.
+     */
+    fun synheart_core_priority_set_metric_override(
+        metric: String?, provider: String?, rank_present: Int, rank: Int
+    ): Int
+
+    /**
+     * Read the effective rank for `(metric, provider)`. Returns
+     * `Int.MAX_VALUE` (the runtime's `ProviderRank::UNRANKED` sentinel)
+     * for unknown providers, or -1 if `metric` is unparseable.
+     */
+    fun synheart_core_priority_effective_rank(metric: String?, provider: String?): Int
+
+    /**
+     * Resolve the winning source for `metric` given a `{provider:
+     * count}` JSON map. Returns JSON string pointer (caller frees via
+     * [synheart_core_free_string]) or null on bad input.
+     */
+    fun synheart_core_priority_resolve(metric: String?, samples_json: String?): Pointer?
+
+    // ------------------------------------------------------------------ //
+    // Loot #4 — HRV-CV resilience score                                   //
+    // Stateless. Three JSON inputs, one JSON output.                     //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Compute a resilience score from samples + sleep windows + config.
+     * Returns JSON string pointer (caller frees) or null on bad input.
+     */
+    fun synheart_core_resilience_compute_v1(
+        samples_json: String?, windows_json: String?, config_json: String?
+    ): Pointer?
+
+    // Loot #5 (Apple Health XML backfill) is intentionally NOT bound
+    // on Android — `export.zip` is iOS-only. When Android Health
+    // Connect backfill ships, it will get its own JNA decls here
+    // pointing at format-agnostic runtime symbols (the underlying
+    // `synheart_core_backfill_*` symbols are reusable; we just need
+    // a different sample-payload variant on the runtime side.
 }
 
 /** JNA callback interface for HSI updates. */

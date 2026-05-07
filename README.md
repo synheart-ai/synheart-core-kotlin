@@ -1,6 +1,6 @@
 # Synheart Core SDK - Kotlin
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.0.4-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -94,7 +94,7 @@ Add the library to your `build.gradle`:
 dependencies {
     implementation project(':synheart-core')
     // Or if published to Maven:
-    // implementation 'ai.synheart:synheart-core:1.2.0'
+    // implementation 'ai.synheart:synheart-core:0.0.4'
 }
 ```
 
