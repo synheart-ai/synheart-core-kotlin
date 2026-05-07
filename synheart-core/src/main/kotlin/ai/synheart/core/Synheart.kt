@@ -247,6 +247,17 @@ object Synheart {
     /** Wipe all local data. Alias of [wipeLocalData] matching the Flutter SDK. */
     suspend fun deleteLocalData() = wipeLocalData()
 
+    /**
+     * Request server-side account deletion only. Local data is preserved.
+     * Use [wipeLocalData] / [deleteLocalData] to clear local state, or
+     * [requestAccountDeletion] to do both.
+     *
+     * Mirrors the Flutter SDK's `deleteCloudData()`.
+     */
+    suspend fun deleteCloudData() {
+        coreRuntime?.requestAccountDeletion()
+    }
+
     /** Request account deletion -- wipes local data and requests server-side deletion. */
     suspend fun requestAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
         coreRuntime?.requestAccountDeletion()
@@ -826,11 +837,13 @@ object Synheart {
     }
 
     /**
-     * Load a native runtime SRM snapshot from JSON.
-     * Returns true on success, false on failure, or `null` if runtime unavailable.
+     * Load a native runtime SRM snapshot from JSON. Returns `true` on success,
+     * `false` on failure or if the runtime is unavailable.
+     *
+     * Signature matches the Flutter SDK's non-nullable `bool` return type.
      */
-    fun loadRuntimeSRMSnapshot(json: String): Boolean? {
-        return coreRuntime?.loadSrmSnapshot(json)
+    fun loadRuntimeSRMSnapshot(json: String): Boolean {
+        return coreRuntime?.loadSrmSnapshot(json) ?: false
     }
 
     /**
