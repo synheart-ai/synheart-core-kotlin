@@ -300,7 +300,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     /**
      * Register a callback for real-time HSI state updates.
      *
-     * The callback fires on a background thread (Rust tokio). Use
+     * The callback fires on a native background thread. Use
      * `Dispatchers.Main` to post to the UI thread.
      */
     fun setHsiCallback(onHsi: (String) -> Unit) {

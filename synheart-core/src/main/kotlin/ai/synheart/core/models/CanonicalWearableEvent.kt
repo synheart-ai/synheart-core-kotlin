@@ -30,8 +30,8 @@ data class CanonicalWearableEvent(
 ) {
     companion object {
         /**
-         * Compute a deterministic wearable event ID using the synheart-id
-         * canonical format.
+         * Compute a deterministic wearable event ID using the canonical
+         * identity format.
          *
          * If [providerRecordId] is present the canonical string is:
          *   `kind=wearable_event|provider={provider}|provider_record_id={id}|v=1`

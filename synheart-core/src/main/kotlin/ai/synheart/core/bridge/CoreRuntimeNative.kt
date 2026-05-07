@@ -5,7 +5,7 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 
 /**
- * JNA interface to the synheart-core-runtime shared library (C ABI).
+ * JNA interface to the native runtime shared library (C ABI).
  *
  * All 42 functions use an opaque handle pattern. Complex input/output types
  * are JSON strings. Returned strings must be freed with [synheart_core_free_string].

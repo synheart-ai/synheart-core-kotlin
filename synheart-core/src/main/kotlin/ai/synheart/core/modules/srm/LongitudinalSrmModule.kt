@@ -5,7 +5,7 @@ import ai.synheart.core.models.CanonicalWearableEvent
 import java.time.Instant
 
 /**
- * Bridges wearable events into the Rust SRM longitudinal baselines.
+ * Bridges wearable events into the native SRM longitudinal baselines.
  *
  * Maps recognised event types to SRM dimension names, extracts a daily
  * scalar value from the event payload, and pushes it to the native

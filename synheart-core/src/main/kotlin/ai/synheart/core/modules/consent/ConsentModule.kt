@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import java.util.UUID
 
 /**
- * Consent Module — thin wrapper delegating core logic to Rust via CoreRuntimeBridge.
+ * Consent Module — thin wrapper delegating core logic to the native runtime via CoreRuntimeBridge.
  *
  * Platform-specific concerns (EncryptedSharedPreferences, device ID, Flow publishers) stay here.
  */

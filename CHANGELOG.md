@@ -42,7 +42,7 @@ variant.
 
 ### Changed
 - Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
-  migrated to the native runtime (Rust). SDK is now a thin FFI shell.
+  migrated to the native runtime. SDK is now a thin FFI shell.
 - RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
 - HSI state updates delivered via native callback mechanism instead of platform-specific streams
 - Lab protocol API now routes through CoreRuntimeBridge
@@ -106,7 +106,7 @@ First stable release supporting HSI 1.x.
 
 ### Added
 
-- **Flux FFI Integration** — Live pipeline from Core SDK to synheart-flux (Rust) via JNA
+- **Flux FFI Integration** — Live pipeline from Core SDK to synheart-flux via JNA
   - `FluxFFIProvider` — concrete `FluxProvider` calling `flux_processor_process_window()` via JNA
   - `FluxNative` — JNA interface binding to `libsynheart_flux.so`
   - Serializes raw `WearSample`, `PhoneDataPoint`, `BehaviorEvent` into WindowInput JSON
@@ -117,7 +117,7 @@ First stable release supporting HSI 1.x.
   - Memory-safe: all `flux_free_string()` calls paired with FFI allocations
   - JNA dependency: `net.java.dev.jna:jna:5.14.0@aar`
 
-- **synheart-flux 0.4.0 Alignment** — HSV types updated to match Rust HSV specification
+- **synheart-flux 0.4.0 Alignment** — HSV types updated to match the canonical HSV specification
   - `HsvAxisValue` — score + confidence pair for per-axis readings (replaces hardcoded 0.8 confidence)
   - `PhysiologyState` — wearable-derived physiology domain with 11 axes (sleep efficiency, recovery, HRV deviation, etc.)
   - `StateQuality` — aggregated quality assessment (overall confidence, modality count, degraded flag, quality flags)

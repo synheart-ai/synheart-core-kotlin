@@ -238,8 +238,13 @@ object Synheart {
     }
 
     /** Cancel a pending account deletion request. */
-    fun cancelAccountDeletion(): Boolean {
-        return coreRuntime?.cancelAccountDeletion() ?: false
+    suspend fun cancelAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
+        val ok = coreRuntime?.cancelAccountDeletion() ?: false
+        return ai.synheart.core.models.DeletionRequestResult(
+            status = if (ok) "cancelled" else "error",
+            message = if (ok) "Account deletion cancelled via CoreRuntimeBridge."
+                      else "Account deletion cancellation failed."
+        )
     }
 
     /** Log out -- revoke consent and clear credentials. */
@@ -477,7 +482,7 @@ object Synheart {
                     }.toString()
                 )
                 if (coreRuntime != null) {
-                    SynheartLogger.log("[Synheart] Rust CoreRuntimeBridge initialized")
+                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
 
                     // Wire HSI callback (consent-gated) + bridge to session engine
                     coreRuntime!!.setHsiCallback { hsiJson ->
@@ -501,10 +506,10 @@ object Synheart {
                     // Update WearableEventProcessor with the live bridge
                     wearModule?.eventProcessor?.updateBridge(coreRuntime)
                 } else {
-                    SynheartLogger.log("[Synheart] Rust CoreRuntimeBridge not available — using Kotlin fallback")
+                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge not available — using Kotlin fallback")
                 }
             } catch (e: Exception) {
-                SynheartLogger.log("[Synheart] Rust CoreRuntimeBridge init failed (non-fatal): $e")
+                SynheartLogger.log("[Synheart] Native CoreRuntimeBridge init failed (non-fatal): $e")
                 coreRuntime = null
             }
 
@@ -536,7 +541,7 @@ object Synheart {
             return // Already running
         }
 
-        // Delegate to Rust core runtime if available
+        // Delegate to native core runtime if available
         coreRuntime?.let { cr ->
             val resultJson = cr.startSession()
             if (resultJson != null) {
@@ -608,7 +613,7 @@ object Synheart {
             return
         }
 
-        // Delegate to Rust core runtime if available
+        // Delegate to native core runtime if available
         coreRuntime?.let { cr ->
             if (cr.stopSession()) {
                 SynheartLogger.log("[Synheart] Session stopped via CoreRuntimeBridge")
@@ -690,7 +695,7 @@ object Synheart {
      * ```
      */
     suspend fun grantConsent(consentType: String) {
-        // Delegate to Rust core runtime if available
+        // Delegate to native core runtime if available
         coreRuntime?.let { cr ->
             if (cr.grantConsent(consentType)) {
                 SynheartLogger.log("[Synheart] Consent '$consentType' granted via CoreRuntimeBridge")
@@ -726,7 +731,7 @@ object Synheart {
      * ```
      */
     suspend fun revokeConsent(consentType: String) {
-        // Delegate to Rust core runtime if available
+        // Delegate to native core runtime if available
         coreRuntime?.let { cr ->
             if (cr.revokeConsent(consentType)) {
                 SynheartLogger.log("[Synheart] Consent '$consentType' revoked via CoreRuntimeBridge")
