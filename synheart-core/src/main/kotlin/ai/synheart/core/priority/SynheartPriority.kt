@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // High-level Kotlin API for the multi-source priority resolver
-// (Loot #3). Mirror of the Flutter and Swift wrappers.
+// Mirror of the Flutter and Swift wrappers.
 //
-// When the loaded native library exposes the Loot #3 symbols
+// When the loaded native library exposes the priority-resolver symbols
 // (synheart-core-runtime 5.4.0+), all calls route through them.
 // Otherwise the class falls back to a pure-Kotlin in-memory store
 // so unit tests and apps developed against older runtimes still

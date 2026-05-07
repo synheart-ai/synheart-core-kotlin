@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// HRV-CV resilience score — Kotlin binding (Loot #4).
+// HRV-CV resilience score — Kotlin binding.
 //
 // Mirror of the Flutter and Swift wrappers. Stateless; takes
 // samples + sleep windows + config and returns a score with

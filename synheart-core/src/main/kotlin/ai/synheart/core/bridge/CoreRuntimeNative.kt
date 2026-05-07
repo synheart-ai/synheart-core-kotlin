@@ -251,7 +251,7 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_lab_finalize(handle: Pointer?, ended_at_ms: Long): Pointer?
 
     // ------------------------------------------------------------------ //
-    // Loot #3 — Multi-source priority resolver                            //
+    // Multi-source priority resolver                                     //
     // Process-global store; no handle. Lower rank wins.                  //
     // ------------------------------------------------------------------ //
 
@@ -282,7 +282,7 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_priority_resolve(metric: String?, samples_json: String?): Pointer?
 
     // ------------------------------------------------------------------ //
-    // Loot #4 — HRV-CV resilience score                                   //
+    // HRV-CV resilience score                                               //
     // Stateless. Three JSON inputs, one JSON output.                     //
     // ------------------------------------------------------------------ //
 
@@ -294,7 +294,7 @@ interface CoreRuntimeNative : Library {
         samples_json: String?, windows_json: String?, config_json: String?
     ): Pointer?
 
-    // Loot #5 (Apple Health XML backfill) is intentionally NOT bound
+    // Apple Health XML backfill is intentionally NOT bound
     // on Android — `export.zip` is iOS-only. When Android Health
     // Connect backfill ships, it will get its own JNA decls here
     // pointing at format-agnostic runtime symbols (the underlying

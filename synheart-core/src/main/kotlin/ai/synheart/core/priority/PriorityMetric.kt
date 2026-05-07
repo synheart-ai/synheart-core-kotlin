@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Public types for the multi-source priority resolver (Loot #3).
+// Public types for the multi-source priority resolver.
 //
 // Mirror of `synheart-core-flutter/lib/src/priority/priority_metric.dart`
 // and `synheart-core-swift/.../SynheartPriority.swift`. Wire names

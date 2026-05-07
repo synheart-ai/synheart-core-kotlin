@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Public types for the HRV-CV resilience score (Loot #4).
+// Public types for the HRV-CV resilience score.
 //
 // Mirror of `synheart-core-flutter/lib/src/resilience/synheart_resilience.dart`
 // and `synheart-core-swift/.../SynheartResilience.swift`. All field
