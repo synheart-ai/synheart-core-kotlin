@@ -4,6 +4,11 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
+> **Source-available.** This repository is open for reading, auditing, and
+> filing issues. We do **not** accept pull requests — see
+> [CONTRIBUTING.md](CONTRIBUTING.md) for the rationale and how to contribute
+> via issues. Security reports go through [SECURITY.md](SECURITY.md).
+
 Android/Kotlin platform SDK for Synheart. This is a thin wrapper around the Synheart runtime — a native binary that owns the on-device business logic and is loaded by this SDK at startup.
 
 Human state inference is computed on-device by the runtime.
