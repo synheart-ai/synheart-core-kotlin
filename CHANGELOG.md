@@ -42,7 +42,7 @@ variant.
 
 ### Changed
 - Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
-  migrated to synheart-core-runtime (Rust). SDK is now a thin FFI shell.
+  migrated to the native runtime (Rust). SDK is now a thin FFI shell.
 - RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
 - HSI state updates delivered via native callback mechanism instead of platform-specific streams
 - Lab protocol API now routes through CoreRuntimeBridge
