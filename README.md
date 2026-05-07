@@ -170,61 +170,6 @@ class MainActivity : AppCompatActivity() {
 }
 ```
 
-### Module-Based Architecture
-
-The SDK also provides a modular architecture for windowed feature collection:
-
-```kotlin
-import ai.synheart.core.modules.*
-import ai.synheart.core.modules.consent.ConsentStorage
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.launch
-
-// Initialize modules
-val capabilities = CapabilityModule().apply {
-    // In production, use loadFromToken(token, secret)
-    // For development only:
-    loadDefaults()
-}
-val consent = ConsentModule(
-    storage = ConsentStorage(context)
-)
-val wearModule = WearModule(capabilities = capabilities, consent = consent)
-val phoneModule = PhoneModule(capabilities = capabilities, consent = consent)
-val behaviorModule = BehaviorModule(capabilities = capabilities, consent = consent)
-
-// Create the runtime bridge (loads the on-device runtime artifact)
-val bridge = CoreRuntimeBridge.create(context)
-
-// Initialize and start modules
-lifecycleScope.launch {
-    // Initialize all modules (must be done before starting)
-    capabilities.initialize()
-    consent.initialize() // This loads consent from storage
-    wearModule.initialize()
-    phoneModule.initialize()
-    behaviorModule.initialize()
-    runtime.initialize()
-    
-    // Optionally grant consents (after initialization)
-    consent.grantAll() // Or updateConsentType() for granular control
-    
-    // Start all modules
-    capabilities.start()
-    consent.start()
-    wearModule.start()
-    phoneModule.start()
-    behaviorModule.start()
-    runtime.start()
-}
-
-// Subscribe to HSI updates from the runtime
-lifecycleScope.launch {
-    Synheart.onHSIUpdate.collect { hsiJson ->
-        // Handle HSI 1.3 JSON frames
-    }
-}
-```
 
 ### Access Current State
 
@@ -238,35 +183,7 @@ val hsiJson: String? = Synheart.currentState
 
 Synheart integrates with Android lifecycle. When using the Cloud Connector and/or background collectors, modules may continue running beyond a single Activity lifecycle depending on your integration.
 
-## Batch Ingest Mode
 
-By default the runtime streams data in real time. **Batch ingest mode** buffers all events during a session and runs a single ingest call when the session stops:
-
-```kotlin
-val config = SynheartConfig(
-    appId = "com.example.app",
-    subjectId = "anon_user_123",
-    batchIngestOnStop = true,
-)
-```
-
-## Lab Ingestion
-
-Lab session and metadata payloads are produced by the `Synheart.lab*` API and uploaded automatically when `research` consent is granted and `cloudConfig` is wired up.
-
-```kotlin
-val now = { System.currentTimeMillis() }
-
-val sessionId = Synheart.labStart(protocolJson, now())
-val windowId = Synheart.labOpenWindow(
-    windowType = "baseline",
-    startedAtMs = now(),
-)
-// ... collect data ...
-Synheart.labCloseWindow(windowId, now())
-
-val payload = Synheart.labFinalize(now())  // returns JSON; auto-enqueued for upload
-```
 
 ## Data Models
 
@@ -287,11 +204,9 @@ For the modular architecture, features are collected in time windows:
 | `initialize(context, config, userId, autoStart)` | Initialize the SDK |
 | `activate(feature)` | Enable a `SynheartFeature` (`WEAR`, `BEHAVIOR`, `PHONE_CONTEXT`, `CLOUD`) |
 | `deactivate(feature)` | Disable a feature |
-| `requestConsent()` | Open the cloud consent flow; returns a `ConsentToken?` |
+| `grantConsent(consentType)` | Grant a wire-string consent |
 | `hasConsent(consentType)` | Check if a wire-string consent is granted |
-| `revokeConsentType(consentType)` | Revoke a single consent type |
-| `revokeConsent()` | Revoke all consent types |
-| `labStart` / `labOpenWindow` / `labCloseWindow` / `labFinalize` | Lab protocol APIs |
+| `revokeConsent(consentType)` | Revoke a single consent type |
 | `syncNow()` | Force a sync of pending uploads |
 | `stop()` | Stop the session |
 | `dispose()` | Release all resources |
