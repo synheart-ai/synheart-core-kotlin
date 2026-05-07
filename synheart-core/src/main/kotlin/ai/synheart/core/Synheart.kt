@@ -928,6 +928,43 @@ object Synheart {
         )
     }
 
+    // ----- Per-Module Collection Control -----
+
+    /**
+     * Start wear (biosignal) collection. Mirrors Flutter's
+     * `startWearCollection({interval})`.
+     *
+     * @param intervalMs Sample interval in milliseconds. Currently not
+     *   honored — the module uses `SynheartConfig.wearConfig.sampleRateHz`
+     *   instead. Kept in the signature for Flutter-API parity.
+     */
+    suspend fun startWearCollection(intervalMs: Long? = null) {
+        @Suppress("UNUSED_PARAMETER") intervalMs
+        wearModule?.start()
+    }
+
+    suspend fun stopWearCollection() {
+        wearModule?.stop()
+    }
+
+    /** Start behavior (interaction) collection. Mirrors Flutter's `startBehaviorCollection()`. */
+    suspend fun startBehaviorCollection() {
+        behaviorModule?.start()
+    }
+
+    suspend fun stopBehaviorCollection() {
+        behaviorModule?.stop()
+    }
+
+    /** Start phone (motion / context) collection. Mirrors Flutter's `startPhoneCollection()`. */
+    suspend fun startPhoneCollection() {
+        phoneModule?.start()
+    }
+
+    suspend fun stopPhoneCollection() {
+        phoneModule?.stop()
+    }
+
     // ----- Diagnostics & Upload State -----
 
     /**
