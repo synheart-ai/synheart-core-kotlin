@@ -146,7 +146,24 @@ object Synheart {
         } catch (_: Exception) {}
     }
 
-    /** List stored sessions with optional filters. */
+    /**
+     * Record a batch of metric events for the current session.
+     *
+     * Mirrors the Flutter SDK's `recordMetrics(List<MetricEvent>)`.
+     */
+    fun recordMetrics(events: List<ai.synheart.core.models.MetricEvent>) {
+        for (event in events) recordMetric(event)
+    }
+
+    /**
+     * List stored sessions with optional filters. Mirrors the Flutter SDK's
+     * `listSessions({SessionRange? range})`.
+     */
+    fun listSessions(range: ai.synheart.core.models.SessionRange? = null): List<SessionRecord> =
+        listLocalSessions(range)
+
+    /** @deprecated Use [listSessions] for Flutter SDK parity. */
+    @Deprecated("Use listSessions() for Flutter SDK parity", ReplaceWith("listSessions(range)"))
     fun listLocalSessions(range: ai.synheart.core.models.SessionRange? = null): List<SessionRecord> {
         val cr = coreRuntime ?: return emptyList()
         val json = cr.listSessions() ?: return emptyList()
