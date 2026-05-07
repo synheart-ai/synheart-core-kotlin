@@ -244,6 +244,9 @@ object Synheart {
         SynheartLogger.log("[Synheart] Local data wiped via CoreRuntimeBridge")
     }
 
+    /** Wipe all local data. Alias of [wipeLocalData] matching the Flutter SDK. */
+    suspend fun deleteLocalData() = wipeLocalData()
+
     /** Request account deletion -- wipes local data and requests server-side deletion. */
     suspend fun requestAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
         coreRuntime?.requestAccountDeletion()
@@ -544,14 +547,21 @@ object Synheart {
      *
      * Must be called after [initialize]. No data collection occurs until
      * this method is called.
+     *
+     * @param durationSec Session duration in seconds. `null` uses the default
+     *   24h (86400). Mirrors the Flutter SDK's optional duration.
+     * @return the newly created [SessionHandle], or `null` if a session was
+     *   already running.
      */
-    suspend fun startSession() {
+    suspend fun startSession(durationSec: Int? = null): SessionHandle? {
         if (!isConfigured) {
             throw IllegalStateException("Synheart must be initialized before starting session")
         }
         if (isRunning) {
-            return // Already running
+            return null // Already running
         }
+
+        val resolvedDuration = durationSec ?: 86400
 
         // Delegate to Rust core runtime if available
         coreRuntime?.let { cr ->
@@ -568,7 +578,7 @@ object Synheart {
                     // Still start Kotlin-side modules for data collection pipeline
                     moduleManager.startAll()
                     reevaluateAllFeatures()
-                    return
+                    return currentSessionHandle
                 } catch (e: Exception) {
                     SynheartLogger.log("[Synheart] CoreRuntimeBridge startSession parse failed, falling back: $e")
                 }
@@ -584,7 +594,7 @@ object Synheart {
         val sessionConfig = SessionConfig(
             sessionId = sessionId,
             mode = SessionMode.FOCUS,
-            durationSec = 86400 // default 24h — long-lived; stop explicitly
+            durationSec = resolvedDuration
         )
         activeMainSessionId = sessionId
         mainSessionJob = scope.launch {
@@ -615,6 +625,7 @@ object Synheart {
         isRunning = true
         reevaluateAllFeatures()
         SynheartLogger.log("[Synheart] Session started")
+        return currentSessionHandle
     }
 
     /**
@@ -903,7 +914,21 @@ object Synheart {
         }
     }
 
-    // MARK: Diagnostics & Upload State
+    // ----- Module Status -----
+
+    /**
+     * Per-module readiness flags. Mirrors the Flutter SDK's `getModuleStatuses()`.
+     * Keys: `"wear"`, `"behavior"`, `"phoneContext"`.
+     */
+    fun getModuleStatuses(): Map<String, Boolean> {
+        return mapOf(
+            "wear" to (wearModule?.status == ai.synheart.core.modules.base.ModuleStatus.RUNNING),
+            "behavior" to (behaviorModule?.status == ai.synheart.core.modules.base.ModuleStatus.RUNNING),
+            "phoneContext" to (phoneModule?.status == ai.synheart.core.modules.base.ModuleStatus.RUNNING),
+        )
+    }
+
+    // ----- Diagnostics & Upload State -----
 
     /**
      * Full native runtime diagnostics as a parsed map, or `null` if the runtime
