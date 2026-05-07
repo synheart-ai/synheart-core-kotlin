@@ -1,6 +1,6 @@
 package ai.synheart.core.config
 
-/** Operational mode for the Synheart SDK (RFC-CORE-0003). */
+/** Operational mode for the Synheart SDK. */
 enum class SynheartMode {
     /** HSI only — no raw bio streams persisted, no app metrics. */
     PERSONAL,

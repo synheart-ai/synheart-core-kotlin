@@ -1,10 +1,6 @@
 package ai.synheart.core.models
 
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-
-/** An app-level metric event recorded during a session (RFC-CORE-0007 §4). */
+/** An app-level metric event recorded during a session. */
 data class MetricEvent(
     val name: String,
     val timestampMs: Long,

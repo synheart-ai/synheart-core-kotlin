@@ -6,14 +6,10 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.hours
 
-/// Cache for wear raw samples
-///
-/// RFC-CORE-0007 compliant: buffers raw data only.
-/// Feature computation is delegated to synheart-runtime.
+/** Cache for raw wear samples. Buffers raw data only; feature computation is delegated to synheart-engine. */
 class WearCache {
     private val windowSamples = mutableMapOf<WindowType, MutableList<WearSample>>()
 
-    /// Add a new sample to the cache
     fun addSample(sample: WearSample) {
         val now = sample.timestamp
 
@@ -30,12 +26,10 @@ class WearCache {
         }
     }
 
-    /// Get raw samples for a specific window
     fun getSamples(window: WindowType): List<WearSample> {
         return windowSamples[window]?.toList() ?: emptyList()
     }
 
-    /// Clear old data
     fun clearOldData() {
         val now = System.currentTimeMillis()
 

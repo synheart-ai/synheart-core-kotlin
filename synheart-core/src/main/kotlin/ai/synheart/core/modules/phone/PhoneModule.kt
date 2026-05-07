@@ -15,10 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import ai.synheart.core.SynheartLogger
 
-/// Phone Module
-///
-/// Captures device-level motion and context signals.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
+/** Captures device-level motion and context signals. */
 class PhoneModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider
@@ -32,8 +29,6 @@ class PhoneModule(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
-
-    // MARK: - RawPhoneDataProvider
 
     override fun rawDataPoints(window: WindowType): List<PhoneDataPoint> {
         if (!consent.current().phoneContext) return emptyList()

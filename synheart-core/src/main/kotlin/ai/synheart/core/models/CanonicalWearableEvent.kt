@@ -4,7 +4,7 @@ import java.security.MessageDigest
 import org.json.JSONObject
 
 /**
- * Canonical wearable event model (RFC Section 8.1).
+ * Canonical wearable event model.
  *
  * Represents a single wearable-sourced health or activity event in a
  * provider-agnostic format suitable for local storage and SRM ingestion.
@@ -30,8 +30,8 @@ data class CanonicalWearableEvent(
 ) {
     companion object {
         /**
-         * Compute a deterministic wearable event ID using the synheart-id
-         * canonical format.
+         * Compute a deterministic wearable event ID using the canonical
+         * identity format.
          *
          * If [providerRecordId] is present the canonical string is:
          *   `kind=wearable_event|provider={provider}|provider_record_id={id}|v=1`

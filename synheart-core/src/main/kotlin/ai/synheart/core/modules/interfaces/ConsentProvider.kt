@@ -4,84 +4,38 @@ import ai.synheart.core.modules.consent.ConsentChannels
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
-/// Consent tier level
 enum class ConsentTier {
-    /// Local-only processing, no cloud upload
     LOCAL,
-
-    /// Cloud upload enabled
     CLOUD,
-
-    /// Research-grade data sharing
     RESEARCH
 }
 
-/// Types of consent
 enum class ConsentType {
-    /// Consent for biosignal collection
     BIOSIGNALS,
-
-    /// Consent for phone context collection (screen state, motion, app context)
     PHONE_CONTEXT,
-
-    /// Consent for behavioral data collection
     BEHAVIOR,
-
-    /// Consent for cloud uploads
     CLOUD_UPLOAD,
-
-    /// Consent for focus estimation (interpretation module)
     FOCUS_ESTIMATION,
-
-    /// Consent for emotion estimation (interpretation module)
     EMOTION_ESTIMATION,
-
-    /// Consent for Syni personalization
     SYNI,
-
-    /// Consent for vendor-side wearable sync (RAMEN connection)
     VENDOR_SYNC
 }
 
-/// Snapshot of user consent at a point in time
+/** Snapshot of user consent at a point in time. */
 data class ConsentSnapshot(
-    /// Consent for biosignal collection
     val biosignals: Boolean,
-
-    /// Consent for phone context collection
     val phoneContext: Boolean,
-
-    /// Consent for behavioral data collection
     val behavior: Boolean,
-
-    /// Consent for cloud uploads
     val cloudUpload: Boolean,
-
-    /// Consent for focus estimation
     val focusEstimation: Boolean,
-
-    /// Consent for emotion estimation
     val emotionEstimation: Boolean,
-
-    /// Consent for Syni personalization
     val syni: Boolean,
-
-    /// Consent for vendor-side wearable sync (RAMEN connection)
     val vendorSync: Boolean = false,
-
-    /// Consent tier level
     val tier: ConsentTier = ConsentTier.LOCAL,
-
-    /// Granular channel-level consent (optional; falls back to module booleans when null)
     val channels: ConsentChannels? = null,
-
-    /// Timestamp when this consent was given
     val timestamp: Instant = Instant.now(),
-
-    /// Schema version for this consent snapshot
     val version: String = "1.0.0"
 ) {
-    /// Check if a specific consent type is allowed
     fun allows(type: ConsentType): Boolean {
         return when (type) {
             ConsentType.BIOSIGNALS -> biosignals
@@ -95,12 +49,14 @@ data class ConsentSnapshot(
         }
     }
 
-    /// Check if a specific granular channel is allowed.
-    /// If [channels] is non-null, looks up the channel in the granular map.
-    /// Otherwise falls back to the module-level boolean based on channel prefix.
-    /// Channel format: "biosignals.vitals", "behavior.digital_activity", etc.
+    /**
+     * Check if a specific granular channel is allowed.
+     *
+     * If [channels] is non-null, looks up the channel in the granular map.
+     * Otherwise falls back to the module-level boolean based on channel prefix.
+     * Channel format: "biosignals.vitals", "behavior.digital_activity", etc.
+     */
     fun allowsChannel(channel: String): Boolean {
-        // If granular channels are present, check them directly
         if (channels != null) {
             val prefix = channel.substringBefore(".")
             val sub = channel.substringAfter(".", "")
@@ -134,7 +90,6 @@ data class ConsentSnapshot(
             }
         }
 
-        // Fallback to module-level booleans based on channel prefix
         val prefix = channel.substringBefore(".")
         return when (prefix) {
             "biosignals" -> biosignals
@@ -152,7 +107,6 @@ data class ConsentSnapshot(
         }
     }
 
-    /// Create a copy with updated values
     fun copyWith(
         biosignals: Boolean? = null,
         phoneContext: Boolean? = null,
@@ -184,7 +138,6 @@ data class ConsentSnapshot(
     }
 
     companion object {
-        /// Create a consent snapshot with all consents denied
         fun none(): ConsentSnapshot {
             return ConsentSnapshot(
                 biosignals = false,
@@ -198,7 +151,6 @@ data class ConsentSnapshot(
             )
         }
 
-        /// Create a consent snapshot with all consents granted
         fun all(): ConsentSnapshot {
             return ConsentSnapshot(
                 biosignals = true,
@@ -214,14 +166,9 @@ data class ConsentSnapshot(
     }
 }
 
-/// Provider interface for consent management
+/** Provider interface for consent management. */
 interface ConsentProvider {
-    /// Get the current consent snapshot
     fun current(): ConsentSnapshot
-
-    /// Observe consent changes
     fun observe(): Flow<ConsentSnapshot>
-
-    /// Update consent (internal use)
     suspend fun updateConsent(newConsent: ConsentSnapshot)
 }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-/// Motion data from accelerometer/gyroscope
+/** Motion data from accelerometer/gyroscope. */
 data class MotionData(
     val x: Double,
     val y: Double,
@@ -21,7 +21,7 @@ data class MotionData(
     val timestamp: Long
 )
 
-/// Screen state information
+/** Screen state information. */
 enum class ScreenState {
     ON,
     OFF,
@@ -29,13 +29,13 @@ enum class ScreenState {
     UNLOCKED
 }
 
-/// Notification event
+/** Notification event. */
 data class NotificationEvent(
     val timestamp: Long,
     val opened: Boolean // true if opened, false if just received
 )
 
-/// Collects motion data from device sensors
+/** Collects motion data from device sensors. */
 class MotionCollector {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _motionFlow = MutableSharedFlow<MotionData>()
@@ -44,7 +44,7 @@ class MotionCollector {
     
     val motionFlow: Flow<MotionData> = _motionFlow.asSharedFlow()
     
-    /// Current normalized motion level (0.0 - 1.0)
+    /** Current normalized motion level (0.0 - 1.0). */
     val currentMotionLevelValue: Double
         get() = currentMotionLevel
     
@@ -87,7 +87,7 @@ class MotionCollector {
     }
 }
 
-/// Tracks screen state (on/off/locked/unlocked)
+/** Tracks screen state (on/off/locked/unlocked). */
 class ScreenStateTracker {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _screenFlow = MutableSharedFlow<ScreenState>()
@@ -130,7 +130,7 @@ class ScreenStateTracker {
     }
 }
 
-/// Tracks app focus and switching
+/** Tracks app focus and switching. */
 class AppFocusTracker {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _appSwitchFlow = MutableSharedFlow<String>()
@@ -141,7 +141,7 @@ class AppFocusTracker {
     
     val appSwitchFlow: Flow<String> = _appSwitchFlow.asSharedFlow()
     
-    /// Get app switch rate (switches per minute)
+    /** App switch rate (switches per minute). */
     val switchRate: Double
         get() {
             val elapsed = (System.currentTimeMillis() - lastSwitch) / 60000.0
@@ -178,7 +178,7 @@ class AppFocusTracker {
     }
 }
 
-/// Tracks notifications
+/** Tracks notifications. */
 class NotificationTracker {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _notificationFlow = MutableSharedFlow<NotificationEvent>()
@@ -187,7 +187,7 @@ class NotificationTracker {
     
     val notificationFlow: Flow<NotificationEvent> = _notificationFlow.asSharedFlow()
     
-    /// Get notification count in last minute
+    /** Notification count in last minute. */
     val recentNotificationCount: Int
         get() {
             val cutoff = System.currentTimeMillis() - 60000

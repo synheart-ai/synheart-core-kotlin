@@ -1,30 +1,30 @@
 package ai.synheart.core.modules.wear
 
 import ai.synheart.core.SynheartLogger
+import ai.synheart.core.bridge.CoreRuntimeBridge
 import ai.synheart.core.models.CanonicalWearableEvent
-import ai.synheart.core.modules.runtime.RuntimeBridge
 import ai.synheart.core.modules.srm.LongitudinalSrmModule
-import ai.synheart.core.storage.StorageManager
-import android.content.ContentValues
 import java.time.Instant
-import java.time.format.DateTimeFormatter
 
 /**
  * Processes incoming RAMEN vendor events into the SynHeart pipeline:
- *   RamenEvent payload -> CanonicalWearableEvent -> SQLite store -> SRM push -> runtime
+ *   RamenEvent payload -> CanonicalWearableEvent -> SRM push -> runtime
  *
  * This is the bridge between the wear SDK's real-time event stream and the
  * core SDK's longitudinal SRM engine. Each vendor event (sleep, recovery,
- * HRV, strain) is normalized, stored immutably, and pushed to the runtime
- * for baseline computation.
+ * HRV, strain) is normalized and pushed to the runtime for baseline
  */
 class WearableEventProcessor(
-    private val storage: StorageManager,
-    private val bridge: RuntimeBridge?,
+    @Volatile private var bridge: CoreRuntimeBridge?,
     private val subjectId: String,
     private val deviceInstallId: String,
     private val srm: LongitudinalSrmModule = LongitudinalSrmModule()
 ) {
+
+    /** Update the bridge after CoreRuntimeBridge is initialized. */
+    fun updateBridge(newBridge: CoreRuntimeBridge?) {
+        bridge = newBridge
+    }
 
     /**
      * Process a raw vendor event from RAMEN.
@@ -101,19 +101,9 @@ class WearableEventProcessor(
                 "raw_event_type" to eventType
             )
         )
-
-        // Store (idempotent -- INSERT OR IGNORE on event_id)
-        try {
-            val cv = toContentValues(event.toMap())
-            storage.insertWearableEvent(cv)
-        } catch (e: Exception) {
-            SynheartLogger.log("[WearableEventProcessor] Storage error: $e")
-            // Continue to SRM push even if storage fails -- runtime needs the data
-        }
-
         // Push to longitudinal SRM via runtime bridge
         try {
-            srm.ingestEvent(event, storage, bridge)
+            srm.ingestEvent(event, bridge)
             SynheartLogger.log(
                 "[WearableEventProcessor] Processed $provider/${mapping.canonicalType} " +
                     "(seq=$seq, confidence=${"%.2f".format(confidence)})"
@@ -316,26 +306,6 @@ class WearableEventProcessor(
             return result
         }
 
-        /**
-         * Convert a flat map (from [CanonicalWearableEvent.toMap]) to Android [ContentValues].
-         */
-        private fun toContentValues(map: Map<String, Any?>): ContentValues {
-            val cv = ContentValues()
-            for ((key, value) in map) {
-                when (value) {
-                    null -> cv.putNull(key)
-                    is String -> cv.put(key, value)
-                    is Int -> cv.put(key, value)
-                    is Long -> cv.put(key, value)
-                    is Double -> cv.put(key, value)
-                    is Float -> cv.put(key, value)
-                    is Boolean -> cv.put(key, value)
-                    is ByteArray -> cv.put(key, value)
-                    else -> cv.put(key, value.toString())
-                }
-            }
-            return cv
-        }
     }
 }
 

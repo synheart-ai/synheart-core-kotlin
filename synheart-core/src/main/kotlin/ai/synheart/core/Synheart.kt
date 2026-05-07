@@ -11,27 +11,13 @@ import ai.synheart.core.modules.consent.ConsentModule
 import ai.synheart.core.modules.consent.ConsentStorage
 import ai.synheart.core.modules.interfaces.CapabilityLevel
 import ai.synheart.core.modules.interfaces.ConsentSnapshot
-import ai.synheart.core.modules.interfaces.FeatureFlag
 import ai.synheart.core.modules.interfaces.Module
 import ai.synheart.core.modules.wear.WearModule
 import ai.synheart.core.modules.phone.PhoneModule
 import ai.synheart.core.modules.behavior.BehaviorModule
-import ai.synheart.core.modules.runtime.RuntimeBridge
-import ai.synheart.core.modules.runtime.RuntimeConfig
-import ai.synheart.core.modules.runtime.RuntimeModule
-import ai.synheart.core.artifacts.ArtifactPipeline
+import ai.synheart.core.bridge.CoreRuntimeBridge
 import ai.synheart.core.config.SynheartMode
-import ai.synheart.core.crypto.SMK
-import ai.synheart.core.models.HSIState
-import ai.synheart.core.models.SessionHandle
-import ai.synheart.core.storage.StorageManager
-import ai.synheart.core.storage.StoragePolicy
 import ai.synheart.core.storage.SessionRecord
-import ai.synheart.core.storage.storagePolicyForMode
-import ai.synheart.core.modules.lab_ingest.LabIngestClient
-import ai.synheart.core.modules.lab_ingest.LabIngestModule
-import ai.synheart.core.modules.lab_ingest.LabIngestResponse
-import ai.synheart.core.modules.lab_ingest.LabPayloadBuilder
 import ai.synheart.core.modules.interfaces.WindowType
 import ai.synheart.core.modules.session.BehaviorModuleAdapter
 import ai.synheart.core.modules.session.SessionModule
@@ -45,7 +31,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
@@ -63,7 +48,7 @@ import kotlinx.coroutines.launch
  * - Wear Module (biosignal collection)
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
- * - Runtime (synheart-runtime C ABI bridge for signal fusion & HSI production)
+ * - Runtime (synheart-engine C ABI bridge for signal fusion & HSI production)
  *
  * Optional interpretation modules:
  * - Emotion (affect modeling)
@@ -80,20 +65,18 @@ import kotlinx.coroutines.launch
  *     )
  * )
  *
- * // Subscribe to HSI JSON updates from synheart-runtime
+ * // Activate modules
+ * Synheart.activate(SynheartFeature.WEAR)
+ * Synheart.activate(SynheartFeature.BEHAVIOR)
+ *
+ * // Subscribe to HSI JSON updates from the runtime
  * Synheart.onHSIUpdate.collect { hsiJson ->
  *     SynheartLogger.log("HSI frame: $hsiJson")
  * }
  *
- * // Optional: Enable interpretation modules
- * Synheart.enableFocus()
- * Synheart.onFocusUpdate.collect { focus ->
- *     SynheartLogger.log("Focus Score: ${focus.score}")
- * }
- *
- * Synheart.enableEmotion()
- * Synheart.onEmotionUpdate.collect { emotion ->
- *     SynheartLogger.log("Stress Index: ${emotion.stress}")
+ * // Or use the typed projection
+ * Synheart.onStateUpdate.collect { state ->
+ *     SynheartLogger.log("HSI state: $state")
  * }
  * ```
  */
@@ -101,61 +84,44 @@ object Synheart {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    // Module manager
+    private var coreRuntime: CoreRuntimeBridge? = null
     private val moduleManager = ModuleManager()
-
-    // Core modules
     private var capabilityModule: CapabilityModule? = null
     private var consentModule: ConsentModule? = null
     private var wearModule: WearModule? = null
     private var phoneModule: PhoneModule? = null
     private var behaviorModule: BehaviorModule? = null
-    private var runtimeModule: RuntimeModule? = null
-    private var labIngestModule: LabIngestModule? = null
 
-    // Activation manager (RFC-0005 four-authority model)
     private var activationManager: ActivationManager? = null
 
-    // State
     private var context: Context? = null
     private var isConfigured = false
     private var isRunning = false
     private var userId: String? = null
     private var previousConsent: ConsentSnapshot? = null
 
-    // Phase 1: Storage and artifact pipeline
-    private var storageManager: StorageManager? = null
-    private var storagePolicy: StoragePolicy? = null
-    private var artifactPipeline: ArtifactPipeline? = null
-    private var smk: SMK? = null
     private var currentSessionHandle: SessionHandle? = null
-    private var artifactHsiJob: Job? = null
     private var synheartConfig: SynheartConfig? = null
 
-    // Phase 3: Sync
-    private var syncModule: ai.synheart.core.sync.SyncModule? = null
-
-    // Session module (wraps SessionEngine from synheart-session)
     private var sessionModule: SessionModule? = null
     private var activeMainSessionId: String? = null
     private var mainSessionJob: Job? = null
     private var hsiToSessionJob: Job? = null
 
-    // Streams
     private val _hsiJsonFlow = MutableStateFlow<String?>(null)
 
     /** The currently active session, if any. */
     val currentSession: SessionHandle? get() = currentSessionHandle
 
     /**
-     * Stream of HSI JSON updates produced by synheart-runtime.
+     * Stream of HSI JSON updates produced by synheart-engine.
      *
      * Each emission is a raw JSON string representing one HSI frame.
      * Returns non-null values only.
      */
     val onHSIUpdate: Flow<String> = _hsiJsonFlow.asStateFlow().filterNotNull()
 
-    /** Stream of typed [HSIState] updates (RFC-CORE-0007 §3). */
+    /** Stream of typed [HSIState] updates. */
     val onStateUpdate: Flow<HSIState> = _hsiJsonFlow.asStateFlow().filterNotNull()
         .map { HSIState.fromJson(it, subjectId = synheartConfig?.subjectId ?: userId ?: "") }
 
@@ -166,177 +132,173 @@ object Synheart {
             return HSIState.fromJson(json, subjectId = synheartConfig?.subjectId ?: userId ?: "")
         }
 
-    // Phase 2: Metrics API
-
     /** Record a single metric event for the current session. */
     fun recordMetric(event: ai.synheart.core.models.MetricEvent) {
-        val handle = currentSessionHandle ?: return
-        if (storagePolicy?.canIncludeMetrics() != true) return
-        try { storageManager?.insertMetric(handle.sessionId, event) } catch (_: Exception) {}
+        val cr = coreRuntime ?: return
+        try {
+            val json = org.json.JSONObject().apply {
+                put("name", event.name)
+                put("value", event.value)
+                put("timestamp_ms", event.timestampMs)
+                event.tags?.let { t -> if (t.isNotEmpty()) put("tags", org.json.JSONObject(t as Map<*, *>)) }
+            }.toString()
+            cr.recordMetric(json)
+        } catch (_: Exception) {}
     }
 
-    // Phase 2: Local Query API
+    /** Record a batch of metric events. Loops over the singular path. */
+    fun recordMetrics(events: List<ai.synheart.core.models.MetricEvent>) {
+        for (event in events) {
+            recordMetric(event)
+        }
+    }
+
+    /**
+     * Enable/disable ambient capture: when on, the runtime forwards every
+     * closed HSI window to the host's HSI callback regardless of session
+     * state. When off (default), windows are forwarded only while a session
+     * is active.
+     */
+    fun setAmbientCapture(enabled: Boolean) {
+        coreRuntime?.setAmbientCapture(enabled)
+    }
+
+    /** Read the ambient-capture flag. */
+    fun getAmbientCapture(): Boolean = coreRuntime?.getAmbientCapture() ?: false
 
     /** List stored sessions with optional filters. */
     fun listLocalSessions(range: ai.synheart.core.models.SessionRange? = null): List<SessionRecord> {
-        val sm = storageManager ?: return emptyList()
-        if (!sm.isOpen) return emptyList()
-        val mode = range?.mode?.let { m ->
-            SynheartMode.entries.find { it.value == m }
-        }
-        return sm.listSessions(subjectId = synheartConfig?.subjectId ?: userId ?: "")
+        val cr = coreRuntime ?: return emptyList()
+        val json = cr.listSessions() ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(json)
+            val records = mutableListOf<SessionRecord>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                records.add(SessionRecord(
+                    sessionId = obj.optString("session_id", ""),
+                    subjectId = obj.optString("subject_id", ""),
+                    mode = obj.optString("mode", "personal"),
+                    createdAtUtc = obj.optLong("created_at_utc", 0),
+                    startUtc = obj.optLong("start_utc", 0),
+                    appId = obj.optString("app_id", ""),
+                    appVersion = obj.optString("app_version", "0.0.0"),
+                    deviceId = obj.optString("device_id", ""),
+                    platform = obj.optString("platform", "android")
+                ))
+            }
+            records
+        } catch (_: Exception) { emptyList() }
     }
 
     /** Get a session summary (decrypted) for the given session. */
     fun getSessionSummary(sessionId: String): org.json.JSONObject? {
-        val sm = storageManager ?: return null
-        if (!sm.isOpen) return null
-
-        val cached = sm.getSummaryJson(sessionId)
-        if (cached != null) return try { org.json.JSONObject(cached) } catch (_: Exception) { null }
-
-        val smk = this.smk ?: return null
-        val artifacts = sm.getArtifactsBySession(sessionId, "session_summary")
-        if (artifacts.isEmpty()) return null
-        return try {
-            val plaintext = ai.synheart.core.crypto.ArtifactCrypto.decrypt(smk, artifacts.first().payload)
-            org.json.JSONObject(String(plaintext, Charsets.UTF_8))
-        } catch (_: Exception) { null }
+        val cr = coreRuntime ?: return null
+        val json = cr.getSessionSummary(sessionId) ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
     }
 
     /** Get decrypted HSI window artifacts for a session. */
     fun getHSIWindows(sessionId: String, range: ai.synheart.core.models.WindowRange? = null): List<org.json.JSONObject> {
-        val sm = storageManager ?: return emptyList()
-        val smk = this.smk ?: return emptyList()
-        if (!sm.isOpen) return emptyList()
-
-        val artifacts = sm.getArtifactsBySession(sessionId, "hsi_window")
-        val results = mutableListOf<org.json.JSONObject>()
-        for (art in artifacts) {
-            if (range?.startMs != null && art.startMs < range.startMs) continue
-            if (range?.endMs != null && art.endMs > range.endMs) continue
-            try {
-                val plaintext = ai.synheart.core.crypto.ArtifactCrypto.decrypt(smk, art.payload)
-                results.add(org.json.JSONObject(String(plaintext, Charsets.UTF_8)))
-            } catch (_: Exception) {}
-            if (range?.limit != null && results.size >= range.limit) break
-        }
-        return results
+        val cr = coreRuntime ?: return emptyList()
+        val json = cr.getHsiWindows(
+            sessionId,
+            startMs = range?.startMs ?: 0,
+            endMs = range?.endMs ?: 0,
+            limit = range?.limit ?: 0
+        ) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (_: Exception) { emptyList() }
     }
-
-    // Phase 2: Storage & Retention
 
     /** Get storage usage statistics. */
     fun getStorageUsage(): ai.synheart.core.models.StorageUsage {
-        val sm = storageManager ?: return ai.synheart.core.models.StorageUsage(0, emptyMap())
-        if (!sm.isOpen) return ai.synheart.core.models.StorageUsage(0, emptyMap())
-        return sm.getStorageUsage()
+        val cr = coreRuntime ?: return ai.synheart.core.models.StorageUsage(0, emptyMap())
+        val json = cr.getStorageUsage() ?: return ai.synheart.core.models.StorageUsage(0, emptyMap())
+        return try {
+            val obj = org.json.JSONObject(json)
+            val totalBytes = obj.optLong("total_bytes", 0)
+            val bySession = mutableMapOf<String, Long>()
+            obj.optJSONObject("by_session_bytes")?.let { bs ->
+                bs.keys().forEach { key -> bySession[key] = bs.optLong(key, 0) }
+            }
+            ai.synheart.core.models.StorageUsage(totalBytes, bySession)
+        } catch (_: Exception) { ai.synheart.core.models.StorageUsage(0, emptyMap()) }
     }
 
     /** Set retention policy. Deletes sessions older than the given number of days. */
     fun setRetentionDays(days: Int?) {
         if (days == null) return
-        val sm = storageManager ?: return
-        if (!sm.isOpen) return
-        val cutoffMs = System.currentTimeMillis() - days.toLong() * 86400000
-        sm.enforceRetention(cutoffMs)
+        coreRuntime?.setRetentionDays(days)
     }
-
-    // Phase 2: Deletion API
 
     /** Delete a session and all its artifacts locally. */
     fun deleteLocalSession(sessionId: String) {
-        val sm = storageManager ?: return
-        if (!sm.isOpen) return
-        sm.deleteSession(sessionId, createTombstones = true)
+        coreRuntime?.deleteSession(sessionId)
     }
 
     /** Wipe all local data. */
     suspend fun wipeLocalData() {
         if (isRunning) stopSession()
-        storageManager?.let { sm ->
-            if (sm.isOpen) {
-                sm.wipeAll()
-                sm.close()
-            }
-        }
-        storageManager = null
-        context?.let { ai.synheart.core.crypto.SMK.delete(it) }
-        context?.let { ai.synheart.core.crypto.URK.delete(it) }
-
-        // Phase 3: Clear sync state
-        syncModule?.dispose()
-        syncModule = null
-
-        artifactPipeline = null
-        storagePolicy = null
-        smk = null
+        coreRuntime?.wipeLocalData()
         currentSessionHandle = null
+        SynheartLogger.log("[Synheart] Local data wiped via CoreRuntimeBridge")
     }
 
-    /** Request account deletion — wipes local data and requests server-side deletion. */
+    /** Request account deletion -- wipes local data and requests server-side deletion. */
     suspend fun requestAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
-        val token = consentModule?.getCurrentToken()
-        if (token != null && token.isValid) {
-            try {
-                val conn = java.net.URL("https://api.synheart.ai/auth/v1/delete")
-                    .openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("Authorization", "Bearer ${token.token}")
-                conn.doOutput = true
-                val body = org.json.JSONObject().put("confirmation", "DELETE_MY_ACCOUNT")
-                java.io.OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-                conn.responseCode
-            } catch (_: Exception) {}
-        }
+        coreRuntime?.requestAccountDeletion()
         wipeLocalData()
         return ai.synheart.core.models.DeletionRequestResult(
             status = "accepted",
-            message = "Local data wiped. Server deletion pending."
+            message = "Account deletion requested via CoreRuntimeBridge. Local data wiped."
         )
     }
 
     /** Cancel a pending account deletion request. */
-    fun cancelAccountDeletion(): Boolean {
-        val token = consentModule?.getCurrentToken() ?: return false
-        if (!token.isValid) return false
-        return try {
-            val conn = java.net.URL("https://api.synheart.ai/auth/v1/delete/cancel")
-                .openConnection() as java.net.HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Authorization", "Bearer ${token.token}")
-            conn.doOutput = false
-            conn.responseCode == 200
-        } catch (_: Exception) {
-            false
-        }
+    suspend fun cancelAccountDeletion(): ai.synheart.core.models.DeletionRequestResult {
+        val ok = coreRuntime?.cancelAccountDeletion() ?: false
+        return ai.synheart.core.models.DeletionRequestResult(
+            status = if (ok) "cancelled" else "error",
+            message = if (ok) "Account deletion cancelled via CoreRuntimeBridge."
+                      else "Account deletion cancellation failed."
+        )
     }
 
-    /** Log out — revoke consent, dispose sync, clear URK. */
+    /** Log out -- revoke consent and clear credentials. */
     fun logout() {
-        syncModule?.dispose()
         try { consentModule?.revokeConsent() } catch (_: Exception) {}
-        context?.let { ai.synheart.core.crypto.URK.delete(it) }
     }
-
-    // Phase 3: Sync API
 
     /** Enable or disable sync. */
     fun setSyncEnabled(enabled: Boolean) {
-        syncModule?.setSyncEnabled(enabled)
+        coreRuntime?.setSyncEnabled(enabled)
     }
 
     /** Execute a sync cycle (push + pull). */
     fun syncNow(): ai.synheart.core.sync.SyncResult {
-        val sync = syncModule ?: return ai.synheart.core.sync.SyncResult()
-        return sync.syncNow()
+        val cr = coreRuntime ?: return ai.synheart.core.sync.SyncResult()
+        val json = cr.syncNow() ?: return ai.synheart.core.sync.SyncResult()
+        return try {
+            val obj = org.json.JSONObject(json)
+            val errorsList = mutableListOf<String>()
+            obj.optJSONArray("errors")?.let { arr ->
+                for (i in 0 until arr.length()) errorsList.add(arr.optString(i, ""))
+            }
+            ai.synheart.core.sync.SyncResult(
+                pushed = obj.optInt("pushed", 0),
+                pulled = obj.optInt("pulled", 0),
+                conflictsResolved = obj.optInt("conflicts_resolved", 0),
+                errors = errorsList
+            )
+        } catch (_: Exception) { ai.synheart.core.sync.SyncResult() }
     }
 
     /** Get current sync status. */
     fun getSyncStatus(): ai.synheart.core.sync.SyncStatus {
-        val sync = syncModule ?: return ai.synheart.core.sync.SyncStatus(enabled = false)
-        return sync.getStatus()
+        return ai.synheart.core.sync.SyncStatus(enabled = false)
     }
 
     /**
@@ -371,8 +333,6 @@ object Synheart {
     ): ai.synheart.core.models.CanonicalWearableEvent? {
         return wearModule?.processVendorEvent(provider, eventType, payload, eventId, seq)
     }
-
-    // Activation API (RFC-0005)
 
     /** Activate a feature. If all four authorities are satisfied, the feature's module starts. */
     fun activate(feature: SynheartFeature) {
@@ -489,62 +449,17 @@ object Synheart {
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(behaviorModule!!, dependsOn = listOf("capabilities", "consent"))
 
-            // SRM is handled by the native runtime (RuntimeBridge.exportSrmSnapshot /
-            // loadSrmSnapshot). BaselineSnapshot artifacts are produced via ArtifactPipeline.
-
-            // 5. Initialize Runtime Module (synheart-runtime C ABI bridge)
-            //    RuntimeBridge is null when the native library is not bundled;
-            //    the pipeline is then gracefully inert.
-            SynheartLogger.log("[Synheart] Initializing Runtime Module...")
-            val runtimeBridge = RuntimeBridge.createIfAvailable(
-                RuntimeConfig(
-                    subjectId = this.userId ?: "",
-                    sessionId = java.util.UUID.randomUUID().toString()
-                )
-            )
-            runtimeModule = RuntimeModule(
-                bridge = runtimeBridge,
-                wearModule = wearModule,
-                behaviorModule = behaviorModule
-            )
-            moduleManager.registerModule(
-                runtimeModule!!,
-                dependsOn = listOf("wear", "behavior")
-            )
-
-            // 7. Initialize Lab Ingest (optional, depends on config)
-            val platformConfig = config?.labIngestConfig
-            if (platformConfig != null) {
-                SynheartLogger.log("[Synheart] Initializing Lab Ingest...")
-                labIngestModule = LabIngestModule(
-                    consentModule = consentModule!!,
-                    config = platformConfig
-                )
-                moduleManager.registerModule(
-                    labIngestModule!!,
-                    dependsOn = listOf("consent")
-                )
-            }
-
-            // 9. Initialize all modules
+            // 5. Initialize all modules
             SynheartLogger.log("[Synheart] Initializing all modules...")
             moduleManager.initializeAll()
 
-            // 9. Register consent change listener
+            // 6. Register consent change listener
             previousConsent = consentModule!!.current()
             consentModule!!.addListener { newConsent ->
                 handleConsentChange(newConsent)
             }
 
-            // 10. Subscribe to HSI stream from RuntimeModule (consent-gated)
-            scope.launch {
-                runtimeModule?.hsiFlow?.collect { hsiJson ->
-                    if (consentModule?.current()?.biosignals != true) return@collect
-                    _hsiJsonFlow.value = hsiJson
-                }
-            }
-
-            // 10b. Create SessionModule with adapted providers
+            // 7. Create SessionModule with adapted providers
             SynheartLogger.log("[Synheart] Initializing SessionModule...")
             val biosignalAdapter = WearModuleBiosignalAdapter(wearModule!!)
             val behaviorAdapter = BehaviorModuleAdapter(behaviorModule!!)
@@ -552,114 +467,70 @@ object Synheart {
                 biosignalProvider = biosignalAdapter,
                 behaviorProvider = behaviorAdapter
             )
-
-            // Bridge HSI metrics from runtime -> session engine (HRV is authoritative
-            // from session-runtime; the session SDK no longer computes it locally).
-            hsiToSessionJob = scope.launch {
-                runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
-                    val sid = activeMainSessionId
-                    if (sid == null || sessionModule == null) return@collect
-                    try {
-                        val parsed = org.json.JSONObject(hsiJson)
-                        val metricsMap = mutableMapOf<String, Any>()
-                        parsed.keys().forEach { key ->
-                            parsed.opt(key)?.let { metricsMap[key] = it }
-                        }
-                        sessionModule?.ingestHsiMetrics(metricsMap)
-                    } catch (_: Exception) {}
-                }
-            }
             SynheartLogger.log("[Synheart] SessionModule initialized")
 
-            // 11. Create activation manager and auto-activate from config
+            // 8. Create activation manager and auto-activate from config
             activationManager = ActivationManager()
             activationManager!!.activateFromConfig(resolvedConfig)
 
-            // Phase 1: Initialize storage and artifact pipeline
             synheartConfig = resolvedConfig
-            if (resolvedConfig.storage.enabled &&
-                resolvedConfig.appId.isNotEmpty() &&
-                resolvedConfig.subjectId.isNotEmpty()
-            ) {
-                try {
-                    storagePolicy = storagePolicyForMode(resolvedConfig.mode)
-                    smk = SMK.loadOrCreate(this.context!!)
-                    storageManager = StorageManager.create(this.context!!)
-                    storageManager!!.open()
 
-                    artifactPipeline = ArtifactPipeline(
-                        storage = storageManager!!,
-                        policy = storagePolicy!!,
-                        smk = smk!!,
-                        subjectId = resolvedConfig.subjectId,
-                        appId = resolvedConfig.appId,
-                        appVersion = resolvedConfig.appVersion,
-                        deviceId = resolvedConfig.deviceId,
-                        platform = resolvedConfig.platform
-                    )
+            // 9. Attach WearableEventProcessor (bridge wired after coreRuntime init)
+            if (wearModule != null) {
+                val processor = ai.synheart.core.modules.wear.WearableEventProcessor(
+                    bridge = null, // will be updated after coreRuntime init
+                    subjectId = resolvedConfig.subjectId,
+                    deviceInstallId = resolvedConfig.deviceId
+                )
+                wearModule!!.setEventProcessor(processor)
+            }
 
-                    // Wire HSI stream to artifact pipeline
-                    artifactHsiJob = scope.launch {
-                        runtimeModule?.hsiFlow?.filterNotNull()?.collect { hsiJson ->
-                            if (currentSessionHandle == null) return@collect
-                            val nowMs = System.currentTimeMillis()
+            // Configure synheart-auth for device attestation + signing
+            if (resolvedConfig.appId.isNotEmpty() && this.context != null) {
+                ai.synheart.auth.SynheartAuth.shared.configure("https://api.synheart.ai/auth")
+            }
+
+            try {
+                coreRuntime = ai.synheart.core.bridge.CoreRuntimeBridge.create(
+                    org.json.JSONObject().apply {
+                        put("app_id", resolvedConfig.appId)
+                        put("subject_id", resolvedConfig.subjectId)
+                        put("mode", resolvedConfig.mode.name.lowercase())
+                        put("device_id", resolvedConfig.deviceId)
+                        put("app_version", resolvedConfig.appVersion)
+                        put("platform", "android")
+                    }.toString()
+                )
+                if (coreRuntime != null) {
+                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
+
+                    // Wire HSI callback (consent-gated) + bridge to session engine
+                    coreRuntime!!.setHsiCallback { hsiJson ->
+                        if (consentModule?.current()?.biosignals != true) return@setHsiCallback
+                        _hsiJsonFlow.value = hsiJson
+
+                        // Bridge HSI metrics to session engine
+                        val sid = activeMainSessionId
+                        if (sid != null && sessionModule != null) {
                             try {
-                                artifactPipeline?.ingestHsiFrame(hsiJson, nowMs)
+                                val parsed = org.json.JSONObject(hsiJson)
+                                val metricsMap = mutableMapOf<String, Any>()
+                                parsed.keys().forEach { key ->
+                                    parsed.opt(key)?.let { metricsMap[key] = it }
+                                }
+                                sessionModule?.ingestHsiMetrics(metricsMap)
                             } catch (_: Exception) {}
                         }
                     }
 
-                    SynheartLogger.log("[Synheart] Storage and artifact pipeline initialized")
-
-                    // Attach WearableEventProcessor to WearModule (requires storage + runtime)
-                    if (wearModule != null) {
-                        val processor = ai.synheart.core.modules.wear.WearableEventProcessor(
-                            storage = storageManager!!,
-                            bridge = runtimeBridge,
-                            subjectId = resolvedConfig.subjectId,
-                            deviceInstallId = resolvedConfig.deviceId
-                        )
-                        wearModule!!.setEventProcessor(processor)
-                    }
-                } catch (e: Exception) {
-                    SynheartLogger.log("[Synheart] Storage init failed (non-fatal): $e")
+                    // Update WearableEventProcessor with the live bridge
+                    wearModule?.eventProcessor?.updateBridge(coreRuntime)
+                } else {
+                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge not available — using Kotlin fallback")
                 }
-            }
-
-            // Phase 3: Initialize sync module (uses ConsentModule's token)
-            val appId = resolvedConfig.appId
-            if (appId.isNotEmpty() && this.context != null) {
-                // Configure synheart-auth for device attestation + signing
-                ai.synheart.auth.SynheartAuth.shared.configure("https://api.synheart.ai/auth")
-
-                // Generate or load session_secret for URK derivation (local, not from server)
-                var sessionSecret: String? = null
-                try {
-                    val prefs = this.context!!.getSharedPreferences("synheart_session", android.content.Context.MODE_PRIVATE)
-                    sessionSecret = prefs.getString("session_secret", null)
-                    if (sessionSecret == null) {
-                        val bytes = ByteArray(32)
-                        java.security.SecureRandom().nextBytes(bytes)
-                        sessionSecret = java.util.Base64.getEncoder().encodeToString(bytes)
-                        prefs.edit().putString("session_secret", sessionSecret).apply()
-                    }
-                } catch (e: Exception) {
-                    SynheartLogger.log("[Synheart] session_secret init failed (non-fatal): $e")
-                }
-
-                // Sync uses ConsentModule's token for Bearer auth.
-                if (storageManager?.isOpen == true && consentModule != null) {
-                    syncModule = ai.synheart.core.sync.SyncModule(
-                        consent = consentModule!!,
-                        storage = storageManager!!,
-                        smk = smk,
-                        context = this.context!!,
-                        baseUrl = "https://api.synheart.ai",
-                        subjectId = resolvedConfig.subjectId,
-                        sessionSecret = sessionSecret
-                    )
-                }
-                SynheartLogger.log("[Synheart] Sync module initialized")
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] Native CoreRuntimeBridge init failed (non-fatal): $e")
+                coreRuntime = null
             }
 
             isConfigured = true
@@ -676,16 +547,11 @@ object Synheart {
         }
     }
 
-    // MARK: - Session Lifecycle
-
     /**
-     * Start a session — activates permitted modules and begins signal collection.
+     * Start a session -- activates permitted modules and begins signal collection.
      *
-     * Per RFC §5.2: Core must activate permitted modules, route normalized
-     * signals to synheart-runtime, enable HSV updates, and enable optional HSI export.
-     *
-     * Must be called after initialize(). No data collection occurs until
-     * this method is called (RFC §3.3).
+     * Must be called after [initialize]. No data collection occurs until
+     * this method is called.
      */
     suspend fun startSession() {
         if (!isConfigured) {
@@ -695,10 +561,32 @@ object Synheart {
             return // Already running
         }
 
+        // Delegate to native core runtime if available
+        coreRuntime?.let { cr ->
+            val resultJson = cr.startSession()
+            if (resultJson != null) {
+                try {
+                    val obj = org.json.JSONObject(resultJson)
+                    val sessionId = obj.optString("session_id", "")
+                    val startedAtMs = obj.optLong("started_at_ms", System.currentTimeMillis())
+                    val mode = synheartConfig?.mode ?: SynheartMode.PERSONAL
+                    currentSessionHandle = SessionHandle(sessionId = sessionId, startedAtMs = startedAtMs, mode = mode)
+                    isRunning = true
+                    SynheartLogger.log("[Synheart] Session started via CoreRuntimeBridge")
+                    // Still start Kotlin-side modules for data collection pipeline
+                    moduleManager.startAll()
+                    reevaluateAllFeatures()
+                    return
+                } catch (e: Exception) {
+                    SynheartLogger.log("[Synheart] CoreRuntimeBridge startSession parse failed, falling back: $e")
+                }
+            }
+        }
+
         SynheartLogger.log("[Synheart] Starting session...")
         moduleManager.startAll()
 
-        // Open main collection session via Session SDK (RFC: session boundary)
+        // Open main collection session via Session SDK
         val nowMs = System.currentTimeMillis()
         val sessionId = "core_$nowMs"
         val sessionConfig = SessionConfig(
@@ -729,27 +617,7 @@ object Synheart {
             }
         }
 
-        // Phase 1: Create session record and start artifact pipeline
         val mode = synheartConfig?.mode ?: SynheartMode.PERSONAL
-
-        if (storageManager?.isOpen == true) {
-            try {
-                storageManager!!.insertSession(SessionRecord(
-                    sessionId = sessionId,
-                    subjectId = synheartConfig?.subjectId ?: userId ?: "",
-                    mode = mode.value,
-                    createdAtUtc = nowMs / 1000,
-                    startUtc = nowMs / 1000,
-                    appId = synheartConfig?.appId ?: "",
-                    appVersion = synheartConfig?.appVersion ?: "0.0.0",
-                    deviceId = synheartConfig?.deviceId ?: "",
-                    platform = synheartConfig?.platform ?: "android"
-                ))
-                artifactPipeline?.onSessionStart(sessionId, mode)
-            } catch (e: Exception) {
-                SynheartLogger.log("[Synheart] Session record creation failed: $e")
-            }
-        }
         currentSessionHandle = SessionHandle(sessionId = sessionId, startedAtMs = nowMs, mode = mode)
 
         isRunning = true
@@ -758,14 +626,23 @@ object Synheart {
     }
 
     /**
-     * Stop the current session — halts module streaming and clears ephemeral buffers.
-     *
-     * Per RFC §5.2: Core must halt module streaming, stop synheart-runtime updates,
-     * clear ephemeral buffers, and prevent further HSI export.
+     * Stop the current session -- halts module streaming and clears ephemeral buffers.
      */
     suspend fun stopSession() {
         if (!isRunning) {
             return
+        }
+
+        // Delegate to native core runtime if available
+        coreRuntime?.let { cr ->
+            if (cr.stopSession()) {
+                SynheartLogger.log("[Synheart] Session stopped via CoreRuntimeBridge")
+                currentSessionHandle = null
+                isRunning = false
+                reevaluateAllFeatures()
+                moduleManager.stopAll()
+                return
+            }
         }
 
         SynheartLogger.log("[Synheart] Stopping session...")
@@ -778,34 +655,10 @@ object Synheart {
             activeMainSessionId = null
         }
 
-        // Phase 1: Finalize session summary and baseline snapshot
-        val handle = currentSessionHandle
-        val pipeline = artifactPipeline
-        if (handle != null && pipeline != null) {
-            val nowMs = System.currentTimeMillis()
-
-            // SessionSummary artifact
-            try {
-                pipeline.finalizeSession(handle.startedAtMs, nowMs)
-                SynheartLogger.log("[Synheart] Session summary artifact created")
-            } catch (e: Exception) {
-                SynheartLogger.log("[Synheart] Session summary creation failed: $e")
-            }
-
-            // BaselineSnapshot from native SRM export
-            try {
-                val srmJson = runtimeModule?.bridge?.exportSrmSnapshot()
-                if (srmJson != null) {
-                    pipeline.produceBaselineSnapshot(srmJson)
-                    SynheartLogger.log("[Synheart] Baseline snapshot artifact created")
-                }
-            } catch (e: Exception) {
-                SynheartLogger.log("[Synheart] Baseline snapshot creation failed: $e")
-            }
-        }
         // Auto-ingest session to platform (opt-in)
+        val handle = currentSessionHandle
         val piConfig = synheartConfig?.labIngestConfig
-        if (piConfig?.autoIngest == true && handle != null && labIngestModule != null) {
+        if (piConfig?.autoIngest == true && handle != null) {
             try {
                 autoIngestSession(handle)
                 SynheartLogger.log("[Synheart] Auto-ingest completed")
@@ -815,84 +668,18 @@ object Synheart {
         }
 
         currentSessionHandle = null
-
-        // Auto-sync after session ends
-        if (syncModule?.enabled == true) {
-            try { syncModule?.syncNow() } catch (_: Exception) {}
-        }
-
         isRunning = false
         reevaluateAllFeatures()
         moduleManager.stopAll()
         SynheartLogger.log("[Synheart] Session stopped")
     }
 
-
-
-    // MARK: - Lab Ingestion
-
     /**
      * Auto-ingest a session payload built from SDK internal data.
      */
     private suspend fun autoIngestSession(session: SessionHandle) {
-        val wearSamples = wearModule?.rawSamples(WindowType.WINDOW_1H) ?: emptyList()
-        val behaviorEvents = behaviorModule?.rawEvents(WindowType.WINDOW_1H) ?: emptyList()
-        val phoneDataPoints = phoneModule?.rawDataPoints(WindowType.WINDOW_1H) ?: emptyList()
-
-        val payload = LabPayloadBuilder.buildSession(
-            sessionId = session.sessionId,
-            deviceId = synheartConfig?.deviceId ?: "",
-            appId = synheartConfig?.appId ?: "",
-            userId = synheartConfig?.subjectId ?: "",
-            startedAtMs = session.startedAtMs,
-            endedAtMs = System.currentTimeMillis(),
-            dataOnCloud = syncModule?.enabled ?: false,
-            wearSamples = wearSamples,
-            behaviorEvents = behaviorEvents,
-            phoneDataPoints = phoneDataPoints
-        )
-        labIngestModule!!.ingestSession(payload)
+        coreRuntime?.flushUploads()
     }
-
-    /**
-     * Ingest a session payload via the Lab Ingest module.
-     *
-     * Requires `behavior` consent.
-     *
-     * @throws IllegalStateException if SDK not initialized or lab ingest not configured
-     */
-    suspend fun ingestSession(payload: Map<String, Any?>): LabIngestResponse {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before ingesting sessions")
-        }
-        val module = labIngestModule
-            ?: throw IllegalStateException("Platform ingest not configured")
-        return module.ingestSession(payload)
-    }
-
-    /**
-     * Ingest a metadata payload via the Lab Ingest module.
-     *
-     * Requires `biosignals` consent.
-     *
-     * @throws IllegalStateException if SDK not initialized or lab ingest not configured
-     */
-    suspend fun ingestMetadata(payload: Map<String, Any?>): LabIngestResponse {
-        if (!isConfigured) {
-            throw IllegalStateException("Synheart must be initialized before ingesting metadata")
-        }
-        val module = labIngestModule
-            ?: throw IllegalStateException("Platform ingest not configured")
-        return module.ingestMetadata(payload)
-    }
-
-    /**
-     * Get the underlying LabIngestClient for standalone/background usage.
-     *
-     * Returns null if lab ingest is not configured.
-     */
-    val labIngestClient: LabIngestClient?
-        get() = labIngestModule?.client
 
     /**
      * Check if user has granted a specific consent
@@ -928,6 +715,14 @@ object Synheart {
      * ```
      */
     suspend fun grantConsent(consentType: String) {
+        // Delegate to native core runtime if available
+        coreRuntime?.let { cr ->
+            if (cr.grantConsent(consentType)) {
+                SynheartLogger.log("[Synheart] Consent '$consentType' granted via CoreRuntimeBridge")
+            }
+            // Fall through to also update Kotlin-side consent module for module gating
+        }
+
         if (consentModule == null) {
             throw IllegalStateException("Consent module not initialized")
         }
@@ -956,6 +751,14 @@ object Synheart {
      * ```
      */
     suspend fun revokeConsent(consentType: String) {
+        // Delegate to native core runtime if available
+        coreRuntime?.let { cr ->
+            if (cr.revokeConsent(consentType)) {
+                SynheartLogger.log("[Synheart] Consent '$consentType' revoked via CoreRuntimeBridge")
+            }
+            // Fall through to also update Kotlin-side consent module for module gating
+        }
+
         if (consentModule == null) {
             throw IllegalStateException("Consent module not initialized")
         }
@@ -997,52 +800,46 @@ object Synheart {
         consentModule?.updateConsent(consent)
     }
 
-    // MARK: - synheart-runtime SRM API (baselines live in the native Rust engine)
-
     /**
-     * Get baseline summary from the native synheart-runtime (if available).
+     * Get baseline summary from the native synheart-engine (if available).
      *
      * Returns a JSON string like `{"total":14,"ready":0,"warming":5,"empty":9}`
      * or `null` if the native runtime is not linked.
      */
     val runtimeBaselineSummary: String?
-        get() = runtimeModule?.bridge?.baselineSummary()
+        get() = coreRuntime?.srmOverallStatus()
 
     /**
      * Get all native runtime baselines as JSON, or `null`.
      */
     val runtimeBaselinesJson: String?
-        get() = runtimeModule?.bridge?.baselinesJson()
+        get() = coreRuntime?.baselinesJson()
 
     /**
      * Export the native runtime SRM snapshot as JSON for cross-session persistence.
      */
     fun exportRuntimeSRMSnapshot(): String? {
-        return runtimeModule?.bridge?.exportSrmSnapshot()
+        return coreRuntime?.exportSrmSnapshot()
     }
 
     /**
      * Load a native runtime SRM snapshot from JSON.
-     * Returns 0 on success, non-zero error code on failure, or `null` if runtime unavailable.
+     * Returns true on success, false on failure, or `null` if runtime unavailable.
      */
-    fun loadRuntimeSRMSnapshot(json: String): Int? {
-        return runtimeModule?.bridge?.loadSrmSnapshot(json)
+    fun loadRuntimeSRMSnapshot(json: String): Boolean? {
+        return coreRuntime?.loadSrmSnapshot(json)
     }
 
     /**
-     * Get the native synheart-runtime version, or `null` if unavailable.
+     * Get the native synheart-engine version, or `null` if unavailable.
      */
     val runtimeVersion: String?
-        get() = RuntimeBridge.version()
-
-    // Consent Change Handling
+        get() = coreRuntime?.diagnostics()
 
     private fun handleConsentChange(newConsent: ConsentSnapshot) {
         previousConsent = newConsent
         reevaluateAllFeatures()
     }
-
-    // Feature Reevaluation (RFC-0005 Four-Authority Model)
 
     /**
      * Reevaluate whether a single feature should be operational.
@@ -1127,6 +924,10 @@ object Synheart {
     suspend fun dispose() {
         try {
             stop()
+
+            coreRuntime?.close()
+            coreRuntime = null
+
             moduleManager.disposeAll()
 
             mainSessionJob?.cancel()
@@ -1136,28 +937,14 @@ object Synheart {
             activeMainSessionId = null
             sessionModule = null
 
-            // Phase 1: Clean up storage and artifact pipeline
-            artifactHsiJob?.cancel()
-            artifactHsiJob = null
-            storageManager?.close()
-            storageManager = null
-            artifactPipeline = null
-            storagePolicy = null
-            smk = null
             currentSessionHandle = null
             synheartConfig = null
-
-            // Phase 3
-            syncModule?.dispose()
-            syncModule = null
 
             consentModule = null
             capabilityModule = null
             wearModule = null
             phoneModule = null
             behaviorModule = null
-            runtimeModule = null
-            labIngestModule = null
             activationManager = null
             previousConsent = null
             isConfigured = false

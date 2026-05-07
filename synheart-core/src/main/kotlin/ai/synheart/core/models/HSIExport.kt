@@ -4,12 +4,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * HSI Snapshot — versioned JSON snapshot produced by synheart-runtime.
+ * HSI Snapshot — versioned JSON snapshot produced by synheart-engine.
  *
  * This is the ONLY serializable, transport-safe, cloud-ingestable representation
- * of human state. HSI generation is handled exclusively by synheart-runtime
+ * of human state. HSI generation is handled exclusively by synheart-engine
  * the Core SDK receives the finished
- * JSON string via [RuntimeBridge.tick] and wraps it here for type safety.
+ * JSON string via [CoreRuntimeBridge] HSI callback and wraps it here for type safety.
  */
 data class HSISnapshot(
     val payload: JsonObject

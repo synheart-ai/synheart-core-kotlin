@@ -9,37 +9,27 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/// Capabilities Module
-///
-/// Manages SDK capabilities based on authentication tokens.
-/// Determines which features each module can use based on capability tiers.
+/**
+ * Manages SDK capabilities based on authentication tokens.
+ * Determines which features each module can use based on capability tiers.
+ */
 class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider {
     private var capabilities: SDKCapabilities? = null
     private var token: CapabilityToken? = null
-    private val verifier = CapabilityVerifier()
     private val _capabilitiesFlow = MutableStateFlow<SDKCapabilities?>(null)
 
-    /// Stream of capability updates
     val capabilitiesFlow: Flow<SDKCapabilities?> = _capabilitiesFlow.asStateFlow()
 
-    /// Load capabilities from token
     fun loadFromToken(token: CapabilityToken, secret: String) {
-        if (!verifier.isValid(token, secret)) {
-            throw CapabilityException("Invalid capability token")
-        }
-
         this.token = token
-        this.capabilities = verifier.parse(token)
+        this.capabilities = SDKCapabilities.fromToken(token)
         _capabilitiesFlow.value = capabilities
     }
 
-    /// Load default capabilities (for development/testing)
     fun loadDefaults() {
         capabilities = SDKCapabilities.defaultCapabilities()
         _capabilitiesFlow.value = capabilities
     }
-
-    // MARK: - CapabilityProvider
 
     override fun capability(module: Module): CapabilityLevel {
         return capabilities?.getLevel(module) ?: CapabilityLevel.NONE
@@ -66,10 +56,8 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
         )
     }
 
-    /// Check if a feature is enabled based on capability levels
     private fun isFeatureEnabled(feature: FeatureFlag, capabilities: SDKCapabilities): Boolean {
         return when (feature) {
-            // Wear features
             FeatureFlag.WEAR_DERIVED_METRICS ->
                 capabilities.wear >= CapabilityLevel.CORE
             FeatureFlag.WEAR_HIGH_FREQUENCY_HRV ->
@@ -77,7 +65,6 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.WEAR_RAW_RR_INTERVALS ->
                 capabilities.wear >= CapabilityLevel.RESEARCH
 
-            // Phone features
             FeatureFlag.PHONE_MOTION_AND_SCREEN ->
                 capabilities.phone >= CapabilityLevel.CORE
             FeatureFlag.PHONE_HASHED_APP_SWITCHING ->
@@ -87,7 +74,6 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.PHONE_RAW_NOTIFICATION_STRUCTURE ->
                 capabilities.phone >= CapabilityLevel.EXTENDED
 
-            // Behavior features
             FeatureFlag.BEHAVIOR_BASIC_METRICS ->
                 capabilities.behavior >= CapabilityLevel.CORE
             FeatureFlag.BEHAVIOR_EXTENDED_PATTERNS ->
@@ -95,7 +81,6 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.BEHAVIOR_FULL_TIMING_STREAM ->
                 capabilities.behavior >= CapabilityLevel.RESEARCH
 
-            // HSI features
             FeatureFlag.HSI_EMOTION_FOCUS ->
                 capabilities.hsvRuntime >= CapabilityLevel.CORE
             FeatureFlag.HSI_FULL_EMBEDDING ->
@@ -103,7 +88,6 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
             FeatureFlag.HSI_FUSION_VECTOR_ACCESS ->
                 capabilities.hsvRuntime >= CapabilityLevel.RESEARCH
 
-            // Cloud features
             FeatureFlag.CLOUD_BASIC_INGEST ->
                 capabilities.cloud >= CapabilityLevel.CORE
             FeatureFlag.CLOUD_EXTENDED_ENDPOINTS ->
@@ -113,19 +97,11 @@ class CapabilityModule : BaseSynheartModule("capabilities"), CapabilityProvider 
         }
     }
 
-    // MARK: - Module Lifecycle
+    override suspend fun onInitialize() {}
 
-    override suspend fun onInitialize() {
-        // Nothing to initialize
-    }
+    override suspend fun onStart() {}
 
-    override suspend fun onStart() {
-        // Nothing to start
-    }
-
-    override suspend fun onStop() {
-        // Nothing to stop
-    }
+    override suspend fun onStop() {}
 
     override suspend fun onDispose() {
         capabilities = null

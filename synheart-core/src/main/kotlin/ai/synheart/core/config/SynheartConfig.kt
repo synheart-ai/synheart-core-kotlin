@@ -3,18 +3,18 @@ package ai.synheart.core.config
 import ai.synheart.core.modules.interfaces.AuthProvider
 import java.util.UUID
 
-/** Storage sub-configuration (RFC-CORE-0004). */
+/** Storage sub-configuration. */
 data class StorageConfig(
     val enabled: Boolean = true,
     val retentionDays: Int? = null
 )
 
-/** Sync sub-configuration (RFC-CORE-0005, Phase 3). */
+/** Sync sub-configuration. */
 data class SyncConfig(
     val enabled: Boolean = false
 )
 
-/** Privacy sub-configuration (RFC-CORE-0003). */
+/** Privacy sub-configuration. */
 data class PrivacyConfig(
     val allowResearch: Boolean = false
 )
@@ -23,7 +23,6 @@ data class PrivacyConfig(
  * Main configuration for Synheart SDK
  */
 data class SynheartConfig(
-    // RFC-CORE-0007 fields
     val appId: String = "",
     val subjectId: String = "",
     val mode: SynheartMode = SynheartMode.PERSONAL,
@@ -79,57 +78,28 @@ data class SynheartConfig(
  * Example:
  * ```kotlin
  * val cloudConfig = CloudConfig(
- *     tenantId = "your_tenant_id",
- *     hmacSecret = "your_hmac_secret",
  *     subjectId = "pseudonymous_user_123",
  *     instanceId = UUID.randomUUID().toString()
  * )
  * ```
  */
 data class CloudConfig(
-    /// Base URL for Synheart Platform (default: production)
     val baseUrl: String = ApiEndpoints.DEFAULT_CLOUD_BASE_URL,
-
-    /// Tenant ID (from app registration)
-    val tenantId: String,
-
-    /// HMAC secret for signing requests (null when authProvider is used)
-    val hmacSecret: String? = null,
-
-    /// Custom auth provider for request signing (e.g., ECDSA device-identity).
-    /// When set, takes precedence over the HMAC path.
+    /**
+     * Auth provider for request signing. The runtime signs every ingest
+     * request with the device's hardware-backed ECDSA P-256 key; this is
+     * an override hook for hosts that need to stub it (e.g. in tests).
+     */
     val authProvider: AuthProvider? = null,
-
-    /// Subject ID (pseudonymous user identifier)
     val subjectId: String,
-
-    /// Subject type (default: "pseudonymous_user")
     val subjectType: String = "pseudonymous_user",
-
-    /// Instance ID (UUID for this SDK instance)
     val instanceId: String = UUID.randomUUID().toString(),
-
-    /// Max upload queue size (default: 100)
     val maxQueueSize: Int = 100,
-
-    /// Batch size for uploads (default: 10)
     val batchSize: Int = 10,
-
-    /// Upload interval (milliseconds, default: 5 minutes)
     val uploadIntervalMs: Long = 300_000,
-
-    /// Max retry attempts (default: 3)
     val maxRetries: Int = 3,
-
-    /// Enable backlog persistence (default: true)
     val enableBacklog: Boolean = true
-) {
-    init {
-        require(hmacSecret != null || authProvider != null) {
-            "CloudConfig requires either hmacSecret or authProvider"
-        }
-    }
-}
+)
 
 /**
  * Consent service configuration.

@@ -27,45 +27,20 @@ class MockAuthProvider(
 class AuthProviderTest {
 
     @Test
-    fun `CloudConfig requires at least one of hmacSecret or authProvider`() {
-        // Valid: hmacSecret only
-        val config1 = CloudConfig(
-            tenantId = "test",
-            hmacSecret = "secret",
-            subjectId = "user"
-        )
-        assertNotNull(config1)
-
-        // Valid: authProvider only
-        val config2 = CloudConfig(
-            tenantId = "test",
-            authProvider = MockAuthProvider(),
-            subjectId = "user"
-        )
-        assertNotNull(config2)
-
-        // Invalid: neither
-        try {
-            CloudConfig(
-                tenantId = "test",
-                subjectId = "user"
-            )
-            fail("Expected IllegalArgumentException")
-        } catch (e: IllegalArgumentException) {
-            // Expected
-        }
+    fun `CloudConfig accepts no authProvider (runtime injects ECDSA path)`() {
+        val config = CloudConfig(subjectId = "user")
+        assertNotNull(config)
+        assertNull(config.authProvider)
     }
 
     @Test
-    fun `CloudConfig stores authProvider and nullable hmacSecret`() {
+    fun `CloudConfig stores authProvider when set`() {
         val provider = MockAuthProvider()
         val config = CloudConfig(
-            tenantId = "test",
             authProvider = provider,
             subjectId = "user"
         )
         assertNotNull(config.authProvider)
-        assertNull(config.hmacSecret)
     }
 
     @Test
@@ -92,15 +67,4 @@ class AuthProviderTest {
         assertTrue(provider.onAuthErrorCalled)
     }
 
-    @Test
-    fun `CloudConfig with both hmacSecret and authProvider is valid`() {
-        val config = CloudConfig(
-            tenantId = "test",
-            hmacSecret = "secret",
-            authProvider = MockAuthProvider(),
-            subjectId = "user"
-        )
-        assertNotNull(config.hmacSecret)
-        assertNotNull(config.authProvider)
-    }
 }

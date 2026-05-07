@@ -3,7 +3,7 @@ package ai.synheart.core.models
 /**
  * Human State Vector - INTERNAL ONLY
  *
- * The HSV is an intermediate representation computed by synheart-runtime.
+ * The HSV is an intermediate representation computed by synheart-engine.
  * It contains per-head inference results (emotion, focus, capacity, etc.)
  * with confidence and metadata.
  *

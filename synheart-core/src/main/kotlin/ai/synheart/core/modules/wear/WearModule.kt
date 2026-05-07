@@ -20,10 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import ai.synheart.core.SynheartLogger
 
-/// Wear Module
-///
-/// Collects and buffers raw biosignals from wearables.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
+/** Collects and buffers raw biosignals from wearables. */
 class WearModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider,
@@ -35,8 +32,8 @@ class WearModule(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
 
-    // Wearable event processor (set externally after storage/runtime are ready)
-    private var eventProcessor: WearableEventProcessor? = null
+    internal var eventProcessor: WearableEventProcessor? = null
+        private set
 
     private val _vendorSyncState = MutableStateFlow(false)
 
@@ -46,10 +43,8 @@ class WearModule(
 
     private val _sampleFlow = MutableSharedFlow<WearSample>()
 
-    /** Live stream of incoming wear samples for downstream consumers (e.g. RuntimeModule). */
+    /** Live stream of incoming wear samples for downstream consumers. */
     val sampleFlow: Flow<WearSample> = _sampleFlow.asSharedFlow()
-
-    // MARK: - RawWearDataProvider
 
     override fun rawSamples(window: WindowType): List<WearSample> {
         if (!consent.current().biosignals) return emptyList()
@@ -118,8 +113,8 @@ class WearModule(
     /**
      * Attach an event processor for RAMEN vendor events.
      *
-     * Called by [Synheart] after storage and runtime are initialized,
-     * so the processor has access to StorageManager and RuntimeBridge.
+     * Called by [Synheart] after runtime is initialized,
+     * so the processor has access to CoreRuntimeBridge.
      */
     fun setEventProcessor(processor: WearableEventProcessor) {
         this.eventProcessor = processor

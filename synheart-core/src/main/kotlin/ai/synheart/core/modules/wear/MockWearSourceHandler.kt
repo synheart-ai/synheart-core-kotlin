@@ -12,7 +12,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-/// Mock wearable data source for testing and development
+/** Mock wearable data source for testing and development. */
 class MockWearSourceHandler : WearSourceHandler {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _sampleFlow = MutableSharedFlow<WearSample>()
@@ -28,9 +28,7 @@ class MockWearSourceHandler : WearSourceHandler {
     
     override val sampleFlow: Flow<WearSample> = _sampleFlow.asSharedFlow()
     
-    override suspend fun initialize() {
-        // Mock initialization - nothing to do
-    }
+    override suspend fun initialize() {}
     
     fun startGenerating() {
         if (isGenerating) return

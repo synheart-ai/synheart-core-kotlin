@@ -8,7 +8,7 @@ plugins {
 import java.util.Base64
 
 group = (project.findProperty('GROUP') ?: 'ai.synheart') as String
-version = (project.findProperty('VERSION_NAME') ?: '1.2.0') as String
+version = (project.findProperty('VERSION_NAME') ?: '0.0.4') as String
 def POM_ARTIFACT_ID = (project.findProperty('POM_ARTIFACT_ID') ?: 'synheart-core') as String
 
 description = 'Synheart Core SDK for Android - Unified HSI-compatible data collection, on-device state computation, and module orchestration.'
@@ -81,12 +81,12 @@ dependencies {
     // AndroidX Security (for encrypted storage)
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
-    // JNA for synheart-runtime native library
+    // JNA for synheart-core-runtime native library
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
 
     // Synheart sibling SDKs
-    // emotion and focus removed — now computed by synheart-runtime
-    // and accessed via RuntimeBridge.
+    // emotion and focus removed — now computed by synheart-engine
+    // and accessed via CoreRuntimeBridge.
     implementation 'ai.synheart:synheart-wear:0.3.0'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
     implementation 'ai.synheart:synheart-session:0.2.0'
@@ -105,10 +105,12 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }
 
-// Forward jna.library.path to the test JVM so host-side integration tests can load the native library.
+// Forward jna.library.path to the test JVM so host-side tests can load the native library.
+// The library is expected in the project's native/ directory (copied by `make kotlin`).
+// Override with -Djna.library.path=/custom/path if needed.
 tasks.withType(Test) {
     def jnaPath = System.getProperty("jna.library.path")
-            ?: "${rootProject.projectDir}/../synheart-runtime/target/release"
+            ?: "${rootProject.projectDir}/native"
     systemProperty 'jna.library.path', jnaPath
 }
 

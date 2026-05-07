@@ -16,7 +16,7 @@ data class HSIAxes(
     val sleep: HSIAxisValue? = null
 )
 
-/** Typed HSI state emitted by `Synheart.onStateUpdate` (RFC-CORE-0007 §3). */
+/** Typed HSI state emitted by `Synheart.onStateUpdate`. */
 data class HSIState(
     val subjectId: String,
     val timestampMs: Long,

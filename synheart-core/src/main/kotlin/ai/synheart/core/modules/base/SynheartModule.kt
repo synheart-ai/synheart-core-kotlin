@@ -1,6 +1,5 @@
 package ai.synheart.core.modules.base
 
-/// Module lifecycle status
 enum class ModuleStatus {
     UNINITIALIZED,
     INITIALIZING,
@@ -13,41 +12,24 @@ enum class ModuleStatus {
     DISPOSED
 }
 
-/// Base interface for all Synheart modules
-///
-/// Each module (Wear, Phone, Behavior, HSI Runtime, etc.) implements this interface
-/// to ensure consistent lifecycle management.
+/** Base interface for all Synheart modules. */
 interface SynheartModule {
-    /// Module identifier
     val moduleId: String
-
-    /// Current module status
     val status: ModuleStatus
-
-    /// Whether this module is currently enabled
     val isEnabled: Boolean
-
-    /// Initialize the module with required dependencies
     suspend fun initialize()
-
-    /// Start the module's operation
     suspend fun start()
-
-    /// Stop the module's operation (can be restarted)
     suspend fun stop()
-
-    /// Dispose of all resources (final cleanup)
     suspend fun dispose()
 }
 
-/// Module exception
 class ModuleException(
     val moduleId: String,
     message: String,
     cause: Throwable? = null
 ) : Exception("ModuleException [$moduleId]: $message", cause)
 
-/// Base implementation of SynheartModule with common functionality
+/** Base implementation of [SynheartModule] with common lifecycle management. */
 abstract class BaseSynheartModule(override val moduleId: String) : SynheartModule {
     private var _status: ModuleStatus = ModuleStatus.UNINITIALIZED
 
@@ -115,22 +97,12 @@ abstract class BaseSynheartModule(override val moduleId: String) : SynheartModul
         }
     }
 
-    // MARK: - Protected methods for subclasses
-
-    /// Set the module status
     protected fun setStatus(newStatus: ModuleStatus) {
         _status = newStatus
     }
 
-    /// Called during initialization - override in subclass
     protected abstract suspend fun onInitialize()
-
-    /// Called when starting the module - override in subclass
     protected abstract suspend fun onStart()
-
-    /// Called when stopping the module - override in subclass
     protected abstract suspend fun onStop()
-
-    /// Called during disposal - override in subclass
     protected abstract suspend fun onDispose()
 }
