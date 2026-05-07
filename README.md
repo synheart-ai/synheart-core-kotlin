@@ -280,7 +280,7 @@ For the modular architecture, features are collected in time windows:
 | Method | Description |
 |--------|-------------|
 | `initialize(context, config, userId, autoStart)` | Initialize the SDK |
-| `activate(feature)` | Enable a `SynheartFeature` (`WEAR`, `BEHAVIOR`, `PHONE_CONTEXT`, `CLOUD`, `SYNI`) |
+| `activate(feature)` | Enable a `SynheartFeature` (`WEAR`, `BEHAVIOR`, `PHONE_CONTEXT`, `CLOUD`) |
 | `deactivate(feature)` | Disable a feature |
 | `requestConsent()` | Open the cloud consent flow; returns a `ConsentToken?` |
 | `hasConsent(consentType)` | Check if a wire-string consent is granted |

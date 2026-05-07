@@ -76,7 +76,7 @@ variant.
 
 - Removed all TODO/FIXME comments across the SDK (Synheart.kt, CapabilityModule.kt, CloudConnectorModule.kt).
 - Replaced stale TODO comments in FocusHead and EmotionHead reevaluation branches with concise `// FocusHead: HSI JSON parser pending.` / `// EmotionHead: HSI JSON parser pending.` notes.
-- **README.md** — Updated version badge, fixed HSV→HSI terminology, updated code examples to use `activate()` API and `Flow<String>` types, removed Syni Hooks and "(planned)" labels, removed stale "Next Steps", updated platform integration sections, added patent pending notice.
+- **README.md** — Updated version badge, fixed HSV→HSI terminology, updated code examples to use `activate()` API and `Flow<String>` types, removed "(planned)" labels, removed stale "Next Steps", updated platform integration sections, added patent pending notice.
 
 ### Added
 
