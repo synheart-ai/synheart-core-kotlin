@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Pure-Kotlin unit tests for the SynheartPriority in-memory fallback.
-// The native FFI path is exercised by the runtime's own Rust tests.
+// The native FFI path is exercised by the runtime's own internal tests.
 
 package ai.synheart.core.priority
 

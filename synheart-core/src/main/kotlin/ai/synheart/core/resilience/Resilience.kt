@@ -4,7 +4,7 @@
 //
 // Mirror of `synheart-core-flutter/lib/src/resilience/synheart_resilience.dart`
 // and `synheart-core-swift/.../SynheartResilience.swift`. All field
-// names are pinned to the Rust `synheart-resilience` JSON shape.
+// names are pinned to the runtime's `synheart-resilience` JSON shape.
 
 package ai.synheart.core.resilience
 
@@ -57,7 +57,7 @@ enum class ResilienceReason {
     }
 }
 
-/** Result returned by `compute()`. Mirrors the Rust `ResilienceScoreResult`. */
+/** Result returned by `compute()`. Mirrors the runtime's `ResilienceScoreResult`. */
 data class ResilienceResult(
     val score: Int?,
     val rmssdOwMs: Double?,

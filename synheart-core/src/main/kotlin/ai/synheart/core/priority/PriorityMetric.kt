@@ -48,7 +48,7 @@ data class SourceResolution(
 data class RankedProvider(val provider: String, val rank: Int)
 
 /**
- * Sentinel rank for unknown providers — matches `i32::MAX` in
- * `ProviderRank::UNRANKED` on the Rust side.
+ * Sentinel rank for unknown providers — matches the runtime's
+ * `ProviderRank::UNRANKED` (32-bit max int).
  */
 const val PRIORITY_UNRANKED: Int = Int.MAX_VALUE

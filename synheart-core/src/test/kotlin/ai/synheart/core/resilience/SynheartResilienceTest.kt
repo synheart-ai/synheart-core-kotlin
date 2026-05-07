@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Pure-Kotlin unit tests for SynheartResilience.
-// Native FFI path is exercised by the runtime's own Rust tests.
+// Native FFI path is exercised by the runtime's own internal tests.
 
 package ai.synheart.core.resilience
 
