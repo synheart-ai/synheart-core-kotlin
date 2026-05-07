@@ -886,6 +886,76 @@ object Synheart {
         }
     }
 
+    // MARK: Diagnostics & Upload State
+
+    /**
+     * Full native runtime diagnostics as a parsed map, or `null` if the runtime
+     * is unavailable. Mirrors the Flutter SDK's `runtimeDiagnostics()`.
+     */
+    fun runtimeDiagnostics(): Map<String, Any>? {
+        val json = coreRuntime?.diagnostics() ?: return null
+        return parseJsonObjectAsMap(json)
+    }
+
+    /** Whether lab metadata is available for the current session. */
+    val isLabMetadataAvailable: Boolean
+        get() = coreRuntime?.isLabAvailable() ?: false
+
+    /** Number of HSI snapshots queued locally awaiting cloud upload. */
+    val uploadQueueLength: Int
+        get() = coreRuntime?.uploadQueueLength() ?: 0
+
+    /** Last error code emitted by the native runtime; 0 if no error. */
+    val lastErrorCode: Int
+        get() = coreRuntime?.lastErrorCode() ?: 0
+
+    /** Whether the native runtime library is loaded and responsive. */
+    val isRuntimeAvailable: Boolean
+        get() = coreRuntime?.isRuntimeAvailable() ?: false
+
+    /** Whether the network is currently reachable per the runtime. */
+    val isNetworkReachable: Boolean
+        get() = coreRuntime?.isNetworkReachable() ?: false
+
+    /**
+     * Force-flush any pending uploads. Returns the runtime's response JSON,
+     * or `null` if the runtime is unavailable.
+     */
+    fun flushUploads(): String? = coreRuntime?.flushUploads()
+
+    /** Raw JSON describing the most recent upload attempt, or `null`. */
+    val uploadMetadata: String?
+        get() = coreRuntime?.uploadMetadata()
+
+    /** Timestamp of the most recent successful cloud ingest, or `null`. */
+    val lastIngestSuccessAtMs: Long?
+        get() = parsedUploadMetadata()?.optLong("lastIngestSuccessAtMs", -1L)
+            ?.takeIf { it >= 0L }
+
+    /** ID of the most recent upload batch, or `null`. */
+    val lastUploadBatchId: String?
+        get() = parsedUploadMetadata()?.optString("lastUploadBatchId")
+            ?.takeIf { it.isNotEmpty() }
+
+    /** Error message from the most recent failed upload, or `null`. */
+    val lastUploadError: String?
+        get() = parsedUploadMetadata()?.optString("lastUploadError")
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun parsedUploadMetadata(): org.json.JSONObject? {
+        val json = coreRuntime?.uploadMetadata() ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
+    }
+
+    private fun parseJsonObjectAsMap(json: String): Map<String, Any>? {
+        return try {
+            val obj = org.json.JSONObject(json)
+            val out = HashMap<String, Any>()
+            obj.keys().forEach { k -> obj.opt(k)?.let { out[k] = it } }
+            out
+        } catch (_: Exception) { null }
+    }
+
     /**
      * Stop Synheart Core SDK
      */
