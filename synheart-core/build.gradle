@@ -87,7 +87,7 @@ dependencies {
     // Synheart sibling SDKs
     // emotion and focus removed — now computed by synheart-engine
     // and accessed via CoreRuntimeBridge.
-    implementation 'ai.synheart:synheart-wear:0.3.0'
+    implementation 'ai.synheart:synheart-wear:0.4.1'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
     implementation 'ai.synheart:synheart-session:0.2.0'
     implementation 'ai.synheart:synheart-auth:0.1.0'
