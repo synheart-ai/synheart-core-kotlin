@@ -373,4 +373,39 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     /** Finalize the lab protocol. Returns the result JSON string, or null on failure. */
     fun labFinalize(endedAtMs: Long): String? =
         readAndFreeString(lib.synheart_core_lab_finalize(requireHandle(), endedAtMs))
+
+    // ------------------------------------------------------------------ //
+    // Breathing compliance                                                //
+    // ------------------------------------------------------------------ //
+
+    /** Set the target breathing rate in breaths per minute (e.g. 6.0 for resonance). */
+    fun breathingSetTargetBpm(bpm: Double) {
+        lib.synheart_core_breathing_set_target_bpm(requireHandle(), bpm)
+    }
+
+    /** Set the rolling-window length in seconds. Native side clamps to `[30, 120]`. */
+    fun breathingSetWindowSecs(secs: Int) {
+        lib.synheart_core_breathing_set_window_secs(requireHandle(), secs)
+    }
+
+    /**
+     * Set the population threshold profile.
+     * `0 = Beginner`, `1 = Experienced`, `2 = Clinical`.
+     */
+    fun breathingSetPopulation(profile: Int) {
+        lib.synheart_core_breathing_set_population(requireHandle(), profile)
+    }
+
+    /**
+     * Evaluate breathing compliance over the current RR window. Returns a
+     * JSON `ComplianceResult` string or null when there isn't enough Tier-1
+     * data yet.
+     */
+    fun breathingEvaluateJson(): String? =
+        readAndFreeString(lib.synheart_core_breathing_evaluate(requireHandle()))
+
+    /** Clear the breathing detector's RR ring buffer. */
+    fun breathingReset() {
+        lib.synheart_core_breathing_reset(requireHandle())
+    }
 }
