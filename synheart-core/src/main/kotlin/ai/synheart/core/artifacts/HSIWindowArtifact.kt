@@ -16,6 +16,10 @@ data class Provenance(
 data class WindowData(
     @SerialName("start_ms") val startMs: Long,
     @SerialName("end_ms") val endMs: Long,
+    // Default 30000 matches the canonical HSI window length and the
+    // Swift sibling's default (HSIWindow.swift). Field added to keep
+    // the JSON wire shape byte-equivalent across Kotlin / Swift / Flutter.
+    @SerialName("window_size_ms") val windowSizeMs: Int = 30_000,
     val hsi: Map<String, JsonElement>
 )
 
@@ -54,7 +58,12 @@ data class HSIWindowArtifact(
                     appId = appId,
                     runtimeVersion = runtimeVersion
                 ),
-                window = WindowData(startMs = startMs, endMs = endMs, hsi = hsi)
+                window = WindowData(
+                    startMs = startMs,
+                    endMs = endMs,
+                    windowSizeMs = (endMs - startMs).toInt().coerceAtLeast(0),
+                    hsi = hsi,
+                )
             )
         }
     }
