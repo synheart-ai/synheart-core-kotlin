@@ -29,6 +29,11 @@ def siblings = [
         'synheart-behavior-kotlin': [module: 'ai.synheart:synheart-behavior', project: ':'],
         'synheart-session-kotlin' : [module: 'ai.synheart:synheart-session', project: ':'],
         'synheart-auth-kotlin'    : [module: 'ai.synheart:synheart-auth', project: ':lib'],
+        // Syni — peer SDK under the `com.syni` group (not `ai.synheart`).
+        // Requires syni-kotlin to be on its AGP-9 / Gradle-9.2 branch
+        // (see syni-kotlin#3); on `main` the AGP version conflict
+        // breaks the composite graph.
+        'syni-kotlin'             : [module: 'com.syni:syni-sdk', project: ':syni-sdk'],
 ]
 
 siblings.each { dir, info ->
