@@ -25,7 +25,9 @@ class BehaviorModuleAdapter(
     override val name: String = "behavior_module"
 
     override fun currentSnapshot(): BehaviorSnapshot? {
-        val events = behaviorModule.rawEvents(WindowType.WINDOW_1M)
+        // No 1-minute bucket in WindowType; pull the 5-minute window and
+        // narrow with the local 60s timestamp filter below.
+        val events = behaviorModule.rawEvents(WindowType.WINDOW_5M)
         if (events.isEmpty()) return null
 
         val now = System.currentTimeMillis()

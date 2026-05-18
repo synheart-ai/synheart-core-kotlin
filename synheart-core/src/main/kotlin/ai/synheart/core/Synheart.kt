@@ -267,39 +267,15 @@ object Synheart {
         )
     }
 
-    /** Log out -- revoke consent and clear credentials. */
-    fun logout() {
-        try { consentModule?.revokeConsent() } catch (_: Exception) {}
+    /** Log out — revoke consent and clear credentials. */
+    suspend fun logout() {
+        try { consentModule?.revokeAll() } catch (_: Exception) {}
     }
 
-    /** Enable or disable sync. */
-    fun setSyncEnabled(enabled: Boolean) {
-        coreRuntime?.setSyncEnabled(enabled)
-    }
-
-    /** Execute a sync cycle (push + pull). */
-    fun syncNow(): ai.synheart.core.sync.SyncResult {
-        val cr = coreRuntime ?: return ai.synheart.core.sync.SyncResult()
-        val json = cr.syncNow() ?: return ai.synheart.core.sync.SyncResult()
-        return try {
-            val obj = org.json.JSONObject(json)
-            val errorsList = mutableListOf<String>()
-            obj.optJSONArray("errors")?.let { arr ->
-                for (i in 0 until arr.length()) errorsList.add(arr.optString(i, ""))
-            }
-            ai.synheart.core.sync.SyncResult(
-                pushed = obj.optInt("pushed", 0),
-                pulled = obj.optInt("pulled", 0),
-                conflictsResolved = obj.optInt("conflicts_resolved", 0),
-                errors = errorsList
-            )
-        } catch (_: Exception) { ai.synheart.core.sync.SyncResult() }
-    }
-
-    /** Get current sync status. */
-    fun getSyncStatus(): ai.synheart.core.sync.SyncStatus {
-        return ai.synheart.core.sync.SyncStatus(enabled = false)
-    }
+    // The dedicated `sync` subsystem (push/pull) was removed from the Kotlin
+    // SDK to match Flutter's surface — uploads now go through the cloud
+    // module on its own schedule, gated by consent. Use the runtime bridge
+    // directly if you need the raw FFI sync hooks (`coreRuntime.syncNow()`).
 
     /**
      * Returns the session module status, if a session is active.
@@ -407,24 +383,11 @@ object Synheart {
 
             // 2. Initialize consent module
             SynheartLogger.log("[Synheart] Initializing consent module...")
-            val consentStorage = ConsentStorage(context = this.context!!)
-            consentModule = ConsentModule(storage = consentStorage)
-
-            // Wire device signing into consent module so all consent-token requests
-            // are signed with device identity (X-Synheart-* headers).
-            consentModule!!.setDeviceSigner { method, path, bodyBytes ->
-                try {
-                    ai.synheart.auth.SynheartAuth.shared.signRequest(
-                        appId = resolvedConfig.appId,
-                        method = method,
-                        path = path,
-                        bodyBytes = bodyBytes
-                    ).toMap()
-                } catch (e: Exception) {
-                    SynheartLogger.log("[Synheart] Device signing unavailable for consent: ${e.message}")
-                    emptyMap()
-                }
-            }
+            consentModule = ConsentModule(context = this.context!!)
+            // Device-signing for outbound requests is owned by the cloud /
+            // upload path (DeviceAuthProvider) directly against
+            // SynheartAuth.shared — the consent module no longer carries
+            // a per-request signer hook, matching Flutter's surface.
 
             // 3. Register modules
             moduleManager.registerModule(capabilityModule!!)
