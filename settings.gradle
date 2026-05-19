@@ -21,10 +21,11 @@ include ':synheart-core'
 // exists next to this repo (local multi-repo workspace). In CI / fresh clones
 // the sibling dirs aren't present, so the corresponding Maven Central artifacts
 // are used instead.
+// Emotion and focus are NOT in this list — they are computed inside the
+// synheart-engine runtime and accessed via CoreRuntimeBridge, not as
+// independent Kotlin SDKs.
 def siblings = [
         'synheart-wear-kotlin'    : [module: 'ai.synheart:synheart-wear', project: ':'],
-        'synheart-emotion-kotlin' : [module: 'ai.synheart:synheart-emotion', project: ':'],
-        'synheart-focus-kotlin'   : [module: 'ai.synheart:synheart-focus', project: ':'],
         'synheart-behavior-kotlin': [module: 'ai.synheart:synheart-behavior', project: ':'],
         'synheart-session-kotlin' : [module: 'ai.synheart:synheart-session', project: ':'],
         'synheart-auth-kotlin'    : [module: 'ai.synheart:synheart-auth', project: ':lib'],

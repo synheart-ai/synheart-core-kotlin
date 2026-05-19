@@ -41,7 +41,7 @@ class ConsentModule(
         return _consentFlow.asStateFlow().filterNotNull()
     }
 
-    fun updateConsent(newConsent: ConsentSnapshot) {
+    override suspend fun updateConsent(newConsent: ConsentSnapshot) {
         currentConsent = newConsent
         _consentFlow.value = newConsent
         notifyListeners(newConsent)
@@ -55,26 +55,35 @@ class ConsentModule(
         listeners.clear()
     }
 
-    fun grantAll() {
+    suspend fun grantAll() {
         updateConsent(ConsentSnapshot.all())
     }
 
-    fun revokeAll() {
+    suspend fun revokeAll() {
         updateConsent(ConsentSnapshot.none())
     }
 
-    fun updateConsentType(type: ConsentType, granted: Boolean) {
+    suspend fun updateConsentType(type: ConsentType, granted: Boolean) {
         if (granted) {
             bridge?.grantConsent(type.name.lowercase())
         } else {
             bridge?.revokeConsent(type.name.lowercase())
         }
         val current = currentConsent ?: return
-        val updated = current.copyWith(type, granted)
+        val updated = when (type) {
+            ConsentType.BIOSIGNALS -> current.copyWith(biosignals = granted)
+            ConsentType.PHONE_CONTEXT -> current.copyWith(phoneContext = granted)
+            ConsentType.BEHAVIOR -> current.copyWith(behavior = granted)
+            ConsentType.CLOUD_UPLOAD -> current.copyWith(cloudUpload = granted)
+            ConsentType.FOCUS_ESTIMATION -> current.copyWith(focusEstimation = granted)
+            ConsentType.EMOTION_ESTIMATION -> current.copyWith(emotionEstimation = granted)
+            ConsentType.SYNI -> current.copyWith(syni = granted)
+            ConsentType.VENDOR_SYNC -> current.copyWith(vendorSync = granted)
+        }
         updateConsent(updated)
     }
 
-    fun denyConsent() {
+    suspend fun denyConsent() {
         updateConsent(ConsentSnapshot.none())
         SynheartLogger.log("[ConsentModule] Consent explicitly denied by user")
     }
