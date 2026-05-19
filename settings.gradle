@@ -11,6 +11,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        mavenLocal() // fallback for locally-published sibling SDKs when composite-build dirs are absent
     }
 }
 

@@ -2,67 +2,70 @@
 //
 // Synheart-side gate around the Syni on-device agent SDK.
 //
-// Unlike Flutter's `package:syni`, the native Syni Android SDK
-// (`com.syni:syni-sdk`) is a separate orchestration layer with its
-// own types (Syni singleton, SyniRequest, SyniResponse) — not a port
-// of Flutter's `SyniAgent`. This module owns the Synheart-specific
-// concern — consent gating — and delegates everything else (engine
-// routing, model download, persona registry, request / response
-// semantics) to the underlying `com.syni.sdk.Syni` singleton.
+// Mirrors the Flutter shape: `SyniAgent` instance + install lifecycle
+// state machine + typed `chat()` / `chatStream()` returning
+// `SyniChatResponse` and `SyniChatEvent` respectively. The underlying
+// `ai.synheart.syni.SyniAgent` is wrapped with a `ConsentType.SYNI`
+// gate so consumers can't accidentally bypass the consent check.
 //
-// Why a module at all when Syni is already a singleton?
-// - The Synheart facade hands a single `SyniModule` to consumers.
-//   The module wraps each call with a consent check so apps don't
-//   accidentally bypass the gate by calling `com.syni.sdk.Syni`
-//   directly.
-// - Consent revocation flips the gate immediately; in-flight calls
-//   started before the change still complete (no cancellation).
-// - Hosts that want to bypass the gate (e.g. an internal admin tool)
-//   can still reach the Syni singleton through `module.unsafeSyni`.
+// API note: this matches the post-alignment Syni SDK
+// (`ai.synheart.syni:syni-sdk:0.0.2+`). The earlier `Syni` singleton
+// shape is gone.
 
 package ai.synheart.core.modules.syni
 
 import ai.synheart.core.modules.interfaces.ConsentProvider
 import ai.synheart.core.modules.interfaces.ConsentType
+import ai.synheart.syni.SyniAgent
+import ai.synheart.syni.SyniChatEvent
+import ai.synheart.syni.SyniChatResponse
+import ai.synheart.syni.SyniCloudConfig
+import ai.synheart.syni.SyniExecutionMode
+import ai.synheart.syni.SyniInstallState
+import ai.synheart.syni.SyniInstaller
+import ai.synheart.syni.SyniModelSpec
+import ai.synheart.syni.SyniPersona
 import android.content.Context
-import com.syni.sdk.Syni
-import com.syni.sdk.core.Persona
-import com.syni.sdk.core.SyniConfig
-import com.syni.sdk.core.SyniRequest
-import com.syni.sdk.core.SyniResponse
-import com.syni.sdk.core.SyniResult
-import com.syni.sdk.model.DownloadProgress
-import com.syni.sdk.model.ModelInfo
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Thrown when a Syni call is attempted without the user having granted SYNI consent. */
 class SyniConsentDeniedException :
     Exception("Syni access requires explicit user consent (ConsentType.SYNI).")
 
 /**
- * Synheart-side facade around the `Syni` on-device agent SDK.
+ * Synheart-side facade around the `SyniAgent` on-device agent SDK.
  *
  * ```kotlin
- * val module = SyniModule(consent = Synheart.consentModule!!)
- * module.initialize(context, SyniConfig())
- * val response = module.generateAsync(SyniRequest(...))
+ * val module = SyniModule(context, consent = Synheart.consentModule!!)
+ * module.install(persona, model)
+ * val resp = module.chat("hi")
  * ```
  *
- * Every call routing through this module first checks consent. The
- * gate is consent-only today; capability-token gating is the caller's
- * responsibility (use `Synheart.isFeatureOperational`).
+ * Every method that touches the agent first checks consent; throws
+ * [SyniConsentDeniedException] when denied. The reactive
+ * [installState] / [currentState] / [hasCloud] / [isInstalled] reads
+ * are not gated — they're cheap state observations consumers may
+ * legitimately need before deciding to ask for consent.
  */
 class SyniModule(
+    context: Context,
     private val consent: ConsentProvider,
+    installer: SyniInstaller? = null,
+    cloudConfig: SyniCloudConfig? = null,
 ) {
 
     /**
-     * Direct access to the underlying singleton. Bypasses the consent
+     * Direct access to the underlying agent. Bypasses the consent
      * gate — use only when you've performed the check yourself (e.g.
      * during initialization, before consent has been granted, in
      * internal tooling).
      */
-    val unsafeSyni: Syni get() = Syni
+    val unsafeAgent: SyniAgent = SyniAgent(
+        context = context,
+        installer = installer,
+        cloudConfig = cloudConfig,
+    )
 
     /** True if the user has granted SYNI consent on the current snapshot. */
     val isGateOpen: Boolean
@@ -72,98 +75,72 @@ class SyniModule(
             false
         }
 
-    /** Mirror of [Syni.isInitialized]. Does not require the gate to be open. */
-    val isInitialized: Boolean get() = Syni.isInitialized
+    // ---- Reactive state (not gated — observation only) -----------------
 
-    /**
-     * Initialize the underlying Syni SDK with [config]. Requires SYNI
-     * consent to be granted; throws [SyniConsentDeniedException] otherwise.
-     *
-     * Idempotent in the same sense `Syni.initialize` is — calling twice
-     * with a different config throws via the underlying SDK, not here.
-     */
-    fun initialize(context: Context, config: SyniConfig = SyniConfig()) {
-        requireGate()
-        Syni.initialize(context, config)
-    }
+    val installState: StateFlow<SyniInstallState> get() = unsafeAgent.installState
+    val currentState: SyniInstallState get() = unsafeAgent.currentState
+    val isInstalled: Boolean get() = unsafeAgent.isInstalled
+    val hasCloud: Boolean get() = unsafeAgent.hasCloud
 
-    /** True if Syni is initialized AND ready (model loaded). Suspend; gated. */
-    suspend fun isReady(): Boolean {
-        requireGate()
-        return Syni.isReady()
-    }
+    // ---- Lifecycle ------------------------------------------------------
 
-    /** Generate a response for [request]. Gated; suspend. */
-    suspend fun generate(request: SyniRequest): SyniResult<SyniResponse> {
+    /** Install [persona] with [model]. Gated; suspend. */
+    suspend fun install(persona: SyniPersona, model: SyniModelSpec) {
         requireGate()
-        return Syni.generate(request)
-    }
-
-    /** Convenience: generate for a persona + plain text. Gated; suspend. */
-    suspend fun generate(personaId: String, text: String): SyniResult<SyniResponse> {
-        requireGate()
-        return Syni.generate(personaId, text)
-    }
-
-    /** Throws on error instead of returning a [SyniResult]. Gated; suspend. */
-    suspend fun generateAsync(request: SyniRequest): SyniResponse {
-        requireGate()
-        return Syni.generateAsync(request)
-    }
-
-    /** Download a model. Gated; returns a progress flow. */
-    fun downloadModel(
-        url: String,
-        modelId: String,
-        expectedChecksum: String? = null,
-        wifiOnly: Boolean = false,
-    ): Flow<DownloadProgress> {
-        requireGate()
-        return Syni.downloadModel(url, modelId, expectedChecksum, wifiOnly)
-    }
-
-    /** List downloaded models. Gated. */
-    fun getDownloadedModels(): List<ModelInfo> {
-        requireGate()
-        return Syni.getDownloadedModels()
-    }
-
-    /** Delete a model. Gated; suspend. */
-    suspend fun deleteModel(modelId: String): Boolean {
-        requireGate()
-        return Syni.deleteModel(modelId)
-    }
-
-    /** Storage used by downloaded models, in bytes. Gated. */
-    fun getStorageUsage(): Long {
-        requireGate()
-        return Syni.getStorageUsage()
-    }
-
-    /** IDs of registered personas. Gated. */
-    fun availablePersonas(): Set<String> {
-        requireGate()
-        return Syni.availablePersonas()
-    }
-
-    /** Look up a registered persona. Gated. */
-    fun getPersona(personaId: String): Persona {
-        requireGate()
-        return Syni.getPersona(personaId)
-    }
-
-    /** Register a new persona at runtime. Gated. */
-    fun registerPersona(persona: Persona) {
-        requireGate()
-        Syni.registerPersona(persona)
+        unsafeAgent.install(persona, model)
     }
 
     /**
-     * Shut down the underlying Syni SDK. Not gated — letting consent
-     * revocation drive a shutdown is the expected path.
+     * Restore an existing install if the on-disk state matches
+     * [persona] + [model]. Gated; suspend. Returns true on successful
+     * restore, false if a fresh [install] is required.
      */
-    suspend fun shutdown() {
-        Syni.shutdown()
+    suspend fun restoreInstallIfReady(persona: SyniPersona, model: SyniModelSpec): Boolean {
+        requireGate()
+        return unsafeAgent.restoreInstallIfReady(persona, model)
+    }
+
+    /** Uninstall the current persona + model. Gated; suspend. */
+    suspend fun uninstall() {
+        requireGate()
+        unsafeAgent.uninstall()
+    }
+
+    /** Release resources held by the underlying runtime. Not gated. */
+    suspend fun dispose() {
+        unsafeAgent.dispose()
+    }
+
+    // ---- Chat -----------------------------------------------------------
+
+    /**
+     * Single-turn chat. Returns the assembled [SyniChatResponse].
+     * Gated; suspend.
+     */
+    suspend fun chat(
+        message: String,
+        hsiContext: Map<String, Any?>? = null,
+        seed: Long = 0L,
+        mode: SyniExecutionMode = SyniExecutionMode.LOCAL_FIRST,
+    ): SyniChatResponse {
+        requireGate()
+        return unsafeAgent.chat(message, hsiContext, seed, mode)
+    }
+
+    /**
+     * Streaming chat. Emits [SyniChatEvent] (Delta / Final) until the
+     * response is complete. Gate is checked at subscription time;
+     * revoking consent mid-stream does not cancel the in-flight
+     * generation.
+     */
+    fun chatStream(
+        message: String,
+        hsiContext: Map<String, Any?>? = null,
+        seed: Long = 0L,
+        mode: SyniExecutionMode = SyniExecutionMode.LOCAL_FIRST,
+    ): Flow<SyniChatEvent> {
+        requireGate()
+        return unsafeAgent.chatStream(message, hsiContext, seed, mode)
     }
 
     private fun requireGate() {
