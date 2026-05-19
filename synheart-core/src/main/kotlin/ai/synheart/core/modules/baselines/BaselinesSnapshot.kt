@@ -71,9 +71,9 @@ data class BaselinesSnapshot(
     val isEmpty: Boolean
         get() = reference == null && latestSleepScore == null && recentSleepScores.isEmpty()
 
-    /** True when the reference is present and reports `Stable` status. */
-    val isStable: Boolean
-        get() = (reference?.status ?: "").lowercase() == "stable"
+    /** True when the reference is present and reports `READY` status — all five primary SRM dimensions are mature enough for personalized scoring. */
+    val isReady: Boolean
+        get() = (reference?.status ?: "").lowercase() == "ready"
 
     /** Number of prior nights behind the live score, when available. */
     val priorNightCount: Int?

@@ -76,19 +76,20 @@ class BaselinesTest {
     }
 
     @Test
-    fun `isStable mirrors reference status case-insensitively`() {
+    fun `isReady mirrors reference status case-insensitively`() {
         val snap = BaselinesSnapshot(
-            reference = reference("Stable"),
+            reference = reference("READY"),
             latestSleepScore = null, capturedAtMs = 0,
         )
-        assertTrue(snap.isStable)
-        assertFalse(snap.copy(reference = reference("Warming")).isStable)
+        assertTrue(snap.isReady)
+        assertFalse(snap.copy(reference = reference("WARMING")).isReady)
+        assertFalse(snap.copy(reference = reference("STALE")).isReady)
     }
 
     @Test
     fun `recentMedian computed from ring when populated`() {
         val snap = BaselinesSnapshot(
-            reference = reference("Stable", recentMedian = 99),
+            reference = reference("READY", recentMedian = 99),
             latestSleepScore = null,
             recentSleepScores = listOf(70, 80, 60),
             capturedAtMs = 0,
@@ -101,7 +102,7 @@ class BaselinesTest {
     @Test
     fun `recentMedian falls back to reference when ring empty`() {
         val snap = BaselinesSnapshot(
-            reference = reference("Stable", recentMedian = 78),
+            reference = reference("READY", recentMedian = 78),
             latestSleepScore = null,
             capturedAtMs = 0,
         )
@@ -135,10 +136,10 @@ class BaselinesTest {
     @Test
     fun `cacheReference and cacheRecoveryScore land on the same snapshot`() = runTest {
         val b = Baselines()
-        b.cacheReference(reference("Stable"))
+        b.cacheReference(reference("READY"))
         b.cacheRecoveryScore(recoveryScore(60))
         val snap = b.current()
-        assertEquals("Stable", snap.reference?.status)
+        assertEquals("READY", snap.reference?.status)
         assertEquals(60, snap.latestRecoveryScore?.score)
         assertNull(snap.latestSleepScore)
     }
@@ -157,7 +158,7 @@ class BaselinesTest {
         val b = Baselines()
         b.cacheSleepScore(sleepScore(70), source = "garmin")
         b.cacheRecoveryScore(recoveryScore())
-        b.cacheReference(reference("Stable"))
+        b.cacheReference(reference("READY"))
         b.reset()
         val snap = b.updates.first()
         assertNull(snap.latestSleepScore)
