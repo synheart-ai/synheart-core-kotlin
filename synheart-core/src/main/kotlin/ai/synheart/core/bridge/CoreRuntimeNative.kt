@@ -300,6 +300,28 @@ interface CoreRuntimeNative : Library {
     // pointing at format-agnostic runtime symbols (the underlying
     // `synheart_core_backfill_*` symbols are reusable; we just need
     // a different sample-payload variant on the runtime side.
+
+    // ------------------------------------------------------------------ //
+    // Breathing compliance (RFC-Breathing-001)                            //
+    // RR samples pushed via `synheart_core_push_rr` already feed the     //
+    // detector. These configure the target / window / population and    //
+    // read back JSON verdicts.                                           //
+    // ------------------------------------------------------------------ //
+
+    fun synheart_core_breathing_set_target_bpm(handle: Pointer, bpm: Double)
+    fun synheart_core_breathing_set_window_secs(handle: Pointer, secs: Int)
+    fun synheart_core_breathing_set_population(handle: Pointer, profile: Int)
+
+    /**
+     * Evaluate breathing compliance over the current RR window. Returns a
+     * JSON `ComplianceResult` string (caller frees via
+     * [synheart_core_free_string]) or null when the detector has nothing
+     * to report.
+     */
+    fun synheart_core_breathing_evaluate(handle: Pointer): Pointer?
+
+    /** Clear the breathing detector's RR ring buffer. */
+    fun synheart_core_breathing_reset(handle: Pointer)
 }
 
 /** JNA callback interface for HSI updates. */
