@@ -67,13 +67,58 @@ The Core SDK strictly separates:
 
 ### Core Modules
 
-1. **Capabilities Module** - Feature gating (core/extended/research)
-2. **Consent Module** - User permission management
-3. **Wear Module** - Biosignal collection from wearables
-4. **Phone Module** - Device motion and context signals
-5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via the runtime native binary)
-7. **Cloud Connector** - Secure HSI snapshot uploads
+1. **Capabilities Module** — Feature gating (core/extended/research)
+2. **Consent Module** — User permission management
+3. **Wear Module** — Biosignal collection from wearables
+4. **Phone Module** — Device motion and context signals
+5. **Behavior Module** — User-device interaction patterns
+6. **HSI Runtime** — Signal fusion and state computation (via the runtime native binary)
+7. **Cloud Connector** — Secure HSI snapshot uploads
+
+### Optional Modules
+
+These ship in the same artifact and are wired through the runtime, but only become useful once you've granted the relevant consent / capabilities. Each is a thin Kotlin facade around an existing FFI surface.
+
+| Module | Purpose | Entry point |
+|---|---|---|
+| **Baselines** | Reactive snapshot of the user's wearable-baseline state — `Flow<BaselinesSnapshot>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night Path-B ring. | `Baselines.shared` |
+| **Breathing** | RFC-Breathing-001 4-pillar compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge)` |
+| **Syni** | Consent-gated facade around the [`ai.synheart.syni`](https://github.com/synheart-ai/syni-kotlin) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `ConsentType.SYNI` check. | `SyniModule(context, consent)` |
+| **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep_need` / `deep_sleep_min` / `rem_sleep_min` / `hrv_rmssd` / `resting_hr` per wake-day. | `HealthConnectRuntimeSink(reader, bridge)` |
+| **Scoring models** | Typed input + result classes for the runtime's Sleep / Recovery / Readiness scorers (RFC-SLEEP-SCORE-PIPELINE-0001 / RFC-RECOVERY-SCORE-0001 / RFC-READINESS-SCORE-0001) plus a self-report `SleepQuestionnaireAnswers`. | `models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.kt` |
+| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Swift siblings. | `modules/cloud/UploadModels.kt` |
+
+Examples:
+
+```kotlin
+// Baselines — react to every score / reference update
+Baselines.shared.updates.collect { snap ->
+    snap.latestSleepScore?.let { render(it.score) }
+    snap.latestRecoveryScore?.let { render(it.score) }
+}
+
+// Breathing — configure once, evaluate per UI frame
+val breathing = BreathingModule(coreRuntime)
+breathing.setTargetBpm(6.0)
+breathing.setPopulation(BreathingPopulation.BEGINNER)
+when (val v = breathing.evaluate()) {
+    is BreathingComplianceResult.Compliant -> showCompliant(v.metrics)
+    is BreathingComplianceResult.NotCompliant -> showCoaching(BreathingGuidanceCopy.copyFor(v.reason))
+    is BreathingComplianceResult.Insufficient -> showWarming(v.reason)
+}
+
+// Health Connect backfill — call on first launch after consent
+val reader = HealthConnectAdapter(context) // from synheart-wear-kotlin
+val sink = HealthConnectRuntimeSink(reader = reader, bridge = coreRuntime)
+val result = sink.backfill(daysBack = 365)
+log("seeded ${result.daysIngested} days, ${result.dimensionsPushed} dimensions")
+
+// Syni — consent-gated agent
+val syni = SyniModule(context, consent = consentModule)
+syni.install(persona = SyniSpecPersona.load(context, "focus.coach.v1"),
+             model   = SyniModels.qwen25_15bInstructQ4)
+val reply = syni.chat("how should I focus right now?")
+```
 
 ### Data Flow
 
