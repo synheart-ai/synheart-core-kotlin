@@ -15,7 +15,7 @@ description = 'Synheart Core SDK for Android - Unified HSI-compatible data colle
 
 android {
     namespace 'ai.synheart.core'
-    compileSdk 34
+    compileSdk 35
 
     lint {
         // CI runs `lint` separately; don't fail `build`/publishing on lint issues.
@@ -91,6 +91,13 @@ dependencies {
     implementation 'ai.synheart:synheart-behavior:0.4.1'
     implementation 'ai.synheart:synheart-session:0.2.0'
     implementation 'ai.synheart:synheart-auth:0.1.0'
+
+    // Syni on-device agent SDK (peer module under `com.syni`).
+    // The composite-build substitution in `settings.gradle` overrides
+    // this to the local `../syni-kotlin/syni-sdk` source when present.
+    // CI / fresh clones without the sibling fall back to Maven (not
+    // yet published — track upstream publishing on syni-kotlin).
+    implementation 'com.syni:syni-sdk:0.0.1'
 
     // JNA (non-Android JAR for host unit tests)
     testImplementation 'net.java.dev.jna:jna:5.14.0'
