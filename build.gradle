@@ -17,6 +17,9 @@ buildscript {
 
 apply plugin: 'io.github.gradle-nexus.publish-plugin'
 
+group = (project.findProperty('GROUP') ?: 'ai.synheart') as String
+version = (project.findProperty('VERSION_NAME') ?: '0.0.5') as String
+
 allprojects {
     repositories {
         google()
