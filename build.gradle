@@ -1,0 +1,57 @@
+// Top-level build file
+buildscript {
+    ext.kotlin_version = '2.3.0'
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        // Gradle 9.x requires a newer Android Gradle Plugin than 8.1.x
+        classpath 'com.android.tools.build:gradle:9.0.0-rc02'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath "org.jetbrains.kotlin:kotlin-serialization:$kotlin_version"
+        classpath 'io.github.gradle-nexus:publish-plugin:2.0.0'
+    }
+}
+
+apply plugin: 'io.github.gradle-nexus.publish-plugin'
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            // OSSRH was shut down (2025-06-30). Use the Central Portal OSSRH Staging API compatibility service.
+            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+            snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
+
+            // Prefer Central Portal token credentials, but accept legacy env var names too.
+            username.set(
+                    project.findProperty('sonatypeUsername')
+                            ?: project.findProperty('SONATYPE_USERNAME')
+                            ?: project.findProperty('OSSRH_USERNAME')
+                            ?: System.getenv('SONATYPE_USERNAME')
+                            ?: System.getenv('OSSRH_USERNAME')
+                            ?: ''
+            )
+            password.set(
+                    project.findProperty('sonatypePassword')
+                            ?: project.findProperty('SONATYPE_PASSWORD')
+                            ?: project.findProperty('OSSRH_PASSWORD')
+                            ?: System.getenv('SONATYPE_PASSWORD')
+                            ?: System.getenv('OSSRH_PASSWORD')
+                            ?: ''
+            )
+        }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

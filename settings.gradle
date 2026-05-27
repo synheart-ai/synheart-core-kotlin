@@ -1,0 +1,45 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    repositories {
+        google()
+        mavenCentral()
+        mavenLocal() // fallback for locally-published sibling SDKs when composite-build dirs are absent
+    }
+}
+
+rootProject.name = "synheart-core-android"
+include ':synheart-core'
+
+// Sibling SDK composite builds — only wire them in when the sibling checkout
+// exists next to this repo (local multi-repo workspace). In CI / fresh clones
+// the sibling dirs aren't present, so the corresponding Maven Central artifacts
+// are used instead.
+// Emotion and focus are NOT in this list — they are computed inside the
+// synheart-engine runtime and accessed via CoreRuntimeBridge, not as
+// independent Kotlin SDKs.
+def siblings = [
+        'synheart-wear-kotlin'    : [module: 'ai.synheart:synheart-wear', project: ':'],
+        'synheart-behavior-kotlin': [module: 'ai.synheart:synheart-behavior', project: ':'],
+        'synheart-session-kotlin' : [module: 'ai.synheart:synheart-session', project: ':'],
+        'synheart-auth-kotlin'    : [module: 'ai.synheart:synheart-auth', project: ':lib'],
+        'syni-kotlin'             : [module: 'ai.synheart:syni', project: ':syni'],
+]
+
+siblings.each { dir, info ->
+    def siblingDir = file("../${dir}")
+    if (siblingDir.exists() && (new File(siblingDir, 'settings.gradle').exists() || new File(siblingDir, 'settings.gradle.kts').exists())) {
+        includeBuild("../${dir}") {
+            dependencySubstitution {
+                substitute module(info.module) using project(info.project)
+            }
+        }
+    }
+}

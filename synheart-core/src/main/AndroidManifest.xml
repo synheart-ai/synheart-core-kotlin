@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="ai.synheart.core">
+
+    <!-- Permissions for signal collection -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Health data permissions (if using Health Connect) -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    
+    <!-- Sensor permissions -->
+    <uses-feature android:name="android.hardware.sensor.heartrate" android:required="false" />
+    
+    <!-- Foreground service permission -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!-- No services required for the v0 module-based runtime -->
+    </application>
+
+</manifest>
+
