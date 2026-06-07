@@ -138,6 +138,22 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         readAndFreeString(lib.synheart_core_current_consent(requireHandle()))
 
     // ------------------------------------------------------------------ //
+    // Research study                                                      //
+    // ------------------------------------------------------------------ //
+
+    /** Enrol the device in a research study. Returns the service response JSON. */
+    fun enrolResearchStudy(accessCode: String, studyCode: String): String? =
+        readAndFreeString(lib.synheart_core_enrol_study(requireHandle(), accessCode, studyCode))
+
+    /** Preview an access + study code pair without redeeming the code. */
+    fun validateResearchStudyCodes(accessCode: String, studyCode: String): String? =
+        readAndFreeString(lib.synheart_core_validate_study_codes(requireHandle(), accessCode, studyCode))
+
+    /** Withdraw from the device's active research study for this app. Idempotent. */
+    fun withdrawResearchStudy(): String? =
+        readAndFreeString(lib.synheart_core_withdraw_study(requireHandle()))
+
+    // ------------------------------------------------------------------ //
     // Capability                                                         //
     // ------------------------------------------------------------------ //
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-06-07
+
+### Added
+- Research-study enrolment API: `Synheart.enrolResearchStudy(accessCode, studyCode)`,
+  `Synheart.validateResearchStudyCodes(accessCode, studyCode)`, and
+  `Synheart.withdrawResearchStudy()`. Enrolment rides the device's signed cloud
+  credential — no tokens are handled by the caller. Withdrawal is idempotent.
+
 ## [0.0.5] - 2026-05-25
 
 ### Added — cross-SDK API parity

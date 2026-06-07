@@ -99,6 +99,19 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_current_consent(handle: Pointer?): Pointer?
 
     // ------------------------------------------------------------------ //
+    // Research study                                                      //
+    // ------------------------------------------------------------------ //
+
+    /** Enrol the device in a research study by redeeming access + study codes. Returns JSON. */
+    fun synheart_core_enrol_study(handle: Pointer?, access_code: String?, study_code: String?): Pointer?
+
+    /** Preview an access + study code pair without redeeming the code. Returns JSON. */
+    fun synheart_core_validate_study_codes(handle: Pointer?, access_code: String?, study_code: String?): Pointer?
+
+    /** Withdraw from the device's active research study for this app. Returns JSON. */
+    fun synheart_core_withdraw_study(handle: Pointer?): Pointer?
+
+    // ------------------------------------------------------------------ //
     // Capability                                                         //
     // ------------------------------------------------------------------ //
 
