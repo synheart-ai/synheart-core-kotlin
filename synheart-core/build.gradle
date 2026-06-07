@@ -52,7 +52,10 @@ android {
     publishing {
         singleVariant("release") {
             withSourcesJar()
-            withJavadocJar()
+            // No withJavadocJar(): AGP's javadoc task runs Dokka V1, which crashes
+            // resolving the binary `syni` dependency's Kotlin metadata. We attach an
+            // empty javadoc jar to the publication instead (Maven Central requires a
+            // javadoc jar to exist + be signed, not to have content). See javadocJar.
         }
     }
 }
@@ -117,11 +120,18 @@ tasks.withType(Test) {
     systemProperty 'jna.library.path', jnaPath
 }
 
+// Empty javadoc jar for Maven Central (Dokka V1 can't read the binary `syni`
+// dependency's Kotlin metadata; content isn't validated, only presence + signature).
+tasks.register('javadocJar', Jar) {
+    archiveClassifier.set('javadoc')
+}
+
 afterEvaluate {
     publishing {
         publications {
             release(MavenPublication) {
                 from components.release
+                artifact tasks.named('javadocJar')
 
                 groupId = project.group as String
                 artifactId = POM_ARTIFACT_ID
