@@ -225,6 +225,39 @@ object Synheart {
         return try { org.json.JSONObject(json) } catch (_: Exception) { null }
     }
 
+    // ------------------------------------------------------------------ //
+    // Research studies                                                    //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Enrol the device in a research study by redeeming an access + study code.
+     * Enrolment rides the device's signed cloud credential — no tokens are
+     * handled by the caller. Returns the service response (enrolment on success,
+     * or an `error` key), or null when the runtime is unavailable.
+     */
+    fun enrolResearchStudy(accessCode: String, studyCode: String): org.json.JSONObject? {
+        val cr = coreRuntime ?: return null
+        val json = cr.enrolResearchStudy(accessCode, studyCode) ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
+    }
+
+    /** Preview an access + study code pair without redeeming the code. */
+    fun validateResearchStudyCodes(accessCode: String, studyCode: String): org.json.JSONObject? {
+        val cr = coreRuntime ?: return null
+        val json = cr.validateResearchStudyCodes(accessCode, studyCode) ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
+    }
+
+    /**
+     * Withdraw from the device's active research study for this app. No codes —
+     * the participant + app come from the device's signed credential. Idempotent.
+     */
+    fun withdrawResearchStudy(): org.json.JSONObject? {
+        val cr = coreRuntime ?: return null
+        val json = cr.withdrawResearchStudy() ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
+    }
+
     /** Get decrypted HSI window artifacts for a session. */
     fun getHSIWindows(sessionId: String, range: ai.synheart.core.models.WindowRange? = null): List<org.json.JSONObject> {
         val cr = coreRuntime ?: return emptyList()
