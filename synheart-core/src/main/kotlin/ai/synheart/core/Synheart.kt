@@ -258,6 +258,20 @@ object Synheart {
         return try { org.json.JSONObject(json) } catch (_: Exception) { null }
     }
 
+    /**
+     * Request erasure of the data the participant contributed to their study for
+     * this app — the deletion the consent copy promises alongside withdrawal. No
+     * identifiers are passed; the participant + app come from the device's signed
+     * credential. When [dryRun] is true the response is an inventory preview and
+     * nothing is deleted; a real request is accepted asynchronously and carries a
+     * `request_id`. Idempotent. Returns null when the runtime is unavailable.
+     */
+    fun requestStudyDataDeletion(dryRun: Boolean = false): org.json.JSONObject? {
+        val cr = coreRuntime ?: return null
+        val json = cr.requestStudyDataDeletion(dryRun) ?: return null
+        return try { org.json.JSONObject(json) } catch (_: Exception) { null }
+    }
+
     /** Get decrypted HSI window artifacts for a session. */
     fun getHSIWindows(sessionId: String, range: ai.synheart.core.models.WindowRange? = null): List<org.json.JSONObject> {
         val cr = coreRuntime ?: return emptyList()

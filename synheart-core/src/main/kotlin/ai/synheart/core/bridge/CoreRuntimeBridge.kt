@@ -153,6 +153,19 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun withdrawResearchStudy(): String? =
         readAndFreeString(lib.synheart_core_withdraw_study(requireHandle()))
 
+    /**
+     * Request erasure of the data the participant contributed to their study.
+     * [dryRun] returns an inventory preview without deleting; a real request is
+     * accepted asynchronously and carries a `request_id`. Idempotent.
+     */
+    fun requestStudyDataDeletion(dryRun: Boolean): String? =
+        readAndFreeString(
+            lib.synheart_core_request_study_data_deletion(
+                requireHandle(),
+                if (dryRun) 1.toByte() else 0.toByte(),
+            ),
+        )
+
     // ------------------------------------------------------------------ //
     // Capability                                                         //
     // ------------------------------------------------------------------ //

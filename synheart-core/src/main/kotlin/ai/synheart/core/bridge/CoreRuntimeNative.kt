@@ -111,6 +111,12 @@ interface CoreRuntimeNative : Library {
     /** Withdraw from the device's active research study for this app. Returns JSON. */
     fun synheart_core_withdraw_study(handle: Pointer?): Pointer?
 
+    /**
+     * Request erasure of the data the participant contributed to their study.
+     * `dry_run` (1 = preview, 0 = delete) is a single C `bool` byte. Returns JSON.
+     */
+    fun synheart_core_request_study_data_deletion(handle: Pointer?, dry_run: Byte): Pointer?
+
     // ------------------------------------------------------------------ //
     // Capability                                                         //
     // ------------------------------------------------------------------ //
