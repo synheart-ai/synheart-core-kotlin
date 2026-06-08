@@ -7,7 +7,7 @@ import com.sun.jna.Pointer
 /**
  * JNA interface to the native runtime shared library (C ABI).
  *
- * All 42 functions use an opaque handle pattern. Complex input/output types
+ * All functions use an opaque handle pattern. Complex input/output types
  * are JSON strings. Returned strings must be freed with [synheart_core_free_string].
  */
 interface CoreRuntimeNative : Library {
