@@ -22,7 +22,7 @@ import java.security.MessageDigest
  * `path`/`type` and feeds message bodies into this class; on iOS the analogous
  * adapter would route by the body `type`.
  *
- * ### What it does (per docs/EDGE-WIRE-CONTRACT.md)
+ * ### What it does (per the Synheart Edge wire contract, in the synheart-edge repo)
  *  - **§3.1 `hr_sample`** → [Listener.onHrSample] (bpm, timestampMs, source?).
  *  - **§3.2 `bio_sample`** → [Listener.onBioSample] (bpm, timestampMs,
  *    rrIntervalsMs[], accel?, source?).

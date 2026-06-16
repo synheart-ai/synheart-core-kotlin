@@ -18,7 +18,8 @@ import org.junit.Test
 
 /**
  * Pure-JVM tests for [EdgeIngest] — no Android, no Play Services. Validates the
- * phone-side consumer against docs/EDGE-WIRE-CONTRACT.md.
+ * phone-side consumer against the Synheart Edge wire contract
+ * (EDGE-WIRE-CONTRACT.md in the synheart-edge repo).
  */
 class EdgeIngestTest {
 
