@@ -7,7 +7,7 @@ class HSIStateTest {
 
     @Test
     fun `parses nested HSI JSON`() {
-        val json = """{"subject_id":"usr_123","timestamp_ms":1700000000000,"hsi":{"focus":{"value":0.8,"confidence":0.9},"arousal":{"value":0.5,"confidence":0.7},"capacity":{"value":0.6,"confidence":0.8},"sleep":{"value":0.3,"confidence":0.95}}}"""
+        val json = """{"subject_id":"usr_123","timestamp_ms":1700000000000,"hsi":{"focus":{"value":0.8,"confidence":0.9},"arousal":{"value":0.5,"confidence":0.7},"capacity":{"value":0.6,"confidence":0.8},"sleep":{"value":0.3,"confidence":0.95},"stress":{"value":0.38,"confidence":0.55}}}"""
         val state = HSIState.fromJson(json)
         assertEquals("usr_123", state.subjectId)
         assertEquals(1700000000000L, state.timestampMs)
@@ -16,6 +16,8 @@ class HSIStateTest {
         assertEquals(0.5, state.hsi.arousal!!.value, 0.001)
         assertEquals(0.6, state.hsi.capacity!!.value, 0.001)
         assertEquals(0.3, state.hsi.sleep!!.value, 0.001)
+        assertEquals(0.38, state.hsi.stress!!.value, 0.001)
+        assertEquals(0.55, state.hsi.stress!!.confidence, 0.001)
         assertEquals(json, state.rawJson)
     }
 
@@ -28,6 +30,7 @@ class HSIStateTest {
         assertEquals(0.4, state.hsi.arousal!!.value, 0.001)
         assertNull(state.hsi.capacity)
         assertNull(state.hsi.sleep)
+        assertNull(state.hsi.stress)
     }
 
     @Test
