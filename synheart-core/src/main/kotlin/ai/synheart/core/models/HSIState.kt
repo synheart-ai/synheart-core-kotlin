@@ -8,12 +8,18 @@ data class HSIAxisValue(
     val confidence: Double
 )
 
-/** The four canonical HSI axes. */
+/** The canonical HSI axes surfaced to hosts. */
 data class HSIAxes(
     val focus: HSIAxisValue? = null,
     val arousal: HSIAxisValue? = null,
     val capacity: HSIAxisValue? = null,
-    val sleep: HSIAxisValue? = null
+    val sleep: HSIAxisValue? = null,
+    /**
+     * Multimodal stress reading (motion-gated autonomic primary fused with a
+     * behavioral corroborator). New in engine v0.10.0; null on the legacy/1.2
+     * path that never carried it.
+     */
+    val stress: HSIAxisValue? = null
 )
 
 /** Typed HSI state emitted by `Synheart.onStateUpdate`. */
@@ -60,7 +66,8 @@ data class HSIState(
                 focus = parseAxis("focus"),
                 arousal = parseAxis("arousal"),
                 capacity = parseAxis("capacity"),
-                sleep = parseAxis("sleep")
+                sleep = parseAxis("sleep"),
+                stress = parseAxis("stress")
             )
         }
     }
