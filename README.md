@@ -1,6 +1,6 @@
 # Synheart Core SDK - Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.0.5-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -120,6 +120,92 @@ syni.install(persona = SyniSpecPersona.load(context, "focus.coach.v1"),
 val reply = syni.chat("how should I focus right now?")
 ```
 
+### Edge ingest (watch → phone)
+
+`EdgeIngest` is the canonical phone-side consumer of the Synheart **edge wire
+contract** (watch → phone). It is the counterpart to the watch producer
+(`synheart-core-kotlin-edge`) and exists so apps stop re-implementing
+watch→phone ingest: parse, hash-verify (`payload_hash_sha256`), HSI-version
+validate (§0), dedupe by `artifact_id`, and ACK all live here once. The core is
+pure-JVM (no Android / Play Services dependency) and unit-tests under plain
+JUnit. See [EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)
+for the canonical message shapes.
+
+```kotlin
+import ai.synheart.core.edge.EdgeIngest
+import kotlinx.coroutines.launch
+
+// 1. Construct with a Listener (or pass a no-op and use the events stream).
+val ingest = EdgeIngest(object : EdgeIngest.Listener {
+    override fun onArtifact(artifact: EdgeIngest.HsiArtifact) {
+        // hash-verified, non-duplicate, already recorded for ACK
+        render(artifact.payloadJson)
+    }
+})
+
+// 2a. Observe the reactive SharedFlow of typed events (parity with the Swift
+//     `events` publisher and Dart `Stream<EdgeEvent>`).
+scope.launch {
+    ingest.events.collect { event ->
+        when (event) {
+            is EdgeIngest.EdgeEvent.HrEvent       -> { /* … */ }
+            is EdgeIngest.EdgeEvent.BioEvent      -> { /* … */ }
+            is EdgeIngest.EdgeEvent.ArtifactEvent -> { /* … */ }
+            is EdgeIngest.EdgeEvent.SessionEventWrap -> { /* … */ }
+        }
+    }
+}
+
+// 2b. …or just rely on the Listener callbacks above. Both fire in lock-step.
+
+// 3. Feed decoded bodies in (transport-agnostic), then send the artifact_ack.
+ingest.onMessage(type = "hsi_artifact", rawBody = jsonString)
+val ack = ingest.drainAckBody()  // { "command":"artifact_ack", "artifact_ids":[…] }
+if (ack != null) sendOnCommandChannel(ack)  // → Wire Contract §4/§5
+```
+
+Beyond the shared surface, Kotlin's `Listener` exposes two extra observability
+hooks — `onUnsupportedHsiVersion(...)` and `onHashMismatch(...)` — that the
+Swift and Dart SDKs fold into their `Outcome` return value and logging.
+
+**Delivery hardening.** Because the watch outbox is delete-on-ACK, ingest is
+hardened against two failure modes:
+
+- **Duplicate re-ack.** A duplicate `artifact_id` (already accepted) is **not**
+  re-surfaced to `onArtifact`, but it **is** re-queued for ACK. A lost ACK would
+  otherwise make the watch resend forever; re-acking duplicates clears the
+  outbox. The dedupe set is a bounded LRU (capacity `SEEN_LRU_CAPACITY`), so
+  memory stays flat over a long-lived process.
+- **Poison-pill dead-letter.** A deterministically-corrupt artifact whose
+  `payload_hash_sha256` keeps mismatching is detected per `artifact_id`: after
+  `POISON_PILL_THRESHOLD` (3) mismatches it is **dead-lettered** — reported via
+  `onPoisonPill(artifactId, expected, actual, attempts)` and ack-to-discarded so
+  it stops blocking the outbox. The first/normal mismatch still rejects without
+  acking (via `onHashMismatch`).
+
+**Opt-in transport adapter.** `EdgeIngestService` is a thin, **opt-in**
+`WearableListenerService` that decodes the Wear Data Layer `path`/`type` and
+feeds bodies into an `EdgeIngest` core, sending the `artifact_ack` back via
+`MessageClient`. Nothing in the SDK wires it in by default — a host declares it
+in its own `AndroidManifest.xml` and installs `EdgeIngestService.bindings` from
+`Application.onCreate`.
+
+Because the adapter is opt-in, the Wear Data Layer dependencies
+(`com.google.android.gms:play-services-wearable` and
+`org.jetbrains.kotlinx:kotlinx-coroutines-play-services`) are declared
+`compileOnly` and are **not** inherited transitively. A host that uses
+`EdgeIngestService` must add `play-services-wearable` to its own `build.gradle`:
+
+```gradle
+dependencies {
+    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+}
+```
+
+Consumers using only the pure `EdgeIngest` core (their own transport) need
+neither dependency.
+
 ### Data Flow
 
 ```
@@ -144,7 +230,7 @@ Add the library to your `build.gradle`:
 dependencies {
     implementation project(':synheart-core')
     // Or if published to Maven:
-    // implementation 'ai.synheart:synheart-core:0.0.5'
+    // implementation 'ai.synheart:synheart-core:0.0.7'
 }
 ```
 

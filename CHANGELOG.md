@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`EdgeIngest`** — canonical phone-side consumer of the Synheart edge wire
+  contract (watch → phone; see
+  [EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)).
+  Pure-JVM (no Android / Play Services dependency), unit-tests under plain JUnit.
+  Parses `hr_sample` / `bio_sample` / `hsi_artifact` / session events and, for
+  artifacts, dedupes by `artifact_id`, verifies `payload_hash_sha256` ==
+  sha256(`payload_json`), validates the inner `hsi_version` against the supported
+  set, and produces the `artifact_ack` body. Public surface:
+  - Sealed `EdgeEvent` family (`HrEvent | BioEvent | ArtifactEvent |
+    SessionEventWrap`) plus the typed payloads (`HrSample`, `BioSample`,
+    `HsiArtifact`, `Accel`).
+  - Reactive `events: SharedFlow<EdgeEvent>` hot stream, emitting in lock-step
+    with the `Listener` callbacks (parity with the Swift `events` publisher and
+    Dart `Stream<EdgeEvent>`).
+  - `Listener` callbacks, including the Kotlin-only observability hooks
+    `onUnsupportedHsiVersion(...)` / `onHashMismatch(...)` and the poison-pill /
+    dead-letter hook `onPoisonPill(artifactId, expected, actual, attempts)`.
+  - ACK helpers `drainPendingAcks()` / `buildAckBody(...)` / `drainAckBody()`.
+  - Delivery hardening (the watch outbox is delete-on-ACK):
+    - **Duplicate re-ack** — a duplicate `artifact_id` is not re-surfaced but is
+      re-queued for ACK, so a lost ACK no longer makes the watch resend forever.
+    - **Bounded dedupe set** — the seen-artifact set is a bounded LRU
+      (`SEEN_LRU_CAPACITY`), keeping memory flat over a long-lived process.
+    - **Poison-pill dead-letter** — an artifact that fails hash verification
+      `POISON_PILL_THRESHOLD` (3) times for the same id is dead-lettered (reported
+      via `onPoisonPill` and ack-to-discarded) so a deterministically-corrupt
+      artifact stops blocking the outbox.
+- **`EdgeIngestService`** — opt-in `WearableListenerService` adapter that decodes
+  the Wear Data Layer `path`/`type` into `EdgeIngest` and sends the
+  `artifact_ack` back via `MessageClient`. Not wired in by default; hosts opt in
+  via manifest + `EdgeIngestService.bindings`.
+
+### Changed
+- The Wear Data Layer dependencies (`play-services-wearable`,
+  `kotlinx-coroutines-play-services`) are now `compileOnly` instead of
+  `implementation`, so consumers no longer inherit them transitively. The pure
+  `EdgeIngest` core needs neither; hosts using the opt-in `EdgeIngestService`
+  adapter must add `play-services-wearable` to their own build. No runtime
+  behavior change.
+
 ## [0.0.7] - 2026-06-07
 
 ### Added

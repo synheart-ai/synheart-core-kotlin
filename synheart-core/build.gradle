@@ -88,6 +88,20 @@ dependencies {
     // JNA for synheart-core-runtime native library
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
 
+    // Wear Data Layer — for the OPT-IN phone-side edge-ingest transport adapter
+    // (EdgeIngestService). Additive: the pure EdgeIngest core has no dependency
+    // on this; only the thin WearableListenerService adapter does. Version
+    // matched to the watch producer SDK (synheart-core-kotlin-edge).
+    //
+    // `compileOnly` (not `implementation`) so this SDK + its EdgeIngestService
+    // adapter compile against the Wear classpath, but consumers do NOT inherit
+    // these transitively — EdgeIngestService is opt-in. A host that uses
+    // EdgeIngestService must add play-services-wearable to its own build (see
+    // the "Edge ingest" section of README.md). The pure EdgeIngest core needs
+    // neither dependency.
+    compileOnly 'com.google.android.gms:play-services-wearable:18.2.0'
+    compileOnly 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+
     // Synheart sibling SDKs
     // emotion and focus removed — now computed by synheart-engine
     // and accessed via CoreRuntimeBridge.
