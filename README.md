@@ -1,8 +1,8 @@
-# Synheart Core SDK - Kotlin
+# Synheart Core SDK — Kotlin
 
 [![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
-[![Kotlin](https://img.shields.io/badge/kotlin-%3E%3D1.9.0-blue.svg)](https://kotlinlang.org)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 > **Source-available.** This repository is open for reading, auditing, and
 > filing issues. We do **not** accept pull requests — see
