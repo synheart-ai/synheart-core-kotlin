@@ -125,7 +125,7 @@ val reply = syni.chat("how should I focus right now?")
 `EdgeIngest` is the canonical phone-side consumer of the Synheart **edge wire
 contract** (watch → phone). It is the counterpart to the watch producer and
 exists so apps stop re-implementing watch→phone ingest: parse, hash-verify
-(`payload_hash_sha256`), HSI-version validate (§0), dedupe by `artifact_id`, and
+(`payload_hash_sha256`), HSI-version validate, dedupe by `artifact_id`, and
 ACK all live here once. The core is pure-JVM (no Android / Play Services
 dependency) and unit-tests under plain JUnit. The canonical message shapes are
 defined by the Synheart edge wire contract.
@@ -160,7 +160,7 @@ scope.launch {
 // 3. Feed decoded bodies in (transport-agnostic), then send the artifact_ack.
 ingest.onMessage(type = "hsi_artifact", rawBody = jsonString)
 val ack = ingest.drainAckBody()  // { "command":"artifact_ack", "artifact_ids":[…] }
-if (ack != null) sendOnCommandChannel(ack)  // → Wire Contract §4/§5
+if (ack != null) sendOnCommandChannel(ack)  // → docs.synheart.ai/synheart-core/edge
 ```
 
 Beyond the shared surface, Kotlin's `Listener` exposes two extra observability
@@ -558,14 +558,11 @@ baseUrl = "http://192.168.1.100:8083"  // your machine's LAN IP
 
 ### Default credentials
 
-Production cloud ingest is signed with **ECDSA P-256** via
-`X-Synheart-Proof` (compact JWS) plus a `X-Consent-Token` JWT — see
-[`synheart-auth`](https://github.com/synheart-ai/synheart-auth) and
-RFC-AUTH-MOBILE-0001. The `synheart local` server below ships
-development-only mock keys for offline iteration.
+Production cloud ingest is device-signed and consent-gated. The `synheart local`
+server below ships development-only mock keys for offline iteration.
 
 - **API Key:** `mock-dev-api-key-2026` (mock platform only)
-- **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only — production is ECDSA, not a shared secret)
+- **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
 
