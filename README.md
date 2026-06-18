@@ -123,13 +123,12 @@ val reply = syni.chat("how should I focus right now?")
 ### Edge ingest (watch → phone)
 
 `EdgeIngest` is the canonical phone-side consumer of the Synheart **edge wire
-contract** (watch → phone). It is the counterpart to the watch producer
-(`synheart-core-kotlin-edge`) and exists so apps stop re-implementing
-watch→phone ingest: parse, hash-verify (`payload_hash_sha256`), HSI-version
-validate (§0), dedupe by `artifact_id`, and ACK all live here once. The core is
-pure-JVM (no Android / Play Services dependency) and unit-tests under plain
-JUnit. See [EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)
-for the canonical message shapes.
+contract** (watch → phone). It is the counterpart to the watch producer and
+exists so apps stop re-implementing watch→phone ingest: parse, hash-verify
+(`payload_hash_sha256`), HSI-version validate (§0), dedupe by `artifact_id`, and
+ACK all live here once. The core is pure-JVM (no Android / Play Services
+dependency) and unit-tests under plain JUnit. The canonical message shapes are
+defined by the Synheart edge wire contract.
 
 ```kotlin
 import ai.synheart.core.edge.EdgeIngest
