@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.0.8-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -229,7 +229,7 @@ Add the library to your `build.gradle`:
 dependencies {
     implementation project(':synheart-core')
     // Or if published to Maven:
-    // implementation 'ai.synheart:synheart-core:0.0.7'
+    // implementation 'ai.synheart:synheart-core:0.0.8'
 }
 ```
 
@@ -427,8 +427,6 @@ Raw Signals → synheart-engine → HSI JSON
 Optional: Focus/Emotion Heads → Semantic Estimates
 ```
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
-
 ## Features
 
 - **On-device state computation**: synheart-engine fuses signals into HSI
@@ -559,16 +557,12 @@ baseUrl = "http://192.168.1.100:8083"  // your machine's LAN IP
 ### Default credentials
 
 Production cloud ingest is device-signed and consent-gated. The `synheart local`
-server below ships development-only mock keys for offline iteration.
+server ships development-only mock keys for offline iteration.
 
 - **API Key:** `mock-dev-api-key-2026` (mock platform only)
 - **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
-
-## Documentation
-
-- **[Architecture](docs/ARCHITECTURE.md)** - Detailed architecture documentation
 
 ## 📄 License
 
