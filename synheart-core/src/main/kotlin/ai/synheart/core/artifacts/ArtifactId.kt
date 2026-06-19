@@ -3,8 +3,7 @@
 // Deterministic artifact ID derivation. Cross-SDK golden vectors live in
 // `src/test/kotlin/.../artifacts/ArtifactIdTest.kt`.
 //
-// Canonical format (RFC-CORE-0006 §5, mirrors the Rust runtime at
-// `synheart-core-runtime/crates/core-runtime/src/artifacts/artifact_id.rs`):
+// Canonical format (RFC-CORE-0006 §5, mirrors the Synheart native runtime):
 //
 //   {type}|v1|{subjectId}|{sessionId or "~"}|{startMs}|{endMs}|{schemaName}@{schemaVersion}
 //
