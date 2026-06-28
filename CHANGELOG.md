@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
+  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
+  consent token scoped to the current subject (configure-cloud on init,
+  mint-on-grant, init self-heal) so uploads are attributed to that subject.
+
+### Removed
+- **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` and
+  `BehaviorConsent.enabled` aliases — use `deviceMotion` / `systemState` /
+  the individual behavior channels.
+
 ## [0.0.8] - 2026-06-17
 
 ### Added
