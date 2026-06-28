@@ -91,19 +91,7 @@ data class PhoneContextConsent(
     /** Consent for system state (screen on/off, charging, connectivity) */
     @SerialName("system_state")
     val systemState: Boolean = false
-) {
-    /** Backward-compatible alias for [deviceMotion]. */
-    @Suppress("unused")
-    @Deprecated("Use deviceMotion instead", ReplaceWith("deviceMotion"))
-    @Transient
-    val motion: Boolean get() = deviceMotion
-
-    /** Backward-compatible alias for [systemState]. */
-    @Suppress("unused")
-    @Deprecated("Use systemState instead", ReplaceWith("systemState"))
-    @Transient
-    val screenState: Boolean get() = systemState
-}
+)
 
 /**
  * Behavior consent configuration.
@@ -121,13 +109,7 @@ data class BehaviorConsent(
     /** Consent for app context collection (foreground app category) */
     @SerialName("app_context")
     val appContext: Boolean = false
-) {
-    /** Backward-compatible aggregate flag: true if any behavior channel is enabled. */
-    @Suppress("unused")
-    @Deprecated("Check individual channels instead", ReplaceWith("digitalActivity || notificationPatterns || appContext"))
-    @Transient
-    val enabled: Boolean get() = digitalActivity || notificationPatterns || appContext
-}
+)
 
 /**
  * Interpretation consent configuration.
