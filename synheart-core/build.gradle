@@ -41,6 +41,9 @@ android {
     }
 
     compileOptions {
+        // Required by the synheart-wear/behavior dependencies (surfaces when
+        // assembling the androidTest APK).
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -124,6 +127,7 @@ dependencies {
     testImplementation 'io.mockk:mockk:1.13.8'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
 
 // Forward jna.library.path to the test JVM so host-side tests can load the native library.

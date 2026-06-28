@@ -186,6 +186,40 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         lib.synheart_core_consent_clear_stored(requireHandle()) == 0
 
     // ------------------------------------------------------------------ //
+    // Device auth (crypto + storage callbacks + registration)            //
+    // ------------------------------------------------------------------ //
+
+    /** Hand the runtime its Keystore-backed crypto callbacks. 0 on success, -2 if absent. */
+    fun setSdkCryptoCallbacks(): Int = try {
+        lib.synheart_core_sdk_set_crypto_callbacks(
+            requireHandle(),
+            DeviceAuthCallbacks.cryptoStruct.pointer,
+        )
+    } catch (e: UnsatisfiedLinkError) {
+        -2
+    }
+
+    /** Hand the runtime its EncryptedSharedPreferences-backed storage callbacks. 0 ok, -2 absent. */
+    fun setStorageCallbacks(): Int = try {
+        lib.synheart_core_set_storage_callbacks(
+            requireHandle(),
+            DeviceAuthCallbacks.store,
+            DeviceAuthCallbacks.load,
+            DeviceAuthCallbacks.delete,
+        )
+    } catch (e: UnsatisfiedLinkError) {
+        -2
+    }
+
+    /** Register this device for [clientId] (the subject id). Returns result JSON, or null. */
+    fun registerDevice(clientId: String): String? =
+        readAndFreeString(lib.synheart_core_sdk_register_device(requireHandle(), clientId))
+
+    /** Device-auth status JSON, or null. */
+    fun deviceAuthStatus(): String? =
+        readAndFreeString(lib.synheart_core_sdk_device_auth_status(requireHandle()))
+
+    // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //
 
