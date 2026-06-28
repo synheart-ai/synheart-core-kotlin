@@ -135,6 +135,27 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_consent_clear_stored(handle: Pointer?): Int
 
     // ------------------------------------------------------------------ //
+    // Device auth (crypto + storage callbacks + registration)            //
+    // ------------------------------------------------------------------ //
+
+    /** Hand the runtime the host crypto callback table (repr(C) struct ptr). 0 on success. */
+    fun synheart_core_sdk_set_crypto_callbacks(handle: Pointer?, callbacks: Pointer?): Int
+
+    /** Hand the runtime secure-storage callbacks (store/load/delete function ptrs). 0 on success. */
+    fun synheart_core_set_storage_callbacks(
+        handle: Pointer?,
+        store: com.sun.jna.Callback,
+        load: com.sun.jna.Callback,
+        delete: com.sun.jna.Callback,
+    ): Int
+
+    /** Register this device for `clientId` (subject id). Returns result JSON, or null. */
+    fun synheart_core_sdk_register_device(handle: Pointer?, clientId: String?): Pointer?
+
+    /** Device-auth status JSON (`{ "status": "...", "device_id": "..." }`), or null. */
+    fun synheart_core_sdk_device_auth_status(handle: Pointer?): Pointer?
+
+    // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //
 

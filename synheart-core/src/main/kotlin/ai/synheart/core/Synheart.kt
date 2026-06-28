@@ -18,6 +18,7 @@ import ai.synheart.core.modules.wear.WearModule
 import ai.synheart.core.modules.phone.PhoneModule
 import ai.synheart.core.modules.behavior.BehaviorModule
 import ai.synheart.core.bridge.CoreRuntimeBridge
+import ai.synheart.core.bridge.DeviceAuthCallbacks
 import ai.synheart.core.config.SynheartMode
 import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.modules.interfaces.WindowType
@@ -566,6 +567,23 @@ object Synheart {
                 if (coreRuntime != null) {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
 
+                    // Device auth: hand the runtime its Keystore crypto + secure
+                    // storage callbacks before any registration so consent tokens
+                    // persist and can be minted. Best-effort.
+                    try {
+                        this.context?.let { DeviceAuthCallbacks.attachContext(it) }
+                        val storageRc = coreRuntime!!.setStorageCallbacks()
+                        if (storageRc != 0) {
+                            SynheartLogger.log("[Synheart] set_storage_callbacks rc=$storageRc; state will not persist")
+                        }
+                        val cryptoRc = coreRuntime!!.setSdkCryptoCallbacks()
+                        if (cryptoRc != 0) {
+                            SynheartLogger.log("[Synheart] set_crypto_callbacks rc=$cryptoRc; device auth unavailable")
+                        }
+                    } catch (e: Exception) {
+                        SynheartLogger.log("[Synheart] device-auth callback wiring failed: ${e.message}")
+                    }
+
                     // Configure the runtime's cloud consent client (base URL + app
                     // id) so it can mint/refresh consent tokens. Best-effort.
                     try {
@@ -867,6 +885,21 @@ object Synheart {
         val needsRefresh = runCatching { cr.consentNeedsTokenRefresh() }.getOrDefault(false)
         if (CloudConsentLogic.isReadyWithoutReissue(status, needsRefresh, consentTokenSubjectStale())) {
             return true
+        }
+
+        // The runtime can only mint once the device is registered (device-signed).
+        // Register on first use; idempotent — skip when already registered.
+        val clientId = subjectId
+        val authStatus = cr.deviceAuthStatus()?.let {
+            runCatching { JSONObject(it).optString("status") }.getOrNull()
+        }
+        if (authStatus != "registered" && !clientId.isNullOrEmpty()) {
+            val reg = cr.registerDevice(clientId)?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val deviceId = reg?.optString("device_id")?.takeIf { it.isNotEmpty() }
+            if (reg == null || reg.has("error") || deviceId == null) {
+                SynheartLogger.log("[Synheart] device registration failed: ${reg?.optString("error") ?: "no device_id"}")
+                return false
+            }
         }
 
         // Reissue: take the editable form, force allow_cloud, submit to mint.
