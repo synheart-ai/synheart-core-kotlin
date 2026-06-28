@@ -7,8 +7,10 @@ import ai.synheart.core.config.SynheartFeature
 import ai.synheart.core.models.*
 import ai.synheart.core.modules.base.ModuleManager
 import ai.synheart.core.modules.capabilities.CapabilityModule
+import ai.synheart.core.modules.consent.CloudConsentLogic
 import ai.synheart.core.modules.consent.ConsentModule
 import ai.synheart.core.modules.consent.ConsentStorage
+import org.json.JSONObject
 import ai.synheart.core.modules.interfaces.CapabilityLevel
 import ai.synheart.core.modules.interfaces.ConsentSnapshot
 import ai.synheart.core.modules.interfaces.Module
@@ -112,6 +114,22 @@ object Synheart {
 
     private var currentSessionHandle: SessionHandle? = null
     private var synheartConfig: SynheartConfig? = null
+
+    /**
+     * The subject id this SDK instance is configured for — the value HSI uploads
+     * are attributed under (`meta.user_id`) and the consent token is minted for.
+     * Null when not configured.
+     */
+    val subjectId: String?
+        get() = synheartConfig?.subjectId ?: userId
+
+    /**
+     * Subject (`user_id` claim) of the most recently issued cloud consent token,
+     * tracked so a token issued for a previous subject can be detected. Null
+     * until a token is issued in this process.
+     */
+    @Volatile
+    private var currentTokenSubject: String? = null
 
     private var sessionModule: SessionModule? = null
     private var activeMainSessionId: String? = null
@@ -536,10 +554,39 @@ object Synheart {
                         put("device_id", resolvedConfig.deviceId)
                         put("app_version", resolvedConfig.appVersion)
                         put("platform", "android")
+                        // Base URL for the runtime's cloud consent + upload clients.
+                        // Without it those clients are unconfigured and uploads no-op.
+                        put(
+                            "api_base_url",
+                            resolvedConfig.cloudConfig?.baseUrl
+                                ?: ai.synheart.core.config.ApiEndpoints.DEFAULT_CLOUD_BASE_URL,
+                        )
                     }.toString()
                 )
                 if (coreRuntime != null) {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
+
+                    // Configure the runtime's cloud consent client (base URL + app
+                    // id) so it can mint/refresh consent tokens. Best-effort.
+                    try {
+                        val cloudBaseUrl = resolvedConfig.cloudConfig?.baseUrl
+                            ?: ai.synheart.core.config.ApiEndpoints.DEFAULT_CLOUD_BASE_URL
+                        coreRuntime!!.consentConfigureCloud(cloudBaseUrl, resolvedConfig.appId)
+                    } catch (e: Exception) {
+                        SynheartLogger.log("[Synheart] consentConfigureCloud failed: ${e.message}")
+                    }
+
+                    // Self-heal: if cloud upload was granted in a prior session,
+                    // ensure a consent token exists for the CURRENT subject so
+                    // uploads resume immediately (reissues a token left by a
+                    // different subject). Best-effort — never blocks init.
+                    try {
+                        if (consentModule?.current()?.cloudUpload == true) {
+                            ensureCloudConsentReady()
+                        }
+                    } catch (e: Exception) {
+                        SynheartLogger.log("[Synheart] init consent self-heal failed: ${e.message}")
+                    }
 
                     // Wire HSI callback (consent-gated) + bridge to session engine
                     coreRuntime!!.setHsiCallback { hsiJson ->
@@ -788,7 +835,80 @@ object Synheart {
         }
 
         consentModule?.updateConsent(updated)
+
+        // Granting cloud upload should immediately mint a consent token for the
+        // current subject so pending data can flush. Best-effort.
+        if (consentType == "cloudUpload") {
+            try {
+                ensureCloudConsentReady()
+            } catch (e: Exception) {
+                SynheartLogger.log("[Synheart] ensureCloudConsentReady after grant failed: ${e.message}")
+            }
+        }
     }
+
+    /**
+     * Ensure a cloud consent token exists for the current subject so pending data
+     * can upload. Short-circuits when a valid, subject-matched token is already
+     * granted; otherwise reissues it by submitting the current consent form.
+     * Returns true when a usable token is in place. Safe to call repeatedly; never
+     * throws fatally.
+     */
+    suspend fun ensureCloudConsentReady(): Boolean {
+        val cr = coreRuntime ?: return false
+
+        // Cloud upload must be granted (effective state is token-authoritative).
+        val effective = cr.consentEffectiveState()?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val cloudGranted =
+            effective?.optBoolean("cloud_upload", effective.optBoolean("cloudUpload", false)) == true
+        if (!cloudGranted) return false
+
+        val status = cr.consentStatus()?.let { runCatching { JSONObject(it).optString("status") }.getOrNull() }
+        val needsRefresh = runCatching { cr.consentNeedsTokenRefresh() }.getOrDefault(false)
+        if (CloudConsentLogic.isReadyWithoutReissue(status, needsRefresh, consentTokenSubjectStale())) {
+            return true
+        }
+
+        // Reissue: take the editable form, force allow_cloud, submit to mint.
+        val formJson = cr.consentGetEditableForm() ?: return false
+        val form = runCatching { JSONObject(formJson) }.getOrNull() ?: return false
+        form.put("allow_cloud", true)
+
+        val resultJson = cr.consentSubmitForm(
+            synheartConfig?.deviceId,
+            "android",
+            subjectId,
+            form.toString(),
+        ) ?: return false
+        val result = runCatching { JSONObject(resultJson) }.getOrNull() ?: return false
+        if (result.has("error")) {
+            SynheartLogger.log("[Synheart] consent submit error: ${result.optString("error")}")
+            return false
+        }
+        val tokenObj = result.optJSONObject("token")
+        if (!CloudConsentLogic.submitIssuedToken(result.optBoolean("synced", false), tokenObj != null)) {
+            SynheartLogger.log("[Synheart] consent submit accepted but no token issued (cloud unavailable / device not registered?)")
+            return false
+        }
+        // Record the subject the token was minted under (the runtime mints under
+        // the configured subject_id) for the subject-stale check.
+        currentTokenSubject =
+            tokenObj?.optString("user_id")?.takeIf { it.isNotEmpty() }
+                ?: tokenObj?.optJSONObject("claims")?.optString("user_id")?.takeIf { it.isNotEmpty() }
+                ?: subjectId
+
+        val refreshed = cr.consentStatus()?.let { runCatching { JSONObject(it).optString("status") }.getOrNull() }
+        return refreshed?.lowercase() == "granted" &&
+            !runCatching { cr.consentNeedsTokenRefresh() }.getOrDefault(true)
+    }
+
+    /**
+     * True when the issued cloud consent token was minted for a DIFFERENT subject
+     * than the current one (e.g. after an account re-key). Conservative: false
+     * when there's no token or the subject is unknown.
+     */
+    fun consentTokenSubjectStale(): Boolean =
+        CloudConsentLogic.isTokenSubjectStale(currentTokenSubject, subjectId)
 
     /**
      * Revoke consent for a specific data type. Any modules gated on this

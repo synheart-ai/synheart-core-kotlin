@@ -98,6 +98,42 @@ interface CoreRuntimeNative : Library {
     /** Return current consent state as JSON. */
     fun synheart_core_current_consent(handle: Pointer?): Pointer?
 
+    /** Configure the cloud consent service (base URL + app id). Returns 0 on success. */
+    fun synheart_core_consent_configure_cloud(
+        handle: Pointer?,
+        base_url: String?,
+        app_id: String?,
+    ): Int
+
+    /** Return the editable consent form as JSON. */
+    fun synheart_core_consent_get_editable_form(handle: Pointer?): Pointer?
+
+    /**
+     * Submit a consent form: mints (or refreshes) the cloud consent token under
+     * the runtime's current subject. `user_id` is a legacy fallback only — the
+     * runtime mints under its configured subject_id. Returns a JSON result that
+     * includes the issued token (or an `error`). Caller frees the string.
+     */
+    fun synheart_core_consent_submit_form(
+        handle: Pointer?,
+        device_id: String?,
+        platform: String?,
+        user_id: String?,
+        form_json: String?,
+    ): Pointer?
+
+    /** Return cloud consent status as JSON (e.g. `{"status":"granted"|"pending"}`). */
+    fun synheart_core_consent_status(handle: Pointer?): Pointer?
+
+    /** Return effective consent state as JSON (token-authoritative when present). */
+    fun synheart_core_consent_effective_state(handle: Pointer?): Pointer?
+
+    /** Returns 1 if the consent token should be refreshed soon, 0 otherwise. */
+    fun synheart_core_consent_needs_token_refresh(handle: Pointer?): Int
+
+    /** Clear the stored consent token + snapshot. Returns 0 on success. */
+    fun synheart_core_consent_clear_stored(handle: Pointer?): Int
+
     // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //

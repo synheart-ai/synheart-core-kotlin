@@ -138,6 +138,54 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         readAndFreeString(lib.synheart_core_current_consent(requireHandle()))
 
     // ------------------------------------------------------------------ //
+    // Cloud consent (token mint + status)                                //
+    // ------------------------------------------------------------------ //
+
+    /** Configure the cloud consent service (base URL + app id). Returns true on success. */
+    fun consentConfigureCloud(baseUrl: String, appId: String): Boolean =
+        lib.synheart_core_consent_configure_cloud(requireHandle(), baseUrl, appId) == 0
+
+    /** Return the editable consent form as JSON, or null. */
+    fun consentGetEditableForm(): String? =
+        readAndFreeString(lib.synheart_core_consent_get_editable_form(requireHandle()))
+
+    /**
+     * Submit a consent form to mint/refresh the cloud consent token under the
+     * runtime's subject. Returns the JSON result (issued token, or `error`), or null.
+     */
+    fun consentSubmitForm(
+        deviceId: String?,
+        platform: String,
+        userId: String?,
+        formJson: String,
+    ): String? =
+        readAndFreeString(
+            lib.synheart_core_consent_submit_form(
+                requireHandle(),
+                deviceId,
+                platform,
+                userId,
+                formJson,
+            ),
+        )
+
+    /** Cloud consent status as JSON (e.g. `{"status":"granted"|"pending"}`), or null. */
+    fun consentStatus(): String? =
+        readAndFreeString(lib.synheart_core_consent_status(requireHandle()))
+
+    /** Effective consent state as JSON (token-authoritative when present), or null. */
+    fun consentEffectiveState(): String? =
+        readAndFreeString(lib.synheart_core_consent_effective_state(requireHandle()))
+
+    /** True if the consent token should be refreshed soon. */
+    fun consentNeedsTokenRefresh(): Boolean =
+        lib.synheart_core_consent_needs_token_refresh(requireHandle()) == 1
+
+    /** Clear the stored consent token + snapshot. Returns true on success. */
+    fun consentClearStored(): Boolean =
+        lib.synheart_core_consent_clear_stored(requireHandle()) == 0
+
+    // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //
 
