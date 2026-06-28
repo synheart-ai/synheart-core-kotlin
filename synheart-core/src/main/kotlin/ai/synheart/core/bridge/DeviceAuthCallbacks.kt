@@ -63,7 +63,7 @@ internal object DeviceAuthCallbacks {
         if (data == null || n <= 0) return@SignBytesCb null
         DeviceAuthCrypto.signBase64Url(id, data.getByteArray(0, n))?.let(::cString)
     }
-    private val getAttestation = GetAttestationCb { _, _, _ -> null } // optional; Play Integrity not wired
+    private val getAttestation = GetAttestationCb { _, _, _ -> null }
     private val keyExists = KeyExistsCb { devId ->
         if (devId?.getString(0)?.let(DeviceAuthCrypto::keyExists) == true) 1 else 0
     }
