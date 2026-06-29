@@ -155,6 +155,12 @@ interface CoreRuntimeNative : Library {
     /** Device-auth status JSON (`{ "status": "...", "device_id": "..." }`), or null. */
     fun synheart_core_sdk_device_auth_status(handle: Pointer?): Pointer?
 
+    /** Canonical RFC-0008 subject id (heap char*, free via free_string), or null. */
+    fun synheart_core_get_subject_id(handle: Pointer?): Pointer?
+
+    /** Rebind the runtime subject; 1 = re-mint required, 0 = valid token, -1 = error. */
+    fun synheart_core_rebind_subject_id(handle: Pointer?, subjectId: String?, invalidateToken: Int): Int
+
     // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //

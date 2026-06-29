@@ -220,6 +220,27 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         readAndFreeString(lib.synheart_core_sdk_device_auth_status(requireHandle()))
 
     // ------------------------------------------------------------------ //
+    // Subject identity                                                    //
+    // ------------------------------------------------------------------ //
+
+    /** The runtime's canonical subject id (RFC-0008), or null (incl. a runtime
+     * build that predates the symbol — degrades softly). */
+    fun runtimeSubjectId(): String? = try {
+        readAndFreeString(lib.synheart_core_get_subject_id(requireHandle()))
+    } catch (e: UnsatisfiedLinkError) {
+        null
+    }
+
+    /** Atomically rebind the runtime subject id, re-pointing consent + the cloud
+     * connector without a full reinit. Returns 1 (re-mint required), 0 (valid
+     * token loaded), or -1 (error / symbol absent). */
+    fun rebindSubjectId(subjectId: String, invalidateToken: Boolean = true): Int = try {
+        lib.synheart_core_rebind_subject_id(requireHandle(), subjectId, if (invalidateToken) 1 else 0)
+    } catch (e: UnsatisfiedLinkError) {
+        -1
+    }
+
+    // ------------------------------------------------------------------ //
     // Research study                                                      //
     // ------------------------------------------------------------------ //
 
