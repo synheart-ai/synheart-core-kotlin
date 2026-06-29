@@ -117,12 +117,32 @@ object Synheart {
     private var synheartConfig: SynheartConfig? = null
 
     /**
-     * The subject id this SDK instance is configured for — the value HSI uploads
-     * are attributed under (`meta.user_id`) and the consent token is minted for.
-     * Null when not configured.
+     * The subject id this SDK instance is bound to — the value HSI uploads are
+     * attributed under (`meta.user_id`) and the consent token is minted for.
+     * Prefers the canonical subject reported by the native runtime (which may
+     * derive it from `client_id` per RFC-0008); falls back to the configured
+     * value before the runtime loads. Null when not configured.
      */
     val subjectId: String?
-        get() = synheartConfig?.subjectId ?: userId
+        get() = nativeSubjectIdOverride?.takeIf { it.isNotEmpty() }
+            ?: synheartConfig?.subjectId ?: userId
+
+    /**
+     * Canonical subject captured from the native runtime after init and after a
+     * [rebindSubjectId]. Source of truth over the immutable configured value.
+     */
+    @Volatile
+    private var nativeSubjectIdOverride: String? = null
+
+    /**
+     * Capture the runtime's canonical subject so [subjectId] /
+     * [consentTokenSubjectStale] agree with native. A null/empty value (e.g. an
+     * older runtime without the symbol) leaves the override unchanged.
+     */
+    private fun syncSubjectFromNative() {
+        val native = runCatching { coreRuntime?.runtimeSubjectId() }.getOrNull()
+        if (!native.isNullOrEmpty()) nativeSubjectIdOverride = native
+    }
 
     /**
      * Subject (`user_id` claim) of the most recently issued cloud consent token,
@@ -567,6 +587,11 @@ object Synheart {
                 if (coreRuntime != null) {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
 
+                    // Capture the canonical subject the runtime resolved (a
+                    // device-auth derive may have changed it) so SDK subject
+                    // checks match the native source of truth.
+                    syncSubjectFromNative()
+
                     // Device auth: hand the runtime its Keystore crypto + secure
                     // storage callbacks before any registration so consent tokens
                     // persist and can be minted. Best-effort.
@@ -944,6 +969,33 @@ object Synheart {
         CloudConsentLogic.isTokenSubjectStale(currentTokenSubject, subjectId)
 
     /**
+     * Rebind the runtime subject id when the signed-in identity changes, then
+     * re-mint cloud consent for the new subject if needed — without a full
+     * dispose/reinit. Prefer this over re-initializing the SDK on sign-in.
+     *
+     * The native runtime atomically re-points consent (`cached_subject_id` +
+     * token slot) and the cloud connector; this syncs the SDK subject and runs
+     * the self-heal so a stale token is reissued before the next upload. Returns
+     * true when applied (false on a runtime that lacks the symbol).
+     */
+    suspend fun rebindSubjectId(subjectId: String): Boolean {
+        val cr = coreRuntime ?: return false
+        val trimmed = subjectId.trim()
+        if (trimmed.isEmpty()) return false
+        val rc = cr.rebindSubjectId(trimmed)
+        if (rc < 0) {
+            SynheartLogger.log("[Synheart] rebindSubjectId failed (rc=$rc)")
+            return false
+        }
+        // Keep the SDK subject in lockstep with the native runtime.
+        syncSubjectFromNative()
+        // rc == 1 => re-mint required; rc == 0 => valid token already loaded.
+        // Self-heal regardless: cheap no-op when ready, reissues otherwise.
+        runCatching { ensureCloudConsentReady() }
+        return true
+    }
+
+    /**
      * Revoke consent for a specific data type. Any modules gated on this
      * consent are stopped and queued data discarded per retention policy.
      *
@@ -1139,6 +1191,8 @@ object Synheart {
             coreRuntime?.clearHsiCallback()
             coreRuntime?.close()
             coreRuntime = null
+            nativeSubjectIdOverride = null
+            currentTokenSubject = null
 
             moduleManager.disposeAll()
 
