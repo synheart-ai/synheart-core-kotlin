@@ -65,9 +65,9 @@ class ConsentModule(
 
     suspend fun updateConsentType(type: ConsentType, granted: Boolean) {
         if (granted) {
-            bridge?.grantConsent(type.name.lowercase())
+            bridge?.grantConsent(type.runtimeKey)
         } else {
-            bridge?.revokeConsent(type.name.lowercase())
+            bridge?.revokeConsent(type.runtimeKey)
         }
         val current = currentConsent ?: return
         val updated = when (type) {
@@ -79,12 +79,15 @@ class ConsentModule(
             ConsentType.EMOTION_ESTIMATION -> current.copyWith(emotionEstimation = granted)
             ConsentType.SYNI -> current.copyWith(syni = granted)
             ConsentType.VENDOR_SYNC -> current.copyWith(vendorSync = granted)
+            ConsentType.RESEARCH -> current.copyWith(research = granted)
         }
         updateConsent(updated)
     }
 
     suspend fun denyConsent() {
-        updateConsent(ConsentSnapshot.none())
+        // `explicitlyDenied` is what separates "user said no" from "never
+        // asked" — without it a host re-prompts someone who already declined.
+        updateConsent(ConsentSnapshot.none().copyWith(explicitlyDenied = true))
         SynheartLogger.log("[ConsentModule] Consent explicitly denied by user")
     }
 
@@ -97,6 +100,84 @@ class ConsentModule(
         prefs.edit().putString("device_id", deviceId).apply()
         SynheartLogger.log("[ConsentModule] Generated new device ID: $deviceId")
         return deviceId
+    }
+
+    /**
+     * Consent profiles this app offers, newest resolution first.
+     *
+     * Sourced from the runtime's editable form, which already reflects the
+     * cloud default profile when one has been cached. Empty when the runtime
+     * is absent or has no profile yet — a host with no profiles should fall
+     * back to its own copy rather than showing an empty picker.
+     */
+    fun availableProfiles(): List<ConsentProfile> {
+        val raw = bridge?.consentGetEditableForm() ?: return emptyList()
+        val form = runCatching { ConsentForm.fromJson(org.json.JSONObject(raw)) }.getOrNull()
+            ?: return emptyList()
+        return listOf(
+            ConsentProfile(
+                id = form.profileId,
+                name = form.profileId,
+                description = "Consent profile resolved by the Synheart runtime.",
+                channels = ConsentChannels(
+                    biosignals = BiosignalsConsent(
+                        vitals = form.biosignals,
+                        sleep = form.biosignals,
+                    ),
+                    phoneContext = PhoneContextConsent(
+                        deviceMotion = form.phoneContext,
+                        deviceContext = form.phoneContext,
+                    ),
+                    behavior = BehaviorConsent(digitalActivity = form.behavior),
+                ),
+                cloudEnabled = form.allowCloud,
+                vendorSyncEnabled = form.allowVendorSync,
+                isDefault = true,
+            ),
+        )
+    }
+
+    /**
+     * Apply a profile the user selected, replacing the current snapshot.
+     *
+     * Channel-level truth comes from the profile; the category booleans are
+     * derived from it so a host reading either shape sees the same decision.
+     */
+    suspend fun applyProfile(profile: ConsentProfile) {
+        val ch = profile.channels
+        val biosignals = ch.biosignals.vitals || ch.biosignals.sleep ||
+            ch.biosignals.cardioAdvanced || ch.biosignals.neuromuscular ||
+            ch.biosignals.wearableMotion
+        val phoneContext = ch.phoneContext.deviceMotion || ch.phoneContext.deviceContext ||
+            ch.phoneContext.systemState
+        val behavior = ch.behavior.digitalActivity || ch.behavior.notificationPatterns ||
+            ch.behavior.appContext
+
+        updateConsent(
+            ConsentSnapshot(
+                biosignals = biosignals,
+                phoneContext = phoneContext,
+                behavior = behavior,
+                cloudUpload = profile.cloudEnabled,
+                focusEstimation = ch.interpretation.focusEstimation,
+                emotionEstimation = ch.interpretation.emotionEstimation,
+                syni = ch.interpretation.focusEstimation || ch.interpretation.emotionEstimation,
+                vendorSync = profile.vendorSyncEnabled,
+                channels = ch,
+            ),
+        )
+
+        // Mirror the decision into the runtime so its consent gate agrees with
+        // the SDK's snapshot; without this the two disagree until the next mint.
+        bridge?.let { b ->
+            ConsentType.entries.forEach { type ->
+                val granted = currentConsent?.allows(type) ?: false
+                // The runtime keys consent in snake_case; `wireKey` is the
+                // camelCase spelling the SDK and hosts use.
+                val key = type.runtimeKey
+                if (granted) b.grantConsent(key) else b.revokeConsent(key)
+            }
+        }
     }
 
     private fun notifyListeners(consent: ConsentSnapshot) {
