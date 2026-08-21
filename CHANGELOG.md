@@ -8,6 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Every behavior event was silently dropped.** `BehaviorEventStream` backed its
+  bus with `MutableSharedFlow()` — replay 0, no extra capacity, i.e. a
+  *rendezvous* flow — while every `record*` reaches it through `tryEmit`, whose
+  `Boolean` result was discarded. `tryEmit` on a rendezvous flow fails unless a
+  subscriber is suspended awaiting a value at that instant, and hosts record from
+  synchronous UI callbacks like `dispatchTouchEvent`. So taps, scrolls and
+  keystrokes never arrived: `behaviorEventStream` stayed empty, the aggregator
+  saw nothing, nothing reached `synheart_core_push_behavior`, and the HSI digital
+  modality never appeared. Behavior is the only source that needs no sensor, so
+  this made the SDK look inert on any device without a wearable while reporting
+  itself healthy. The bus is now buffered with `DROP_OLDEST`, which suits
+  interaction telemetry — high-rate, lossy-tolerant, and `SUSPEND` cannot be
+  honoured from a synchronous callback anyway.
+- **Consent did not survive a restart, so sessions collected nothing.**
+  `initialize()` never adopted the runtime's persisted consent into the SDK's own
+  `consentModule` mirror; only `consentSubmitForm` did. On every launch after the
+  first, the runtime reported all channels granted while `consentModule.current()`
+  said none was, and everything gating on the mirror failed closed:
+  `moduleManager.startAll()` started each module and `reevaluateAllFeatures()`
+  stopped it a millisecond later. A session collected **nothing** while the
+  consent UI showed all-granted. The cloud self-heal was dead for the same
+  reason — it checks `current().cloudUpload`, which was never true, so no consent
+  token was minted and every upload reported a closed gate.
+  `syncConsentModuleFromRuntime()` already existed and was correct; it simply was
+  not called at init.
+- **The wear module fabricated biosignals by default.** `WearModule` fell back to
+  `MockWearSourceHandler` whenever a host passed no sources — which on Android is
+  always, since the SDK registers no real one. Its `isAvailable` is
+  unconditionally `true` and it invents a heart rate and RMSSD every second.
+  Those samples are not cosmetic: they reach `wearSampleStream`, where a host
+  renders them as measurements, and they flow through
+  `WearModuleBiosignalAdapter` into the session engine and the runtime's
+  longitudinal baselines (SRM) — so a host that merely granted biosignals consent
+  silently corrupted that subject's real reference ranges with fabricated beats,
+  on their own device, with nothing on screen indicating the data was invented. A
+  module with no source now reports no signal, which is the truth; the generator
+  is opt-in via `SynheartConfig.allowSyntheticBiosignals` and logs a warning when
+  active.
+- **Device registration was impossible on Android.** Two defects compounded.
+  `DeviceAuthCallbacks.getAttestation` was a hardcoded `null`, but the runtime's
+  FFI contract is a JSON object `{"format":…,"blob":…}` and it treats a NULL
+  pointer as a hard `PlatformCrypto("null callback result")` — so registration
+  could never pass step 4/7 whatever the configuration. That also made
+  `DeviceAuthConfig.allowUnattestedDevRegistration` unreachable: its documented
+  behaviour, sending `format:"none"` with an empty blob so the server decides,
+  requires the callback to *answer*. A null is not "no material available", it is
+  "the callback is broken", and the runtime cannot tell a device that cannot
+  attest from a host that never wired this up. Separately, every failure path in
+  `DeviceAuthCrypto` was `catch (e: Exception) { null }`, so the runtime could
+  only ever report "null callback result" — indistinguishable from an unwired
+  callback, which has a completely different fix. The callback now reports no
+  material in the shape the contract expects, and the crypto causes are logged.
 - **Documentation corrections.** The README's quick-start activated features but
   never granted consent or called `startSession()`, so the first thing a
   developer copied collected nothing, silently — a feature needs all four
@@ -69,6 +121,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle.
 
 ### Added
+- **`SynheartConfig.allowSyntheticBiosignals`** (default `false`) — opt-in for the
+  synthetic wear generator. Development only: its samples enter the session engine
+  and the runtime's SRM baselines exactly as real readings would, so it must never
+  run against a real subject, and any UI showing the values should label them.
+- **`HSIState.modalities` and `HSIState.tiers`**, derived from
+  `meta.provenance.sources[*].signals` and `meta.synheart.tiers`. The five
+  canonical axes are physiology-derived, so on hardware with no wearable they all
+  sit at zero confidence while behavior and motion are in fact arriving — a
+  consumer reading only the axes reasonably concludes the SDK is broken.
+  `modalities` is what distinguishes "nothing was collected" from "signal
+  arrived, just not physiological". Physiological tier reports the *worst*
+  (highest) tier among contributing sources, since a fused window is only as
+  trustworthy as its weakest input.
+- **`HSIState.parseError` / `hasParseError`** — a failed parse yields all-null
+  axes, previously indistinguishable from "the engine had no basis for any axis".
+- **`HSIAxes.hasDigital`** — whether any interaction-derived axis resolved.
 - **Full native ABI coverage.** `CoreRuntimeNative` now declares all 163
   `synheart_core_*` symbols the runtime exports (up from 82), each verified
   against the runtime's `extern "C"` signatures for arity, argument width and
