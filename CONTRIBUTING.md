@@ -42,6 +42,11 @@ Before opening an issue, please:
 2. Use the appropriate issue template (bug report or feature request).
 3. Include enough detail for us to reproduce or evaluate the request — version,
    platform, minimal reproduction code, and what you expected vs. observed.
+4. For anything that looks like "the SDK produces no data", run the
+   [diagnostics checklist](doc/INTEGRATION.md#checklist-before-filing-a-bug)
+   first and paste its output. Most of those reports turn out to be a missing
+   native runtime, an ungranted consent, or a session that was never started —
+   none of which surface as an error.
 
 Issues that are well scoped and reproducible get triaged faster.
 

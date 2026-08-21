@@ -7,11 +7,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Documentation corrections.** The README's quick-start activated features but
+  never granted consent or called `startSession()`, so the first thing a
+  developer copied collected nothing, silently — a feature needs all four
+  authorities (activation, consent, capability, running session) and the
+  README documented none of that. It also claimed a double `initialize()`
+  throws (it is a no-op), documented a `CapabilityException` that does not
+  exist (it is `CapabilityRequiredError`), showed `SynheartConfig` samples with
+  empty `appId`/`subjectId` that `validate()` rejects, referenced an internal
+  `Hsv` type by the wrong name, and stated no `minSdk` at all.
+- **BREAKING (behavioural): `synheart_core_push_rr` was declared with the wrong
+  arity.** The runtime takes a fourth `provider: *const c_char` argument; the
+  JNA declaration had three. Every RR push read whatever happened to be in the
+  provider register. `Synheart.pushRr` now takes a `provider` (default
+  `"default_sensor"`).
+- **`synheart_core_push_behavior` passed a `String` where the runtime takes a
+  `c_int`.** Behavior events crossing the FFI boundary carried a pointer where
+  an event code was expected. The code now comes from `RuntimeBehaviorEvent`.
+- **`synheart_core_lab_is_available` is not a runtime symbol** — it is
+  `synheart_core_is_lab_available`. `isLabAvailable` always threw
+  `UnsatisfiedLinkError` internally.
+- **Consent keys were not translated across the FFI boundary.** The runtime
+  keys consent in snake_case (`cloud_upload`); the SDK API uses camelCase
+  (`cloudUpload`). `grantConsent` / `revokeConsent` / `hasConsent` passed the
+  caller's spelling through unchanged, so a grant the SDK recorded never
+  reached the runtime's gate. Both spellings are now accepted and translated.
+- **`Synheart.hasConsent` never consulted the runtime.** It read only the SDK's
+  own snapshot, so it could not see the cloud gate and disagreed with
+  `consentEffectiveState`. It now prefers the runtime, falling back to the
+  snapshot when no runtime is loaded.
+- **`SessionRecord` read `start_utc`, but the runtime emits `started_at_ms`.**
+  Every record carried `startUtc == 0`, so orphan-session sweeps — which filter
+  on `startUtc > 0` — silently matched nothing. Both spellings are now read,
+  and `state` / `endedAtUtc` / `isActive` are parsed.
+- **`Synheart.runtimeVersion` returned the whole diagnostics blob** instead of
+  the runtime's semantic version.
+- **A cleared HSI or stream callback could be collected while a native worker
+  was still inside the dispatch path.** `synheart_core_clear_hsi_callback` only
+  aborts the listener task without joining it, so releasing the JNA peer at
+  clear time is a use-after-free. Retired callbacks are now retained until the
+  handle is freed.
+
+### Changed
+- **BREAKING: the SDK no longer ships a built-in API host.** `ApiEndpoints`
+  resolves the platform origin from `ApiEndpoints.baseUrlOverride`, the
+  `synheart.baseUrl` system property, or `SYNHEART_BASE_URL`, defaulting to
+  empty — with none set, no origin is passed to the runtime and the runtime
+  applies its own default. `CloudConfig.baseUrl`, `ConsentConfig.consentServiceUrl`
+  and `LabIngestConfig.baseUrl` now default to `""` rather than
+  `https://api.synheart.ai`. A host baked into the library becomes the
+  destination for any build that forgot to name one, including forks and
+  self-hosted deployments.
+- **The runtime config handed to `synheart_core_new` is now built by
+  `buildRuntimeConfigMap`** — a pure, unit-tested function shared by the facade
+  and `SynheartInstance`. It adds the `org_id`, `client_id`, `data_dir`,
+  `storage`, `ingest`, `device_auth`, `sync` and `privacy` keys the previous
+  inline map omitted, and gates `ingest.*` on a non-empty org id and
+  `device_auth.enabled` on a `DeviceAuthConfig` — enabling either without its
+  prerequisite makes the runtime reject the whole config and return a null
+  handle.
+
 ### Added
+- **Full native ABI coverage.** `CoreRuntimeNative` now declares all 163
+  `synheart_core_*` symbols the runtime exports (up from 82), each verified
+  against the runtime's `extern "C"` signatures for arity, argument width and
+  return type.
+- **`SynheartInstance`** — a second, fully independent runtime handle with its
+  own engine, storage and attested device identity, for running a research
+  instance alongside the personal one.
+- **Typed baseline snapshots** — `BaselineKind`, `BaselineEnvelope`,
+  `HsiAxesBaseline`, `SessionSrmMetricsBaseline`, `LongitudinalWearBaseline`
+  and the `Synheart.baselineSnapshots` facade, hydrated from local storage on
+  init.
+- **Cross-device sync** — `syncNow`, `checkSyncReadiness`, space create / join /
+  recover / leave / delete, pairing, device listing and revocation, plus
+  `SyncNativeError` / `SyncNativeException` so a failure envelope keeps its
+  reason instead of collapsing to a bare null.
+- **Realtime event stream** — `startEventStream` / `startVendorSync`,
+  `rawRamenEvents` (with the ping-vs-stream `DeliveryHint`), `vendorEvents`,
+  and `onDataDeletionUpdate`.
+- **GDPR Article 17 surface** — `requestDataDeletion`, `dataDeletionStatus`,
+  `listDataDeletions`, `deleteLocalData`, `deleteModuleData`, and the
+  `DataDeletionRequest` / `DataDeletionEvent` models.
+- **Scores** — `computeSleepScore`, `computeRecoveryScore`,
+  `computeReadinessScore` (plus raw-JSON and traced variants),
+  `attachSleepScore`, `attachRecoveryScoreToday`, and `wearableReference`.
+- **Personalization** — `TaskType`, `FocusKind`, workout events,
+  `personalizationContextJson`, and the SRM wearable-daily import path.
+- **Cloud ingestion facade** — `Synheart.ingestion` (`SynheartIngestion`),
+  `cloudSyncStatus`, HSI history (`listHsiHistory`, `fetchCloudHsiWindows`,
+  `clearHsiHistory`), and last-upload bookkeeping.
+- **Lab protocol surface** — start / open / close / finalize, metadata, and
+  session re-enqueue.
+- **Consent** — `ConsentForm`, `ConsentEffectiveState`, `ConsentTypeMeta`
+  (`wireKey` / `runtimeKey` / `displayName`), `consentChanges`,
+  `requestConsent`, `setConsentUIProvider`, and a `RESEARCH` consent type.
+- **Collection control** — per-module `start*Collection` / `stop*Collection`,
+  `wearSampleStream`, `behaviorEventStream`, behavior sessions with
+  `BehaviorSessionResults`, and notification-listener helpers.
+- **Runtime logging** — `initRuntimeLogging`, buffered mode with
+  `drainRuntimeLogs`, and `runtimeDiagnostics()` annotated with the symbols the
+  loaded library turned out not to export.
+- **`SyniContextBuilder`** — projects live HSI plus session history into the
+  Syni conditioning payload, skipping the heavy blocks for trivial messages.
+- **`doc/INTEGRATION.md`** — the ordered walkthrough from an empty project to a
+  device that uploads, ported from the Flutter SDK and adapted to Gradle,
+  `BuildConfig`, `jniLibs` and Play Integrity. Includes a symptom-keyed
+  troubleshooting table and a pre-bug-report diagnostics checklist.
+- **`example/README.md` and `example/SETUP.md`** — what the example
+  demonstrates, and how to provision the native runtime and credentials.
+- **`Synheart.isRuntimeAvailable`** and a stable `isAvailable` key in
+  `runtimeDiagnostics()`. The runtime's own diagnostics shape is not guaranteed
+  to carry one, and "did the native library load" is the first question to ask
+  when no state arrives.
+- **A version-sync guard** (`VersionSyncTest`) over `gradle.properties`,
+  `SYNHEART_CORE_VERSION`, the README badge, and every README Maven coordinate.
+  The README shipped `0.0.8` against a `0.1.0` build, so the documented
+  dependency line was a version behind.
+- **Example-app credentials are read from `example/env/synheart.credentials.json`**
+  into `BuildConfig` — the Kotlin analogue of Flutter's
+  `--dart-define-from-file`. The key names match the credentials download from
+  platform.synheart.ai so it can be dropped in whole. Populated files are
+  gitignored; only the template is checked in. A missing file leaves every
+  field empty and the SDK local-only, so a fresh clone still builds. Previously
+  the example hardcoded `appId = "ai.synheart.example"` and set no `orgId` at
+  all, so cloud ingest could never be exercised.
+- **The example app packages the native runtime.** `:example` now points
+  `jniLibs.srcDirs` at `example/synheart/vendor/runtime/android/jniLibs`
+  (overridable via the `synheart.runtime.android.jniLibs` property), mirroring
+  the Flutter SDK. AGP reads only `src/main/jniLibs` by default, so the
+  vendored `libsynheart_core_runtime.so` was present on disk but absent from
+  the APK — every FFI call would have degraded to "native library not loaded".
+- **`.gitignore` now covers the vendored native binaries** (`*.so`, `*.dylib`,
+  `native/`, `example/synheart/vendor/`), matching the Flutter SDK. The
+  vendored tree is ~1.8 GB and was previously untracked but unignored, so a
+  `git add .` would have tried to commit it.
+- **The example app is now a real Gradle module** (`:example`) that CI
+  compiles. It was previously two loose source files nothing referenced, and
+  had drifted out of sync with the SDK — `CanonicalExample` read
+  `HSIState.hsiVersion` and `.observedAtUtc`, neither of which has ever existed
+  in either the Kotlin or the Flutter SDK. It is not published.
+- **`SYNHEART_CORE_VERSION`**, `BoundedBuffer`, `HsiDeliveryDeduper`,
+  `MotionStateSnapshot`, `WearModuleStatus`, `HsiAxes`, and `SyncResult` /
+  `SyncStatus`.
 - **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
   `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
   consent token scoped to the current subject (configure-cloud on init,
   mint-on-grant, init self-heal) so uploads are attributed to that subject.
+
+### Known gaps
+- **`minSdk 24` is not achievable by consumers.** `:synheart-core` declares
+  `minSdk 24`, but it depends on `ai.synheart:syni:0.0.3`, whose manifest
+  declares `minSdkVersion 26`. A library module never runs the full manifest
+  merge, so this was invisible here; a consumer **app** at 24 fails with
+  `uses-sdk:minSdkVersion 24 cannot be smaller than version 26 declared in
+  library [ai.synheart:syni:0.0.3]`. The example app is pinned to 26 to build.
+  Either raise the SDK's `minSdk` to 26, or make the Syni dependency optional
+  so a host that does not use it can stay at 24.
+- **Watch-session relay is not available.** `isWatchSessionActive`,
+  `activeWatchSessionId`, `watchSessionEvents`, `getWatchStatus`,
+  `startWatchSession` and `stopWatchSession` have no Kotlin equivalent because
+  `ai.synheart:synheart-session:0.2.1` ships no watch-relay surface (no
+  `WatchStatus`, no watch start/stop). They land when the session SDK gains it.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` and
