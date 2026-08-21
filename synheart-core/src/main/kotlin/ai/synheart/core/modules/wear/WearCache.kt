@@ -30,6 +30,11 @@ class WearCache {
         return windowSamples[window]?.toList() ?: emptyList()
     }
 
+    /** Drop every buffered sample across all windows. */
+    fun clear() {
+        windowSamples.clear()
+    }
+
     fun clearOldData() {
         val now = System.currentTimeMillis()
 

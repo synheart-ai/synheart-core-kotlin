@@ -10,6 +10,11 @@ import kotlin.time.Duration.Companion.hours
 class PhoneCache {
     private val windowData = mutableMapOf<WindowType, MutableList<PhoneDataPoint>>()
 
+    /** Drop every buffered data point across all windows. */
+    fun clear() {
+        windowData.clear()
+    }
+
     fun addMotionData(motion: MotionData) {
         addDataPoint(PhoneDataPoint(
             timestamp = motion.timestamp,

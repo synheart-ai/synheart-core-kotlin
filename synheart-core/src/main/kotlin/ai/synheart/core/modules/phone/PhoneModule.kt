@@ -35,6 +35,14 @@ class PhoneModule(
         return cache.getDataPoints(window)
     }
 
+    /**
+     * Drop every buffered data point. Used by the SDK's per-module erasure
+     * path; the durable record, if any, lives in the runtime's storage.
+     */
+    suspend fun clearCache() {
+        cache.clear()
+    }
+
     override suspend fun onInitialize() {
         SynheartLogger.log("[PhoneModule] Initializing phone collectors...")
     }

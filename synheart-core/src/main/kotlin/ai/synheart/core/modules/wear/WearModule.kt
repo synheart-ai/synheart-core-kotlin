@@ -24,10 +24,23 @@ import ai.synheart.core.SynheartLogger
 class WearModule(
     private val capabilities: CapabilityProvider,
     private val consent: ConsentProvider,
-    private val sources: List<WearSourceHandler>? = null
+    private val sources: List<WearSourceHandler>? = null,
+    /**
+     * Whether to fall back to a synthetic generator when [sources] is null.
+     *
+     * See [ai.synheart.core.config.SynheartConfig.allowSyntheticBiosignals]:
+     * this used to be unconditional, which made invented heart rates the only
+     * biosignal source on Android and fed them into real SRM baselines.
+     */
+    private val allowSynthetic: Boolean = false
 ) : BaseSynheartModule("wear"), RawWearDataProvider {
 
-    private val actualSources = sources ?: listOf(MockWearSourceHandler())
+    // An empty list rather than a mock: a module with no source reports no
+    // signal, which is the truth. Fabricating one to avoid an empty screen is
+    // what made "biosignals are working" indistinguishable from "biosignals are
+    // invented".
+    private val actualSources = sources
+        ?: if (allowSynthetic) listOf(MockWearSourceHandler()) else emptyList()
     private val cache = WearCache()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
@@ -49,6 +62,14 @@ class WearModule(
     override fun rawSamples(window: WindowType): List<WearSample> {
         if (!consent.current().biosignals) return emptyList()
         return cache.getSamples(window)
+    }
+
+    /**
+     * Drop every buffered sample. Used by the SDK's per-module erasure path;
+     * the durable record, if any, lives in the runtime's storage.
+     */
+    suspend fun clearCache() {
+        cache.clear()
     }
 
     override suspend fun onInitialize() {
@@ -88,6 +109,12 @@ class WearModule(
                 jobSet.add(job)
 
                 if (source is MockWearSourceHandler) {
+                    SynheartLogger.log(
+                        "[WearModule] WARNING: synthetic biosignal generator active — " +
+                            "heart rate and HRV are INVENTED and will enter the runtime's " +
+                            "longitudinal baselines. Never enable " +
+                            "allowSyntheticBiosignals against a real subject.",
+                    )
                     source.startGenerating()
                 }
             }
@@ -142,14 +169,32 @@ class WearModule(
             SynheartLogger.log("[WearModule] No event processor attached -- ignoring vendor event")
             return null
         }
-        return processor.processRamenEvent(
+        val canonical = processor.processRamenEvent(
             provider = provider,
             eventType = eventType,
             payload = payload,
             eventId = eventId,
             seq = seq
         )
+        if (canonical != null) _canonicalEvents.tryEmit(canonical)
+        return canonical
     }
+
+    private val _canonicalEvents =
+        kotlinx.coroutines.flow.MutableSharedFlow<CanonicalWearableEvent>(
+            replay = 0,
+            extraBufferCapacity = 64,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        )
+
+    /**
+     * Canonical vendor events, emitted after normalization and storage.
+     *
+     * Buffered and drop-oldest: a slow collector must not stall the stream
+     * callback, which runs on a native thread.
+     */
+    val canonicalEvents: kotlinx.coroutines.flow.Flow<CanonicalWearableEvent> =
+        _canonicalEvents.asSharedFlow()
 
     override suspend fun onStop() {
         SynheartLogger.log("[WearModule] Stopping wear data collection...")
