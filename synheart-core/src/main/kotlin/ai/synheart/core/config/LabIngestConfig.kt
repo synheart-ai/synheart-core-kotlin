@@ -15,8 +15,11 @@ package ai.synheart.core.config
  * ```
  */
 data class LabIngestConfig(
-    /** Base URL for the lab ingestion service. */
-    val baseUrl: String = ApiEndpoints.DEFAULT_LAB_INGEST_BASE_URL,
+    /**
+     * Base URL for the lab ingestion service. Empty resolves through
+     * [ApiEndpoints.resolvedLabIngestBaseUrl]; nothing is baked in here.
+     */
+    val baseUrl: String = "",
 
     /** API key for authentication (X-API-Key header). Optional when device auth is configured. */
     val apiKey: String? = null,
