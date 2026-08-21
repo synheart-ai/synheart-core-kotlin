@@ -1,0 +1,136 @@
+// Example app for the Synheart Core SDK.
+//
+// A runnable Compose app that walks the SDK lifecycle across four tabs, mirroring
+// the core-flutter example. It is also here to be COMPILED by CI: before
+// `example/` was a Gradle module it was two loose source files that nothing
+// referenced, and they drifted out of sync with the SDK silently (referencing
+// `HSIState.hsiVersion` and `.observedAtUtc`, neither of which ever existed). An
+// API change that breaks the documented usage now breaks the build.
+//
+// It is deliberately NOT published: no `maven-publish` here, so
+// `publishToSonatype` never sees it.
+// AGP 9 has built-in Kotlin support, so no `org.jetbrains.kotlin.android` here
+// — applying it fails the build. This mirrors :synheart-core.
+plugins {
+    id 'com.android.application'
+    // Compose with Kotlin 2.x needs the compiler plugin applied explicitly.
+    // It composes fine with AGP 9's built-in Kotlin — unlike
+    // `org.jetbrains.kotlin.android`, which conflicts with it.
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+import groovy.json.JsonSlurper
+
+// Credentials come from a file downloaded from platform.synheart.ai and copied
+// to example/env/synheart.credentials.json (gitignored — see the template
+// beside it). The Kotlin analogue of Flutter's `--dart-define-from-file`.
+//
+// Absent or partial is fine: every field falls back to empty, and the SDK then
+// runs local-only. That is deliberate — a fresh clone must build without
+// anyone's organization ids.
+def synheartCreds = { ->
+    def f = new File(projectDir, 'env/synheart.credentials.json')
+    if (!f.exists()) return [:]
+    try {
+        def parsed = new JsonSlurper().parse(f)
+        return (parsed instanceof Map) ? parsed : [:]
+    } catch (Exception e) {
+        logger.warn("[synheart] could not parse ${f}: ${e.message} — building local-only")
+        return [:]
+    }
+}()
+
+def credString = { String key -> (synheartCreds[key] ?: '').toString() }
+
+android {
+    namespace 'ai.synheart.core.example'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ai.synheart.core.example'
+        // 26, not the SDK's declared 24: :synheart-core depends on
+        // `ai.synheart:syni:0.0.3`, whose manifest declares minSdkVersion 26.
+        // A consumer app at 24 fails manifest merge. See the note in
+        // CHANGELOG under "Known gaps".
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName project.version as String
+
+        // Surfaced to the app as BuildConfig fields. `org_id` is load-bearing:
+        // the runtime rejects a config that enables cloud ingest without one,
+        // so an empty value keeps ingest gated off rather than failing init.
+        buildConfigField 'String', 'SYNHEART_ORG_ID', "\"${credString('org_id')}\""
+        buildConfigField 'String', 'SYNHEART_APP_ID', "\"${credString('app_id')}\""
+        buildConfigField 'String', 'SYNHEART_BASE_URL', "\"${credString('base_url')}\""
+        // Optional split-environment override. Empty falls back to base_url —
+        // NOT to the runtime's own default — so a file that names only base_url
+        // still sends registration, consent and ingest to the same host.
+        buildConfigField 'String', 'SYNHEART_AUTH_URL', "\"${credString('auth_url')}\""
+        buildConfigField 'String', 'SYNHEART_PACKAGE_NAME', "\"${credString('package_name')}\""
+
+        // Read but NOT consumed by the SDK — the runtime config carries app_id
+        // and org_id and nothing else. Surfaced only so the Setup screen can
+        // report what a dropped-in credentials file actually supplied, which is
+        // the fastest way to see which field is the missing one.
+        buildConfigField 'String', 'SYNHEART_TENANT_ID', "\"${credString('tenant_id')}\""
+        buildConfigField 'String', 'SYNHEART_PROJECT_ID', "\"${credString('project_id')}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+
+    // Native .so files are provisioned by `synheart install runtime`, which
+    // places them at <host-app-root>/synheart/vendor/runtime/android/jniLibs/
+    // — here, example/synheart/... . AGP only picks up src/main/jniLibs by
+    // default, so without this the runtime is never packaged and the SDK
+    // silently falls back to "native library not loaded" at runtime.
+    //
+    // Override with `synheart.runtime.android.jniLibs` in gradle.properties.
+    // Mirrors the wiring in the Flutter SDK's android/build.gradle.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = [
+                project.findProperty('synheart.runtime.android.jniLibs')
+                    ?: new File(projectDir, 'synheart/vendor/runtime/android/jniLibs')
+                        .absolutePath
+            ]
+        }
+    }
+
+    compileOptions {
+        // Required transitively: :synheart-core and synheart-wear both declare
+        // that consumers must enable core library desugaring.
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation project(':synheart-core')
+
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Compose, the Kotlin analogue of the Flutter example's widget tree. The
+    // BOM pins every artifact to one release so the compiler and the runtime
+    // libraries cannot drift apart.
+    implementation platform('androidx.compose:compose-bom:2024.09.03')
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.activity:activity-compose:1.9.2'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+}
