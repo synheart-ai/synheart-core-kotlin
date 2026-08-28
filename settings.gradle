@@ -18,6 +18,11 @@ dependencyResolutionManagement {
 rootProject.name = "synheart-core-android"
 include ':synheart-core'
 
+// The example app is included so CI COMPILES it. As loose, unreferenced source
+// files it drifted out of sync with the SDK silently. It is not published —
+// `maven-publish` is applied only in :synheart-core.
+include ':example'
+
 // Sibling SDK composite builds — only wire them in when the sibling checkout
 // exists next to this repo (local multi-repo workspace). In CI / fresh clones
 // the sibling dirs aren't present, so the corresponding Maven Central artifacts

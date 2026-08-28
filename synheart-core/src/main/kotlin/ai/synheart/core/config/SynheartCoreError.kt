@@ -27,6 +27,9 @@ sealed class SynheartCoreError(
     class StorageDisabled :
         SynheartCoreError("ERR_STORAGE_DISABLED", "Storage is disabled")
 
+    class SyncDisabled :
+        SynheartCoreError("ERR_SYNC_DISABLED", "Sync is not enabled in the current configuration")
+
     class CryptoKeyUnavailable :
         SynheartCoreError("ERR_CRYPTO_KEY_UNAVAILABLE", "Crypto key is unavailable")
 

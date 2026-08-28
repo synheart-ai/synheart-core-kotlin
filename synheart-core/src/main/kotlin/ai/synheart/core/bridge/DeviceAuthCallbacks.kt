@@ -63,7 +63,39 @@ internal object DeviceAuthCallbacks {
         if (data == null || n <= 0) return@SignBytesCb null
         DeviceAuthCrypto.signBase64Url(id, data.getByteArray(0, n))?.let(::cString)
     }
-    private val getAttestation = GetAttestationCb { _, _, _ -> null }
+    /**
+     * Platform attestation material for a registration challenge.
+     *
+     * The runtime's FFI contract is a JSON object `{"format":…,"blob":…}`; it
+     * reads the returned pointer and treats a NULL as a hard
+     * `PlatformCrypto("null callback result")` failure. This used to be a
+     * hardcoded `null`, which made that failure unconditional: registration
+     * could never get past step 4/7 on Android, whatever the configuration.
+     *
+     * It also made [DeviceAuthConfig.allowUnattestedDevRegistration]
+     * unreachable. That flag's documented behaviour — "sends the registration
+     * carrying `format:"none"` and an empty blob, and the server decides" —
+     * requires the callback to *answer*. A null is not "no material available",
+     * it is "the callback is broken", and the runtime cannot tell the difference
+     * between a device that cannot attest and a host that never wired this up.
+     *
+     * So: report no material, in the shape the contract expects. An empty blob
+     * is the runtime's documented signal for "Play Integrity unavailable"
+     * (emulator, de-Googled ROM, no Play services), which it maps onto either
+     * an unattested registration or a local-only fallback.
+     *
+     * This deliberately does NOT mint a real Play Integrity token.
+     * `synheart-auth` ships [ai.synheart.auth.registration.PlayIntegrityAttestationProvider]
+     * for that, but its `generateProof` is `suspend` and this callback is a
+     * synchronous FFI trampoline — bridging them means blocking a runtime thread
+     * on an Integrity API round-trip, which needs its own timeout and
+     * cancellation design rather than a `runBlocking` bolted on here. A host
+     * that needs attested provenance today should supply the token through that
+     * provider path; nothing fake is ever sent from here.
+     */
+    private val getAttestation = GetAttestationCb { _, _, _ ->
+        cString("""{"format":"none","blob":""}""")
+    }
     private val keyExists = KeyExistsCb { devId ->
         if (devId?.getString(0)?.let(DeviceAuthCrypto::keyExists) == true) 1 else 0
     }

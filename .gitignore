@@ -89,3 +89,33 @@ lint/tmp/
 
 docs/*
 .DS_Store
+
+# ── Native runtime binaries ─────────────────────────────────────────────
+# Provisioned by `synheart install runtime`; never committed. The vendored
+# tree under example/ is ~1.8 GB, so an unguarded `git add .` is expensive.
+# Mirrors the ignore rules in the Flutter SDK.
+
+# Native shared libraries (loaded at runtime, not committed)
+*.so
+*.dylib
+
+# Host-side test runtime — synheart-core/build.gradle points
+# `jna.library.path` here.
+native/
+
+# Everything `synheart install runtime` drops into the example app — vendored
+# native runtimes, xcframeworks and the syni spec bundle. Machine-specific,
+# large, and re-fetched by the CLI, so the whole tree stays out rather than just
+# `vendor/`: a future CLI layout change should not start committing binaries.
+example/synheart/
+
+# ── Example app credentials ─────────────────────────────────────────────
+# Downloaded from platform.synheart.ai. The four ids are identifiers rather
+# than secrets, but they are organization-specific, so a populated file stays
+# local. Only the placeholder template is checked in — README and SETUP tell you
+# to copy it, so a fresh clone needs it present. Mirrors the Flutter SDK.
+# `example/env/*` and not `example/env/`: git never descends into an ignored
+# DIRECTORY, so a negation for a file inside one has no effect and the template
+# below would be ignored too.
+example/env/*
+!example/env/synheart.credentials.example.json

@@ -2,6 +2,7 @@ package ai.synheart.core.bridge
 
 import ai.synheart.auth.crypto.HardwareKeyManager
 import ai.synheart.auth.crypto.KeyManaging
+import ai.synheart.core.SynheartLogger
 import android.util.Base64
 import java.math.BigInteger
 
@@ -29,7 +30,27 @@ internal object DeviceAuthCrypto {
         }
         val coords = splitUncompressedPoint(pub)
         coords?.let { (x, y) -> "{\"x\":\"$x\",\"y\":\"$y\"}" }
+            // A non-null key with an unexpected encoding is a distinct failure
+            // from a key that could not be created, and both used to surface
+            // identically.
+            ?: run {
+                SynheartLogger.log(
+                    "[DeviceAuthCrypto] generateKey: public key was not an " +
+                        "uncompressed P-256 point (${pub.size} bytes); device auth " +
+                        "cannot proceed",
+                )
+                null
+            }
     } catch (e: Exception) {
+        // Never swallow this. The runtime can only report "platform crypto:
+        // null callback result", so without the cause here a Keystore refusal
+        // (no StrongBox, locked device, attestation unsupported) is
+        // indistinguishable from an unwired callback — and the two have
+        // completely different fixes.
+        SynheartLogger.log(
+            "[DeviceAuthCrypto] generateKey failed for device_id=$deviceId: " +
+                "${e::class.java.name}: ${e.message}",
+        )
         null
     }
 
@@ -40,12 +61,17 @@ internal object DeviceAuthCrypto {
         val der = keyManager.sign(data, deviceId)
         base64Url(derToRawRS(der))
     } catch (e: Exception) {
+        SynheartLogger.log(
+            "[DeviceAuthCrypto] sign failed for device_id=$deviceId: " +
+                "${e::class.java.name}: ${e.message}",
+        )
         null
     }
 
     fun keyExists(deviceId: String): Boolean = try {
         keyManager.hasKey(deviceId)
     } catch (e: Exception) {
+        SynheartLogger.log("[DeviceAuthCrypto] keyExists failed: ${e.message}")
         false
     }
 
@@ -53,6 +79,7 @@ internal object DeviceAuthCrypto {
         keyManager.deleteKey(deviceId)
         true
     } catch (e: Exception) {
+        SynheartLogger.log("[DeviceAuthCrypto] deleteKey failed: ${e.message}")
         false
     }
 

@@ -183,6 +183,16 @@ data class SleepScoreBreakdown(
     val vendorScore: Int? = null,
     val proxyHr: Int? = null,
 ) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("duration", duration ?: JSONObject.NULL)
+        put("quality", quality ?: JSONObject.NULL)
+        put("continuity", continuity ?: JSONObject.NULL)
+        put("consistency", consistency ?: JSONObject.NULL)
+        put("personalization", personalization ?: JSONObject.NULL)
+        put("vendor_score", vendorScore ?: JSONObject.NULL)
+        put("proxy_hr", proxyHr ?: JSONObject.NULL)
+    }
+
     companion object {
         fun fromJson(json: JSONObject): SleepScoreBreakdown = SleepScoreBreakdown(
             duration = optInt(json, "duration"),
@@ -200,6 +210,11 @@ data class SleepScoreAdjust(
     val debtPenalty: Int,
     val hrAdjustment: Int,
 ) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("debt_penalty", debtPenalty)
+        put("hr_adjustment", hrAdjustment)
+    }
+
     companion object {
         fun fromJson(json: JSONObject): SleepScoreAdjust = SleepScoreAdjust(
             debtPenalty = json.optInt("debt_penalty", 0),
@@ -215,6 +230,14 @@ data class ComponentWeights(
     val consistency: Double = 0.0,
     val personalization: Double = 0.0,
 ) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("duration", duration)
+        put("quality", quality)
+        put("continuity", continuity)
+        put("consistency", consistency)
+        put("personalization", personalization)
+    }
+
     companion object {
         fun fromJson(json: JSONObject): ComponentWeights = ComponentWeights(
             duration = json.optDouble("duration", 0.0),
@@ -242,6 +265,27 @@ data class SleepScoreResult(
     val modelId: String,
     val constantsHash: String,
 ) {
+    /**
+     * Serialize back to the runtime's wire shape. Symmetric with the serde
+     * representation on the Rust side, so a result read from the runtime can
+     * be handed straight back to `attachSleepScoreJson`.
+     */
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("score", score ?: JSONObject.NULL)
+        put("score_normalized", scoreNormalized ?: JSONObject.NULL)
+        put("confidence", confidence)
+        put("path", path.wire)
+        put("mode", mode.wire)
+        put("components", components.toJson())
+        put("adjustments", adjustments.toJson())
+        put("effective_weights", effectiveWeights.toJson())
+        put("reason", reason?.wire ?: JSONObject.NULL)
+        put("prior_night_count", priorNightCount)
+        put("pipeline_version", pipelineVersion)
+        put("model_id", modelId)
+        put("constants_hash", constantsHash)
+    }
+
     companion object {
         fun fromJson(json: JSONObject): SleepScoreResult = SleepScoreResult(
             score = optInt(json, "score"),

@@ -11,8 +11,55 @@ data class StorageConfig(
 
 /** Sync sub-configuration. */
 data class SyncConfig(
-    val enabled: Boolean = false
+    val enabled: Boolean = false,
+    /**
+     * Platform origin for sync + the runtime's cloud clients. Empty defers to
+     * [ApiEndpoints.resolvedAuthBaseUrl], and then to the runtime's own
+     * default — see [ApiEndpoints] on why nothing is baked in here.
+     */
+    val baseUrl: String = ""
 )
+
+/**
+ * Device-auth sub-configuration.
+ *
+ * Supplying this is what enables hardware-backed device identity: the runtime
+ * refuses a config with `device_auth.enabled` but no auth origin, so the
+ * absence of this object is how a local-only host opts out.
+ *
+ * Runtime-only policy: SDK layers must not perform outbound auth API calls
+ * directly.
+ */
+data class DeviceAuthConfig(
+    /** Base URL for the device auth service. */
+    val authBaseUrl: String,
+    /** Base URL for the capability token service. Defaults to [authBaseUrl]. */
+    val capabilityBaseUrl: String? = null,
+    /**
+     * The app's package id, used to bind device registration to the app.
+     * Optional; leave empty if not applicable.
+     */
+    val packageName: String = "",
+    /**
+     * **Development only.** Register the device even when the platform
+     * produces no attestation material (Play Integrity unavailable — an
+     * emulator, a de-Googled ROM, a sideloaded debug build).
+     *
+     * With this false (the default), such a device skips registration and runs
+     * local-only. With it true, the runtime submits the registration with
+     * `attestation.format = "none"` and an empty blob, and the **server**
+     * decides.
+     *
+     * This is **not** a security bypass. It only stops the client giving up
+     * early. Acceptance still requires development mode on this app's record
+     * in the Synheart dashboard; with that off, registration is refused
+     * server-side. Never enable it on a production app id — use a separate
+     * development app id.
+     */
+    val allowUnattestedDevRegistration: Boolean = false
+) {
+    val resolvedCapabilityBaseUrl: String get() = capabilityBaseUrl ?: authBaseUrl
+}
 
 /** Privacy sub-configuration. */
 data class PrivacyConfig(
@@ -45,13 +92,41 @@ data class SynheartConfig(
 
     val cloudConfig: CloudConfig? = null,
     val consentConfig: ConsentConfig? = null,
+    /**
+     * Hardware-backed device identity. Null leaves device auth disabled and
+     * the SDK local-only — see [DeviceAuthConfig].
+     */
+    val deviceAuthConfig: DeviceAuthConfig? = null,
     val labIngestConfig: LabIngestConfig? = null,
     /** Server-signed capability token for feature gating */
     val capabilityToken: ai.synheart.core.modules.capabilities.CapabilityToken? = null,
     /** HMAC secret for verifying the capability token signature */
     val capabilitySecret: String? = null,
     /** When true, allows SDK to run with default capabilities and no signed token (debug only) */
-    val allowUnsignedCapabilities: Boolean = false
+    val allowUnsignedCapabilities: Boolean = false,
+    /**
+     * **Development only.** Attach a synthetic biosignal generator when no real
+     * wear source is configured.
+     *
+     * Off by default, and that default is load-bearing. [WearModule] used to
+     * fall back to [ai.synheart.core.modules.wear.MockWearSourceHandler]
+     * whenever a host passed no sources — which on Android is always, since
+     * nothing in the SDK registers a real one. Its `isAvailable` is
+     * unconditionally true and it emits an invented heart rate and RMSSD every
+     * second.
+     *
+     * Those samples are not cosmetic. They reach `wearSampleStream`, where a
+     * host renders them as measurements, and they flow through
+     * `WearModuleBiosignalAdapter` into the session engine and the runtime's
+     * longitudinal baselines (SRM) — so a host that merely granted biosignals
+     * consent silently corrupted that user's real reference ranges with
+     * fabricated beats, on their actual device, with nothing on screen to
+     * indicate the data was invented.
+     *
+     * Enable it only to exercise the pipeline, never on a build that touches a
+     * real subject's baselines, and label it in any UI that shows the values.
+     */
+    val allowSyntheticBiosignals: Boolean = false
 ) {
     /** Validate config and throw on violations. */
     fun validate() {
@@ -84,7 +159,17 @@ data class SynheartConfig(
  * ```
  */
 data class CloudConfig(
-    val baseUrl: String = ApiEndpoints.DEFAULT_CLOUD_BASE_URL,
+    /**
+     * Ingest origin. Empty resolves through [ApiEndpoints.resolvedCloudBaseUrl]
+     * and then the runtime's own default; nothing is baked in here.
+     */
+    val baseUrl: String = "",
+    /**
+     * Organization id. Cloud ingest is only legal with a non-empty org id —
+     * the runtime rejects the whole configuration otherwise, so
+     * [buildRuntimeConfigMap] gates `ingest.*` on this being present.
+     */
+    val orgId: String = "",
     /**
      * Auth provider for request signing. The runtime signs every ingest
      * request with the device's hardware-backed ECDSA P-256 key; this is
@@ -117,7 +202,7 @@ data class CloudConfig(
  */
 data class ConsentConfig(
     /** Base URL for consent service */
-    val consentServiceUrl: String = ApiEndpoints.DEFAULT_CONSENT_BASE_URL,
+    val consentServiceUrl: String = "",
 
     /** App ID for consent service */
     val appId: String? = null,

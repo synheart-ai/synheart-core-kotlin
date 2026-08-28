@@ -18,7 +18,10 @@ enum class ConsentType {
     FOCUS_ESTIMATION,
     EMOTION_ESTIMATION,
     SYNI,
-    VENDOR_SYNC
+    VENDOR_SYNC,
+
+    /** Consent for research data export. */
+    RESEARCH
 }
 
 /** Snapshot of user consent at a point in time. */
@@ -31,10 +34,18 @@ data class ConsentSnapshot(
     val emotionEstimation: Boolean,
     val syni: Boolean,
     val vendorSync: Boolean = false,
+    /** Consent for research data export. */
+    val research: Boolean = false,
     val tier: ConsentTier = ConsentTier.LOCAL,
     val channels: ConsentChannels? = null,
     val timestamp: Instant = Instant.now(),
-    val version: String = "1.0.0"
+    val version: String = "1.0.0",
+    /**
+     * Whether the user explicitly declined, as opposed to never having been
+     * asked. Distinguishes "pending" from "denied" so a host can avoid
+     * re-prompting someone who already said no.
+     */
+    val explicitlyDenied: Boolean = false
 ) {
     fun allows(type: ConsentType): Boolean {
         return when (type) {
@@ -46,6 +57,7 @@ data class ConsentSnapshot(
             ConsentType.EMOTION_ESTIMATION -> emotionEstimation
             ConsentType.SYNI -> syni
             ConsentType.VENDOR_SYNC -> vendorSync
+            ConsentType.RESEARCH -> research
         }
     }
 
@@ -116,10 +128,12 @@ data class ConsentSnapshot(
         emotionEstimation: Boolean? = null,
         syni: Boolean? = null,
         vendorSync: Boolean? = null,
+        research: Boolean? = null,
         tier: ConsentTier? = null,
         channels: ConsentChannels? = this.channels,
         timestamp: Instant? = null,
-        version: String? = null
+        version: String? = null,
+        explicitlyDenied: Boolean? = null
     ): ConsentSnapshot {
         return ConsentSnapshot(
             biosignals = biosignals ?: this.biosignals,
@@ -130,10 +144,12 @@ data class ConsentSnapshot(
             emotionEstimation = emotionEstimation ?: this.emotionEstimation,
             syni = syni ?: this.syni,
             vendorSync = vendorSync ?: this.vendorSync,
+            research = research ?: this.research,
             tier = tier ?: this.tier,
             channels = channels,
             timestamp = timestamp ?: this.timestamp,
-            version = version ?: this.version
+            version = version ?: this.version,
+            explicitlyDenied = explicitlyDenied ?: this.explicitlyDenied
         )
     }
 
@@ -147,7 +163,8 @@ data class ConsentSnapshot(
                 focusEstimation = false,
                 emotionEstimation = false,
                 syni = false,
-                vendorSync = false
+                vendorSync = false,
+                research = false
             )
         }
 
@@ -160,7 +177,8 @@ data class ConsentSnapshot(
                 focusEstimation = true,
                 emotionEstimation = true,
                 syni = true,
-                vendorSync = true
+                vendorSync = true,
+                research = true
             )
         }
     }

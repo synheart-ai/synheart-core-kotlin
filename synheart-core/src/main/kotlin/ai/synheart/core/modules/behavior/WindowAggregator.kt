@@ -26,6 +26,11 @@ class WindowAggregator {
         }
     }
 
+    /** Drop every buffered event across all windows. */
+    fun clear() {
+        windows.clear()
+    }
+
     fun getEvents(window: WindowType): List<BehaviorEvent> {
         return windows[window]?.toList() ?: emptyList()
     }
