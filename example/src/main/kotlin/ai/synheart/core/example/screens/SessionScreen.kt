@@ -246,7 +246,89 @@ fun SessionScreen(c: SynheartController, padding: PaddingValues) {
             }
 
             item { SignalSources(c, running) }
+            item { WatchCard(c) }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/**
+ * Companion-watch session.
+ *
+ * Separate from the phone session above: the watch runs its own engine and
+ * computes its own metrics. This only relays a command out and events back, so
+ * a watch session can run whether or not the phone is collecting.
+ */
+@Composable
+private fun WatchCard(c: SynheartController) {
+    val status = c.watchStatus
+    val running = c.isWatchSessionRunning
+    SectionCard(
+        title = "Companion watch",
+        subtitle = "Runs a session on a paired Wear OS watch over the Wearable Data " +
+            "Layer. Needs the companion app installed on the watch — it owns the " +
+            "listener that answers the start command.",
+        trailing = {
+            StatusPill(
+                when {
+                    running -> "running"
+                    status == null -> "unknown"
+                    // Told apart on purpose: no transport at all is a different
+                    // problem from a transport with no watch on the end.
+                    !status.supported -> "unsupported"
+                    !status.reachable -> "no watch"
+                    else -> "ready"
+                },
+                when {
+                    running || status?.canStartSession == true -> PillTone.GOOD
+                    status == null -> PillTone.NEUTRAL
+                    else -> PillTone.WARN
+                },
+            )
+        },
+    ) {
+        Column {
+            if (status == null) {
+                Text(
+                    "Not queried yet — initialize the SDK first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                KeyValueRow("supported", "${status.supported}")
+                KeyValueRow("reachable", "${status.reachable}")
+                KeyValueRow("events received", "${c.watchEventCount}")
+                KeyValueRow("hr samples → engine", "${c.watchHrSampleCount}")
+                KeyValueRow("last event", c.lastWatchEvent ?: "—")
+            }
+
+            c.watchError?.let {
+                Spacer(Modifier.height(8.dp))
+                ErrorBanner(it)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { c.refreshWatchStatus() }) { Text("Refresh") }
+                if (running) {
+                    OutlinedButton(onClick = { c.stopWatchSession() }) { Text("Stop watch") }
+                } else {
+                    FilledTonalButton(
+                        onClick = { c.startWatchSession() },
+                        enabled = status?.canStartSession == true,
+                    ) { Text("Start on watch") }
+                }
+            }
+
+            if (status?.supported == true && status.reachable != true) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Play Services is present but no Wear OS node is connected. Pair " +
+                        "the watch and make sure the companion app is installed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

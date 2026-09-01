@@ -44,7 +44,7 @@ internal class ActivationManager {
      * Activate the features the config declares.
      *
      * Declaring a module config activates that feature; omitting it leaves the
-     * module inert. This matches `synheart-core-flutter`.
+     * module inert. This matches the sibling platform SDKs.
      *
      * Previously wear, phone and behavior were activated unconditionally,
      * ignoring the config. That gave a host no way to run one collector without

@@ -17,9 +17,8 @@ import kotlinx.coroutines.flow.merge
 /**
  * A real biosignal source, bridging `synheart-wear` into [WearModule].
  *
- * This is the Kotlin counterpart of the Flutter SDK's
- * `SynheartWearSourceHandler`, and it closes what was the largest functional gap
- * between the two: nothing in this SDK registered a wear source, so the only
+ * This closes what was the largest functional gap against the sibling platform
+ * SDKs: nothing here registered a wear source, so the only
  * one that ever ran was [MockWearSourceHandler] — invented data — and with that
  * correctly disabled the wear module had no source at all. Biosignals could only
  * arrive if the host pushed them itself through `pushWearHr` / `pushRr`.

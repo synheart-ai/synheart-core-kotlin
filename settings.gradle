@@ -23,6 +23,10 @@ include ':synheart-core'
 // `maven-publish` is applied only in :synheart-core.
 include ':example'
 
+// Wear OS companion for :example. Shares its applicationId because the Wearable
+// Data Layer only delivers between apps with the same package and signature.
+include ':example-watch'
+
 // Sibling SDK composite builds — only wire them in when the sibling checkout
 // exists next to this repo (local multi-repo workspace). In CI / fresh clones
 // the sibling dirs aren't present, so the corresponding Maven Central artifacts

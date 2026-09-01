@@ -2,7 +2,7 @@
 //
 // Public types for the HRV-CV resilience score.
 //
-// Mirror of `synheart-core-flutter/lib/src/resilience/synheart_resilience.dart`
+// Shared shape with the sibling platform SDKs' resilience surface
 // and `synheart-core-swift/.../SynheartResilience.swift`. All field
 // names are pinned to the runtime's `synheart-resilience` JSON shape.
 

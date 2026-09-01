@@ -18,7 +18,7 @@ data class WindowData(
     @SerialName("end_ms") val endMs: Long,
     // Default 30000 matches the canonical HSI window length and the
     // Swift sibling's default (HSIWindow.swift). Field added to keep
-    // the JSON wire shape byte-equivalent across Kotlin / Swift / Flutter.
+    // the JSON wire shape byte-equivalent across every platform SDK.
     @SerialName("window_size_ms") val windowSizeMs: Int = 30_000,
     val hsi: Map<String, JsonElement>
 )

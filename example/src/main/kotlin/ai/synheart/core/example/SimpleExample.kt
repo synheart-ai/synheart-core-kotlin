@@ -163,9 +163,9 @@ suspend fun simpleExample(context: Context, scope: CoroutineScope) {
             " runtime=" + Synheart.isRuntimeAvailable,
     )
 
-    // Behavior needs a host-side hook: unlike the Flutter SDK, there is no
-    // gesture-detector widget, so nothing observes taps until the host records
-    // them. Override `dispatchTouchEvent` on your activity:
+    // Behavior needs a host-side hook: Android has no view-tree hook, so
+    // nothing observes taps until the host records them. Override
+    // `dispatchTouchEvent` on your activity:
     //
     //   override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
     //     if (ev.actionMasked == MotionEvent.ACTION_DOWN) {

@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
  * Runs a session on a companion Wear OS watch.
  *
  * A thin adapter over `synheart-session`'s [WatchSessionRelay], mirroring the
- * Flutter SDK's `WatchSessionModule`. The session SDK stays standalone and
+ * sibling SDKs' watch session module. The session SDK stays standalone and
  * usable on its own; this only adds the lifecycle bookkeeping the facade needs
  * — a single active session, and a shared event stream that outlives any one
  * subscriber.
@@ -30,10 +30,20 @@ import kotlinx.coroutines.launch
 class WatchSessionModule(
     private val context: Context,
     private val scope: CoroutineScope,
+    /**
+     * Where a heart-rate sample from the watch goes.
+     *
+     * A callback rather than calling `Synheart.pushWearHr` directly: this module
+     * is owned by the facade, and reaching back up into it would make the
+     * dependency circular and untestable.
+     */
+    private val onHrSample: (timestampMs: Long, bpm: Double) -> Unit = { _, _ -> },
 ) {
 
     private var relay: WatchSessionRelay? = null
     private var activeSession: String? = null
+    private var relayJob: kotlinx.coroutines.Job? = null
+    private var hrJob: kotlinx.coroutines.Job? = null
 
     private val _events = MutableSharedFlow<SessionEvent>(
         // Replay so a screen that subscribes after the session started still
@@ -57,13 +67,31 @@ class WatchSessionModule(
     /** The running session's id, or null. */
     val activeSessionId: String? get() = activeSession
 
-    /** Create the relay. Safe to call repeatedly. */
+    /** Create the relay and start forwarding biosignals. Safe to call twice. */
     fun initialize() {
-        if (relay == null) {
-            relay = WatchSessionRelay(context)
-            SynheartLogger.log("[WatchSessionModule] Initialized")
+        if (relay != null) return
+        val r = WatchSessionRelay(context)
+        relay = r
+        SynheartLogger.log("[WatchSessionModule] Initialized")
+
+        // Collected for the module's lifetime, not per session: the watch is the
+        // only biosignal source here, and a sample that arrives between sessions
+        // still belongs in the engine's longitudinal baselines.
+        hrJob = scope.launch {
+            runCatching {
+                r.hrSamples().collect { sample ->
+                    hrSampleCount++
+                    onHrSample(sample.timestampMs, sample.bpm)
+                }
+            }.onFailure {
+                SynheartLogger.log("[WatchSessionModule] hr stream ended: ${it.message}")
+            }
         }
     }
+
+    /** How many watch heart-rate samples have been forwarded to the engine. */
+    var hrSampleCount: Int = 0
+        private set
 
     /**
      * Watch connectivity, or null before [initialize].
@@ -97,21 +125,41 @@ class WatchSessionModule(
                 "(mode: ${config.mode.value}, duration: ${config.durationSec}s)",
         )
 
-        scope.launch {
+        relayJob?.cancel()
+        relayJob = scope.launch {
             relayEvents(r.startSession(config), config.sessionId)
         }
         return events
     }
 
-    /** Stop the active session. No-op when none is running. */
+    /**
+     * Stop the active session. No-op when none is running.
+     *
+     * Clears the bookkeeping here rather than waiting for the relay's flow to
+     * complete. A stop command does not itself end that flow — only the watch's
+     * terminal event or the acknowledgement timeout does — so leaving it to the
+     * flow meant `isActive` stayed true after an explicit stop, the UI kept
+     * offering "Stop", and every later start was refused.
+     *
+     * The collector is cancelled too: a summary arriving after the user has
+     * already stopped belongs to a session nothing is showing any more.
+     */
     suspend fun stopSession() {
         val id = activeSession ?: return
         SynheartLogger.log("[WatchSessionModule] Stopping session $id")
-        relay?.stopSession(id)
+        runCatching { relay?.stopSession(id) }
+            .onFailure { SynheartLogger.log("[WatchSessionModule] stop failed: ${it.message}") }
+        relayJob?.cancel()
+        relayJob = null
+        activeSession = null
     }
 
     /** Release the relay. The module can be re-[initialize]d afterwards. */
     fun dispose() {
+        hrJob?.cancel()
+        hrJob = null
+        relayJob?.cancel()
+        relayJob = null
         activeSession = null
         relay = null
         SynheartLogger.log("[WatchSessionModule] Disposed")

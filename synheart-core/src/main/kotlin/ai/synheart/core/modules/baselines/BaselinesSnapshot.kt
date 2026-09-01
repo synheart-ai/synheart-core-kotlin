@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Typed aggregate of host-visible baseline state at a point in time.
-// Mirrors Flutter's `lib/src/modules/baselines/baselines_snapshot.dart`.
+// Shared baselines-snapshot shape across the platform SDKs.
 
 package ai.synheart.core.modules.baselines
 

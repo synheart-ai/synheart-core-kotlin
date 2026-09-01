@@ -65,9 +65,9 @@ data class DeviceAuthConfig(
  * Wear (biosignal) module configuration.
  *
  * Declaring this **activates** the wear feature — that is the load-bearing part,
- * matching `synheart-core-flutter`. The tuning fields below are carried for
- * parity and are not yet consumed by any collector in either SDK; they are here
- * so a config written against the Flutter SDK ports across unchanged.
+ * matching the sibling platform SDKs. The tuning fields below are carried for
+ * parity and are not yet consumed by any collector on any platform; they are
+ * here so a config written against another SDK ports across unchanged.
  */
 data class WearConfig(
     /** Enable high-frequency HRV sampling (requires extended capability). */
@@ -112,8 +112,8 @@ data class BehaviorConfig(
     /**
      * Enable on-device motion-state inference in `synheart-behavior`.
      *
-     * Carried for parity with the Flutter SDK; the Kotlin behavior module has no
-     * motion pipeline yet, so this currently changes nothing.
+     * Carried for cross-platform parity; this SDK's behavior module has no
+     * motion pipeline yet, so it currently changes nothing.
      */
     val enableMotionLite: Boolean = false,
     /**
@@ -158,11 +158,11 @@ data class SynheartConfig(
      * Per-module configuration. Declaring one **activates** that feature; a null
      * leaves the module inert.
      *
-     * This mirrors `synheart-core-flutter`, and is a change in behaviour: the
+     * This matches the sibling platform SDKs, and is a change in behaviour: the
      * activation manager previously turned wear, phone and behavior on
      * unconditionally, ignoring the config entirely, so a host had no way to run
      * (say) behavior alone. Passing none of the three keeps every collector off,
-     * which is also what the Flutter SDK does.
+     * which is also what the sibling SDKs do.
      */
     val wearConfig: WearConfig? = null,
     val phoneConfig: PhoneConfig? = null,

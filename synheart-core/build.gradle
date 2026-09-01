@@ -110,7 +110,21 @@ dependencies {
     // and accessed via CoreRuntimeBridge.
     implementation 'ai.synheart:synheart-wear:0.4.1'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
-    implementation 'ai.synheart:synheart-session:0.2.1'
+    // `api`, not `implementation`: session types are part of this SDK's public
+    // signature — `startWatchSession(SessionConfig)`, `watchSessionEvents:
+    // Flow<SessionEvent>`, `getWatchStatus(): WatchStatus?`. Behind
+    // `implementation` those types are off a consumer's compile classpath and
+    // the whole watch API is uncallable. The sibling platform SDKs re-export
+    // their session package for the same reason.
+    api 'ai.synheart:synheart-session:0.2.1'
+
+    // synheart-session declares these `compileOnly` so a phone-only consumer is
+    // not forced to ship Play Services. This SDK exposes the watch API, so it is
+    // the layer that must actually provide them — without them at runtime
+    // WatchSessionRelay throws NoClassDefFoundError on first use and every watch
+    // call silently reports "unsupported".
+    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
     implementation 'ai.synheart:synheart-auth:0.1.0'
 
     // Syni on-device agent SDK.

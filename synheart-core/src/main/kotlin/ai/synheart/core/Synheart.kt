@@ -379,7 +379,7 @@ object Synheart {
     }
 
     // The dedicated `sync` subsystem (push/pull) was removed from the Kotlin
-    // SDK to match Flutter's surface — uploads now go through the cloud
+    // SDK to match the shared surface — uploads now go through the cloud
     // module on its own schedule, gated by consent. Use the runtime bridge
     // directly if you need the raw FFI sync hooks (`coreRuntime.syncNow()`).
 
@@ -504,7 +504,7 @@ object Synheart {
             // Device-signing for outbound requests is owned by the cloud /
             // upload path (DeviceAuthProvider) directly against
             // SynheartAuth.shared — the consent module no longer carries
-            // a per-request signer hook, matching Flutter's surface.
+            // a per-request signer hook, matching the shared surface.
 
             // 3. Register modules
             moduleManager.registerModule(capabilityModule!!)
@@ -554,7 +554,15 @@ object Synheart {
             // its own session and applies its own, and nothing is collected on
             // this device. Registered outside moduleManager for the same reason
             // — it has no start/stop tied to a phone session.
-            watchSessionModule = WatchSessionModule(this.context!!, scope).apply { initialize() }
+            // Watch heart rate goes straight into the runtime, which is what
+            // gives HSI its physiology: the phone has no PPG, so without this
+            // every canonical axis stays at zero confidence however long the
+            // watch measures.
+            watchSessionModule = WatchSessionModule(
+                context = this.context!!,
+                scope = scope,
+                onHrSample = { tsMs, bpm -> pushWearHr(tsMs, bpm) },
+            ).apply { initialize() }
 
             moduleManager.registerModule(wearModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
@@ -2553,6 +2561,16 @@ object Synheart {
         return mod.startSession(config)
     }
 
+    /**
+     * Watch heart-rate samples forwarded into the engine.
+     *
+     * Worth surfacing separately from the session's event count: events prove
+     * the companion is talking, this proves the engine is being fed. The two
+     * fail independently — a companion can relay session events while its
+     * sensor reads nothing.
+     */
+    val watchHrSampleCount: Int get() = watchSessionModule?.hrSampleCount ?: 0
+
     /** Stop the active watch session. No-op when none is running. */
     suspend fun stopWatchSession() {
         watchSessionModule?.stopSession()
@@ -2777,8 +2795,8 @@ object Synheart {
 
     // ── Automatic interaction capture ────────────────────────────────────
     //
-    // The Android counterpart of the Flutter SDK's `wrapWithBehaviorDetector`.
-    // Flutter can wrap the widget tree; Android has no equivalent hook, so the
+    // The Android counterpart of the widget-tree gesture detector the sibling
+    // SDKs ship. Android has no equivalent hook, so the
     // host forwards its touch dispatch here and this derives the events.
     //
     // Without it every host reimplements the same gesture bookkeeping — and

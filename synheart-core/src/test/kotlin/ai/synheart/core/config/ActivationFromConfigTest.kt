@@ -12,7 +12,7 @@ import org.junit.Test
  * config entirely — so a host could not run one collector without the others,
  * and `deviceRole`, documented as controlling which modules are enabled, was
  * read by nothing. Declaring a module config now activates that feature, which
- * is the rule `synheart-core-flutter` has always used.
+ * is the rule the sibling platform SDKs have always used.
  */
 class ActivationFromConfigTest {
 

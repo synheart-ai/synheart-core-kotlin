@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Host-facing facade for typed baseline state — observable + sync
-// getters. Mirrors Flutter's `Baselines` static surface in
+// getters. Shared `Baselines` static surface, described in
 // `lib/src/modules/baselines/baselines.dart` (live `updates` stream +
 // `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore`
 // / `reference` getters), without the vendor-ingest orchestration
-// that lives on the Flutter SDK only.
+// that lives on the other platform SDKs only.
 //
-// The full Flutter `Baselines.ingestVendorSleep(...)` pipeline (Whoop /
+// The full `Baselines.ingestVendorSleep(...)` pipeline (Whoop /
 // Garmin / Apple Health / Health Connect → score → snapshot) is not
 // ported here — Kotlin/Swift hosts wire those ingest paths themselves
 // and call the `cache*` setters when results land. The facade owns

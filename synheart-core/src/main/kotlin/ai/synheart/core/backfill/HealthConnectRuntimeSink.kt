@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Health Connect (Android) historical-read backfill — Kotlin parallel to
-// Flutter's `lib/src/backfill/health_connect_runtime_sink.dart`.
+// the sibling platform SDKs' Health Connect backfill sink.
 //
-// Architecture mirrors Flutter:
+// Architecture, shared across the platform SDKs:
 //
 //   wear (synheart-wear-kotlin)               core (this file)
 //   ──────────────────────────                ──────────────────
@@ -42,13 +42,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 // NOTE on wiring: types live in synheart-wear-kotlin's
-// `ai.synheart.wear.backfill` package (matches Flutter, where
+// `ai.synheart.wear.backfill` package (matching the sibling SDKs, where
 // SleepNightSummary / OvernightPhysiologySummary live in synheart_wear).
 // Requires a synheart-wear-kotlin version that ships the
 // `ai.synheart.wear.backfill` package — bump the `ai.synheart:synheart-wear`
 // dependency in `synheart-core/build.gradle` once it's released.
 
-/** Outcome of a Health Connect historical pull. Mirrors Flutter's `HealthConnectBackfillResult`. */
+/** Outcome of a Health Connect historical pull. Shared shape across SDKs. */
 data class HealthConnectBackfillResult(
     val requestedDaysBack: Int,
     val daysIngested: Int,
@@ -133,7 +133,7 @@ class HealthConnectRuntimeSink(
                     dimensionsPushed++; dayDidPush = true
 
                     // Stage pushes are nested under the totalAsleep > 0 gate
-                    // (matches Flutter). A night with stages but zero asleep
+                    // (as the sibling SDKs do). A night with stages but zero asleep
                     // minutes is treated as no usable sleep data.
                     night.deepMinutes?.takeIf { it > 0 }?.let {
                         pushDaily("deep_sleep_min", dayIndex, it, 0.85, 1)
@@ -186,7 +186,7 @@ class HealthConnectRuntimeSink(
         /**
          * Default push routes through the runtime's `wearable_daily_values`
          * ingest batch. Each call enqueues a single-dimension batch — same
-         * per-(day, dimension) granularity as Flutter's `srmPushWearableDaily`.
+         * per-(day, dimension) granularity as `srmPushWearableDaily`.
          */
         fun defaultPushDaily(bridge: CoreRuntimeBridge?): PushDailyCallback =
             { dimension, dayIndex, value, confidence, fidelity ->
@@ -213,7 +213,7 @@ class HealthConnectRuntimeSink(
          * The runtime recomputes inline on each `wearable_daily_values`
          * ingest (see `recompute_from/to` in [defaultPushDaily]), so the
          * default trigger is a no-op. Kept as a hook for API parity with
-         * Flutter and for tests that want an end-of-backfill signal.
+         * the sibling SDKs and for tests wanting an end-of-backfill signal.
          */
         fun defaultTriggerRecompute(@Suppress("UNUSED_PARAMETER") bridge: CoreRuntimeBridge?): TriggerRecomputeCallback =
             { /* runtime recomputes inline via ingestBatch */ }

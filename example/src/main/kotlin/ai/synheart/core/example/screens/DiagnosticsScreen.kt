@@ -44,9 +44,8 @@ import androidx.compose.ui.unit.dp
  * and terrible for debugging, because a runtime one release behind silently
  * disables whole feature areas.
  *
- * The caveat is sharper on Kotlin than on Flutter: the bridge has no `probeAll`
- * equivalent, so the list only ever names symbols something already tried to
- * resolve. An empty list is therefore ambiguous — it means "nothing has failed
+ * The caveat is sharp here: the bridge has no `probeAll` equivalent, so the
+ * list only ever names symbols something already tried to resolve. An empty list is therefore ambiguous — it means "nothing has failed
  * *yet*", not "the runtime exports everything". Treat a non-empty list as
  * actionable and an empty one as unproven.
  */

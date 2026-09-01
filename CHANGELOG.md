@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wear, phone and behavior on unconditionally and ignored the config entirely, so
   a host could not run one collector without the others — and `deviceRole`,
   documented as controlling which modules are enabled, was read by nothing at
-  all. This is the rule `synheart-core-flutter` has always used.
+  all. This is the rule the sibling platform SDKs have always used.
 
   **A host that declares none of the three now collects nothing.** Add the module
   configs for the collectors you want. Activation is additionally intersected
@@ -136,21 +136,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Watch sessions: `startWatchSession`, `stopWatchSession`, `getWatchStatus`,
   `watchSessionEvents`, `isWatchSessionActive`, `activeWatchSessionId`**, backed
   by a new `WatchSessionModule`. Runs a session on a paired Wear OS watch over
-  the Wearable Data Layer, mirroring the Flutter facade.
+  the Wearable Data Layer, matching the shared facade.
 
   This needed `synheart-session` to publish the relay first: the implementation
-  existed only inside `synheart-session-flutter`'s Android plugin, which declares
-  no `maven-publish`, so it was compiled into a Flutter plugin AAR that nothing
+  existed only inside the cross-platform session plugin's Android module, which
+  declares no `maven-publish`, so it was compiled into a plugin AAR that nothing
   could depend on. See that repo's changelog.
+- **Watch heart rate reaches the engine.** `WatchSessionModule` forwards the
+  companion's samples into `pushWearHr`, so HSI has physiology on a phone that
+  has no PPG of its own — without it every canonical axis stays at zero
+  confidence however long the watch measures. `Synheart.watchHrSampleCount`
+  reports how many arrived, separately from the session's event count: the two
+  fail independently, since a companion can relay session events while its
+  sensor reads nothing.
 - **`Synheart.recordTouchEvent(MotionEvent)`** — the Android counterpart of the
-  Flutter SDK's `wrapWithBehaviorDetector`. Flutter wraps the widget tree;
-  Android has no equivalent hook, so a host forwards its `dispatchTouchEvent`
+  widget-tree gesture detector the sibling SDKs ship. Android has no equivalent
+  hook, so a host forwards its `dispatchTouchEvent`
   and this derives tap and scroll events. Every host previously reimplemented
   the same bookkeeping, including the part that is easy to get wrong: recording
   per `ACTION_MOVE` floods the aggregator, since one drag dispatches dozens.
 - **A real biosignal source on Android.** `SynheartWearSourceHandler` bridges
-  `synheart-wear` (already a dependency) into `WearModule`, mirroring the Flutter
-  SDK's handler of the same name. Nothing in this SDK previously registered a
+  `synheart-wear` (already a dependency) into `WearModule`, matching the wear
+  source handler the sibling SDKs ship. Nothing in this SDK previously registered a
   wear source, so the only one that ever ran was the synthetic generator — and
   with that correctly disabled the wear module had no source at all, leaving
   biosignals reachable only if the host pushed them itself. Attached when the
@@ -164,10 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `synheart-wear`'s `PermissionType`, which is not on a consumer's compile
   classpath.
 - **`WearConfig`, `PhoneConfig` and `BehaviorConfig`**, matching
-  `synheart-core-flutter`. Declaring one activates that feature. The tuning
+  the sibling platform SDKs. Declaring one activates that feature. The tuning
   fields (`sampleRateHz`, `motionSensitivity`, `enableGestureTracking`, …) are
   carried for parity and are not consumed by any collector in either SDK yet, so
-  a config written against the Flutter SDK ports across unchanged.
+  a config written against another platform SDK ports across unchanged.
 - **`SynheartConfig.runtimeLogEnvFilter`** — a `tracing` filter for the native
   runtime's own logs, applied by `initialize()` before any native work. Without
   it the runtime logs nowhere, so the lines that explain a stalled integration —
@@ -236,7 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SyniContextBuilder`** — projects live HSI plus session history into the
   Syni conditioning payload, skipping the heavy blocks for trivial messages.
 - **`doc/INTEGRATION.md`** — the ordered walkthrough from an empty project to a
-  device that uploads, ported from the Flutter SDK and adapted to Gradle,
+  device that uploads, adapted from the sibling SDKs to Gradle,
   `BuildConfig`, `jniLibs` and Play Integrity. Includes a symptom-keyed
   troubleshooting table and a pre-bug-report diagnostics checklist.
 - **`example/README.md` and `example/SETUP.md`** — what the example
@@ -250,8 +257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The README shipped `0.0.8` against a `0.1.0` build, so the documented
   dependency line was a version behind.
 - **Example-app credentials are read from `example/env/synheart.credentials.json`**
-  into `BuildConfig` — the Kotlin analogue of Flutter's
-  `--dart-define-from-file`. The key names match the credentials download from
+  into `BuildConfig`, read at configure time. The key names match the credentials download from
   platform.synheart.ai so it can be dropped in whole. Populated files are
   gitignored; only the template is checked in. A missing file leaves every
   field empty and the SDK local-only, so a fresh clone still builds. Previously
@@ -260,18 +266,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The example app packages the native runtime.** `:example` now points
   `jniLibs.srcDirs` at `example/synheart/vendor/runtime/android/jniLibs`
   (overridable via the `synheart.runtime.android.jniLibs` property), mirroring
-  the Flutter SDK. AGP reads only `src/main/jniLibs` by default, so the
+  the sibling SDKs. AGP reads only `src/main/jniLibs` by default, so the
   vendored `libsynheart_core_runtime.so` was present on disk but absent from
   the APK — every FFI call would have degraded to "native library not loaded".
 - **`.gitignore` now covers the vendored native binaries** (`*.so`, `*.dylib`,
-  `native/`, `example/synheart/vendor/`), matching the Flutter SDK. The
+  `native/`, `example/synheart/vendor/`), matching the sibling SDKs. The
   vendored tree is ~1.8 GB and was previously untracked but unignored, so a
   `git add .` would have tried to commit it.
 - **The example app is now a real Gradle module** (`:example`) that CI
   compiles. It was previously two loose source files nothing referenced, and
   had drifted out of sync with the SDK — `CanonicalExample` read
   `HSIState.hsiVersion` and `.observedAtUtc`, neither of which has ever existed
-  in either the Kotlin or the Flutter SDK. It is not published.
+  in any platform SDK. It is not published.
 - **`SYNHEART_CORE_VERSION`**, `BoundedBuffer`, `HsiDeliveryDeduper`,
   `MotionStateSnapshot`, `WearModuleStatus`, `HsiAxes`, and `SyncResult` /
   `SyncStatus`.

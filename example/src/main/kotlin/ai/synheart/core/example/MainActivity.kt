@@ -78,8 +78,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Feed real interaction into the SDK.
      *
-     * The Android counterpart of Flutter's `wrapWithBehaviorDetector`. It has to
-     * live on the activity: the Kotlin SDK ships no view-tree hook, so nothing
+     * Has to live on the activity: the SDK ships no view-tree hook, so nothing
      * observes taps unless the host dispatches them itself. Declaring the
      * behavior feature and granting behavior consent is not enough on its own.
      *
@@ -120,7 +119,7 @@ private fun SynheartExampleApp(controller: SynheartController) {
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     val scheme = remember(dark) {
         // Dynamic color where the platform offers it, so the example looks
-        // native; the seed pair is the fallback and matches the Flutter app.
+        // native; the seed pair is the fallback.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         } else {

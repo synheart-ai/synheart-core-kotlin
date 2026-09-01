@@ -86,7 +86,7 @@ These ship in the same artifact and are wired through the runtime, but only beco
 | **Syni** | Consent-gated facade around the [`ai.synheart.syni`](https://github.com/synheart-ai/syni-kotlin) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `ConsentType.SYNI` check. | `SyniModule(context, consent)` |
 | **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep_need` / `deep_sleep_min` / `rem_sleep_min` / `hrv_rmssd` / `resting_hr` per wake-day. | `HealthConnectRuntimeSink(reader, bridge)` |
 | **Scoring models** | Typed input + result classes for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.kt` |
-| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Swift siblings. | `modules/cloud/UploadModels.kt` |
+| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with the sibling platform SDKs. | `modules/cloud/UploadModels.kt` |
 
 Examples:
 
@@ -824,11 +824,10 @@ paths go untested locally unless you drop a desktop build of the runtime into
 
 This Android implementation is part of a multi-platform SDK:
 
-- **Flutter:** `synheart-core-flutter` (reference implementation)
-- **iOS:** `synheart-core-swift` (Swift implementation)
 - **Android:** `synheart-core-kotlin` (this repository)
+- **iOS:** `synheart-core-swift`
 
-All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
+The platform SDKs share the same modular architecture and wire format.
 
 ## Local Development with `synheart local`
 
@@ -890,7 +889,7 @@ Then add the two fields the download does not carry:
 
 `example/env/*.json` is gitignored apart from the template, so a populated file
 stays on your machine. The build reads it into `BuildConfig` — the Kotlin
-analogue of Flutter's `--dart-define-from-file`. A missing or partial file is
+read at configure time. A missing or partial file is
 fine: every field falls back to empty and the SDK runs local-only, so a fresh
 clone builds without anyone's organization ids.
 

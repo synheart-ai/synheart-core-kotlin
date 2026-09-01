@@ -16,6 +16,10 @@ import ai.synheart.core.config.WearConfig
 import ai.synheart.core.example.BuildConfig
 import ai.synheart.core.models.HSIState
 import ai.synheart.core.models.SessionHandle
+import ai.synheart.session.SessionConfig
+import ai.synheart.session.SessionErrorEvent
+import ai.synheart.session.SessionMode
+import ai.synheart.session.WatchStatus
 import ai.synheart.core.modules.behavior.BehaviorEvent
 import ai.synheart.core.modules.behavior.BehaviorEventType
 import ai.synheart.core.modules.consent.ConsentEffectiveState
@@ -77,8 +81,7 @@ class SynheartController : ViewModel() {
     // `synheart.credentials.example.json` is the checked-in template; a
     // populated file is gitignored, because it carries real organization
     // identifiers. Gradle reads it and surfaces the values as BuildConfig
-    // fields — the Kotlin analogue of Flutter's `--dart-define-from-file`.
-    // See SETUP.md.
+    // fields. See SETUP.md.
 
     companion object {
         private const val PREFS = "synheart.example"
@@ -120,12 +123,10 @@ class SynheartController : ViewModel() {
          * Optional per-service override for device auth, for a split
          * environment.
          *
-         * The Flutter SDK's equivalent pair is a footgun: setting only
-         * `SYNHEART_AUTH_URL` leaves consent and ingest on the runtime's own
-         * default, splitting one run across two hosts. That cannot happen here —
-         * [ApiEndpoints.resolvedAuthBaseUrl] falls back to [baseUrl], not to the
-         * runtime default, so naming one origin is enough and naming both is
-         * only for the genuinely split case.
+         * Naming one origin is enough: [ApiEndpoints.resolvedAuthBaseUrl] falls
+         * back to [baseUrl] rather than to the runtime's own default, so a build
+         * cannot accidentally split one run across two hosts by setting only
+         * half of the pair. Set both only for a genuinely split environment.
          */
         val authUrl: String = BuildConfig.SYNHEART_AUTH_URL
 
@@ -154,14 +155,13 @@ class SynheartController : ViewModel() {
          * Tenant and project identifiers, read so a credentials file can be
          * dropped in whole and the Setup screen can show what was supplied.
          *
-         * The SDK does **not** consume either one, and neither does the Flutter
-         * SDK — this is parity, not a Kotlin gap. `buildRuntimeConfigMap` emits
-         * `app_id` and `org_id` and no tenant or project key in either language,
-         * and `CloudConfig` has no field for them. The only `tenantId` in the
-         * codebase is on `DataDeletionRequest`, parsed *out of* a server
-         * response rather than sent in; `projectId` only appears on
-         * `CapabilityToken`, which the server signs. The Flutter SDK goes
-         * further and hardcodes `tenantId: ''` at its one internal call site.
+         * The SDK does **not** consume either one — and neither does any sibling
+         * platform SDK, so this is by design rather than a gap here.
+         * `buildRuntimeConfigMap` emits `app_id` and `org_id` and no tenant or
+         * project key, and `CloudConfig` has no field for them. The only
+         * `tenantId` in the codebase is on `DataDeletionRequest`, parsed *out of*
+         * a server response rather than sent in; `projectId` appears only on
+         * `CapabilityToken`, which the server signs.
          *
          * So setting them changes no behavior. They are read here only so a
          * credentials file can be dropped in whole and the Setup screen can say
@@ -204,10 +204,9 @@ class SynheartController : ViewModel() {
 
     // ── State the UI renders ───────────────────────────────────────────────
     //
-    // Compose `mutableStateOf` rather than a StateFlow bundle: the Flutter
-    // example uses one ChangeNotifier with plain fields, and mirroring that
-    // keeps the two readable side by side. Each read in a composable
-    // subscribes, so there is no notifyListeners() equivalent to forget.
+    // Compose `mutableStateOf` rather than a StateFlow bundle: plain fields read
+    // top-to-bottom, and each read in a composable subscribes on its own, so
+    // there is no change-notification call to forget.
 
     var subjectId: String? by mutableStateOf(null)
         private set
@@ -386,8 +385,8 @@ class SynheartController : ViewModel() {
 
         // Declaring a module config both activates the feature and tells the SDK
         // which collectors to wire. Omit one and that module never starts — the
-        // same rule as the Flutter SDK. All three are declared here so the
-        // Session screen can show what each contributes.
+        // All three are declared here so the Session screen can show what each
+        // contributes.
         wearConfig = WearConfig(),
         phoneConfig = PhoneConfig(),
         behaviorConfig = BehaviorConfig(),
@@ -492,6 +491,7 @@ class SynheartController : ViewModel() {
                 isInitialized = true
                 refreshConsent()
                 refreshWearPermissions()
+                refreshWatchStatus()
                 refreshAttestation()
                 pollAttestation()
             } catch (e: Exception) {
@@ -913,9 +913,8 @@ class SynheartController : ViewModel() {
      * Feed real interaction into the SDK from the activity's touch dispatch.
      *
      * Required for behavior collection. Activating the feature and granting
-     * behavior consent is not enough on its own — unlike the Flutter SDK, which
-     * ships a gesture-detector widget, the Kotlin SDK has no view-tree hook at
-     * all, so the host has to record events itself. Nothing is observed until
+     * behavior consent is not enough on its own — the SDK has no view-tree hook,
+     * so the host has to record events itself. Nothing is observed until
      * something calls this.
      *
      * Touches are a genuine signal, so recording them is safe — and interaction
@@ -929,12 +928,124 @@ class SynheartController : ViewModel() {
     fun recordTouch(event: MotionEvent) {
         // One call; the SDK derives the tap and scroll events.
         //
-        // This used to be ~25 lines of gesture bookkeeping here — the Android
-        // counterpart of Flutter's `wrapWithBehaviorDetector`, which every host
-        // had to reimplement. It now lives in the SDK, including the part that
+        // This used to be ~25 lines of gesture bookkeeping here, which every
+        // host had to reimplement. It now lives in the SDK, including the part that
         // is easy to get wrong: recording per ACTION_MOVE floods the aggregator,
         // since one drag dispatches dozens.
         Synheart.recordTouchEvent(event)
+    }
+
+    // ── Companion watch ────────────────────────────────────────────────────
+    //
+    // The watch runs its own session and computes its own metrics; the phone
+    // only relays commands out and events in. Nothing here derives anything.
+    //
+    // Needs the companion app (synheart-edge-watch-android) installed on the
+    // watch — it owns the listener that answers on /synheart/session/command.
+
+    var watchStatus: WatchStatus? by mutableStateOf(null)
+        private set
+    var watchEventCount: Int by mutableStateOf(0)
+        private set
+
+    /**
+     * Heart-rate samples the watch sent that reached the engine.
+     *
+     * The number that matters for HSI: session events only prove the companion
+     * is talking. Polled because the SDK counts them on a background collector
+     * with nothing to observe.
+     */
+    var watchHrSampleCount: Int by mutableStateOf(0)
+        private set
+    var lastWatchEvent: String? by mutableStateOf(null)
+        private set
+    var watchError: String? by mutableStateOf(null)
+        private set
+
+    private var watchJob: Job? = null
+
+    /**
+     * True while a session is running on the watch.
+     *
+     * Compose state, not a getter over `Synheart.isWatchSessionActive`: that is
+     * a plain field, so nothing recomposes when it changes. The card read it
+     * once and kept offering "Start on watch" against a session that was already
+     * running — and the start handler, which checks the live value, silently
+     * refused every tap.
+     */
+    var isWatchSessionRunning: Boolean by mutableStateOf(false)
+        private set
+
+    /** Re-read connectivity. Cheap, and the answer changes as the watch moves. */
+    fun refreshWatchStatus() {
+        if (!isInitialized) return
+        watchHrSampleCount = runCatching { Synheart.watchHrSampleCount }.getOrDefault(0)
+        viewModelScope.launch {
+            // Report the reason rather than collapsing every failure to null.
+            // A missing play-services-wearable throws NoClassDefFoundError here,
+            // and swallowing it left the card saying "not queried yet" forever
+            // with nothing to chase.
+            runCatching { Synheart.getWatchStatus() }
+                .onSuccess { watchStatus = it; watchError = null }
+                .onFailure { watchError = "${it::class.simpleName}: ${it.message}" }
+            syncWatchRunning()
+        }
+    }
+
+    /**
+     * Start a session on the watch.
+     *
+     * Subscribes before sending the command, so the watch's first event cannot
+     * arrive before anything is listening.
+     */
+    fun startWatchSession() {
+        if (!isInitialized || isWatchSessionRunning) return
+        watchError = null
+        watchEventCount = 0
+        lastWatchEvent = null
+
+        if (watchJob == null) {
+            watchJob = viewModelScope.launch {
+                Synheart.watchSessionEvents.collect { event ->
+                    watchEventCount++
+                    lastWatchEvent = event::class.simpleName
+                    // The relay reports failure as an event, not an exception —
+                    // an unanswered start arrives here as SessionErrorEvent.
+                    if (event is SessionErrorEvent) watchError = event.message
+                    syncWatchRunning()
+                    watchHrSampleCount = Synheart.watchHrSampleCount
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                Synheart.startWatchSession(
+                    SessionConfig(
+                        sessionId = "watch_${System.currentTimeMillis()}",
+                        mode = SessionMode.FOCUS,
+                        durationSec = WATCH_SESSION_SECONDS,
+                    ),
+                )
+            }.onFailure { watchError = it.message ?: it.toString() }
+            syncWatchRunning()
+            refreshWatchStatus()
+        }
+    }
+
+    /** Re-read the SDK's live flag into Compose state. */
+    private fun syncWatchRunning() {
+        isWatchSessionRunning = runCatching { Synheart.isWatchSessionActive }
+            .getOrDefault(false)
+    }
+
+    fun stopWatchSession() {
+        viewModelScope.launch {
+            runCatching { Synheart.stopWatchSession() }
+                .onFailure { watchError = it.message ?: it.toString() }
+            syncWatchRunning()
+            refreshWatchStatus()
+        }
     }
 
     // ── 4. Diagnostics ─────────────────────────────────────────────────────
@@ -943,9 +1054,9 @@ class SynheartController : ViewModel() {
      * Native runtime health.
      *
      * `missingSymbols` is the field worth understanding, and the caveat is
-     * bigger here than in the Flutter SDK: optional bindings resolve lazily and
-     * the Kotlin bridge has no `probeAll` equivalent, so the list only ever
-     * names symbols something already tried to use. An empty list on a screen
+     * sharp: optional bindings resolve lazily and the bridge has no `probeAll`
+     * equivalent, so the list only ever names symbols something already tried
+     * to use. An empty list on a screen
      * that called nothing means "nothing was checked", not "everything
      * resolved".
      */
@@ -1197,6 +1308,7 @@ class SynheartController : ViewModel() {
     }
 
     override fun onCleared() {
+        watchJob?.cancel()
         attestationPoll?.cancel()
         hsiJob?.cancel()
         wearJob?.cancel()
@@ -1228,6 +1340,9 @@ private fun JSONObject?.field(name: String): String? =
  * pipeline.
  */
 private const val SYNTHETIC_BIOSIGNALS = false
+
+/** Duration for the demo watch session. Short, so a test round-trips quickly. */
+private const val WATCH_SESSION_SECONDS = 120
 
 /** How often to re-read the attestation snapshot while it may still change. */
 private const val ATTESTATION_POLL_MS = 1_500L

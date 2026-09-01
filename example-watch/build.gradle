@@ -1,0 +1,62 @@
+// Wear OS companion for the phone example.
+//
+// It exists because of a Wearable Data Layer rule: a message is only delivered
+// to an app with the SAME package name AND signature on the other device. The
+// phone example is `ai.synheart.core.example`, so a companion under any other
+// id — `synheart-edge-watch-android`'s `ai.synheart.wear.watch`, say — can
+// never receive its commands. That shows up as:
+//
+//   WearableService: Failed to deliver message to AppKey[...];
+//     action=/synheart/session/command
+//
+// Hence the shared applicationId. The two never collide: one is installed on
+// the phone, the other on the watch.
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+    namespace 'ai.synheart.core.example.watch'
+    compileSdk 35
+
+    defaultConfig {
+        // Must match the phone example — see the note above.
+        applicationId 'ai.synheart.core.example'
+        minSdk 30          // Wear OS 3
+        targetSdk 35
+        versionCode 1
+        versionName project.version as String
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    // The session engine that actually runs the session on this device, plus
+    // the Data Layer transport for talking back to the phone.
+    implementation 'ai.synheart:synheart-session:0.2.1'
+    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation platform('androidx.compose:compose-bom:2024.09.03')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.activity:activity-compose:1.9.2'
+    implementation 'androidx.wear.compose:compose-material:1.4.0'
+
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+}

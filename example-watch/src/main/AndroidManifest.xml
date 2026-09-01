@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature android:name="android.hardware.type.watch" />
+    <!--
+      Both are needed, for different Wear OS generations.
+
+      On Wear OS 4+/Android 14 the platform gates `TYPE_HEART_RATE` behind the
+      Health Connect permission, not the legacy one — `dumpsys sensorservice`
+      shows it plainly:
+
+        Samsung HR None Wakeup Sensor | type: android.sensor.heart_rate(21)
+          | perm: android.permission.health.READ_HEART_RATE
+
+      With only BODY_SENSORS the listener registers with result=OK and then
+      never receives a value, which looks exactly like a wrist the watch cannot
+      read.
+    -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+
+    <application
+        android:label="Synheart Example (Watch)"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <uses-library android:name="com.google.android.wearable" android:required="false" />
+
+        <activity
+            android:name=".WatchActivity"
+            android:exported="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Receives session commands from the phone.
+
+          The path filter must match WatchSessionRelay.COMMAND_PATH exactly.
+          A WearableListenerService is started by the system on delivery, so the
+          watch app does not need to be running or ever have been opened.
+        -->
+        <service
+            android:name=".SessionCommandService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/synheart/session/command" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
