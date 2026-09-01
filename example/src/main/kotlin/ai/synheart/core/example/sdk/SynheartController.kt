@@ -2,13 +2,17 @@ package ai.synheart.core.example.sdk
 
 import ai.synheart.core.SYNHEART_CORE_VERSION
 import ai.synheart.core.Synheart
+import ai.synheart.core.SynheartLogger
 import ai.synheart.core.config.ApiEndpoints
 import ai.synheart.core.config.CloudConfig
+import ai.synheart.core.config.BehaviorConfig
 import ai.synheart.core.config.ConsentConfig
 import ai.synheart.core.config.DeviceAuthConfig
+import ai.synheart.core.config.PhoneConfig
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.config.SynheartFeature
 import ai.synheart.core.config.SynheartMode
+import ai.synheart.core.config.WearConfig
 import ai.synheart.core.example.BuildConfig
 import ai.synheart.core.models.HSIState
 import ai.synheart.core.models.SessionHandle
@@ -380,10 +384,19 @@ class SynheartController : ViewModel() {
         // verified consent token; running unsigned means "allow everything".
         allowUnsignedCapabilities = true,
 
-        // No per-module config objects here, unlike the Flutter SDK: the Kotlin
-        // SDK creates wear, phone and behavior unconditionally and activates
-        // them from the device role, so there is nothing to declare. Which
-        // modules ended up active is readable via Synheart.isActivated.
+        // Declaring a module config both activates the feature and tells the SDK
+        // which collectors to wire. Omit one and that module never starts — the
+        // same rule as the Flutter SDK. All three are declared here so the
+        // Session screen can show what each contributes.
+        wearConfig = WearConfig(),
+        phoneConfig = PhoneConfig(),
+        behaviorConfig = BehaviorConfig(),
+
+        // Surface the runtime's own logs. Without a filter the runtime logs
+        // nowhere, and the lines that explain a stalled integration — an
+        // unattestable device, a closed cloud gate, a failing ingest POST —
+        // simply do not exist.
+        runtimeLogEnvFilter = "info",
 
         // Left at its default of false. The wear module would otherwise attach a
         // generator that invents a heart rate every second and feeds it into the
@@ -461,22 +474,14 @@ class SynheartController : ViewModel() {
             try {
                 if (subjectId == null) loadIdentity(context)
 
-                // Route the RUNTIME's own logs to logcat before loading it.
+                // Runtime logging is requested through the config
+                // (`runtimeLogEnvFilter`), which initialize() applies before any
+                // native work so the runtime's own startup is covered.
                 //
-                // Opt-in, and easy to miss: without this the native runtime logs
-                // nowhere, so the lines that explain a stalled integration —
+                // `Synheart.initRuntimeLogging` remains available for a host that
+                // wants to change the filter later, or to capture lines into its
+                // own sink rather than logcat.
                 //
-                //   WARN device auth: no attestation material - device cannot
-                //        attest; skipping registration (local-only)
-                //   INFO ingest POST succeeded | url=… status_code=200
-                //
-                // — simply do not exist. The SDK's own `[Synheart]` lines still
-                // appear, which makes the silence look like "nothing happened"
-                // rather than "you never asked to be told".
-                //
-                // Before initialize, so the runtime's startup is covered too.
-                Synheart.initRuntimeLogging(envFilter = "info")
-
                 // The origin was already named in `init` — see the note there
                 // for why it cannot wait until this point.
                 Synheart.initialize(
@@ -486,6 +491,7 @@ class SynheartController : ViewModel() {
                 )
                 isInitialized = true
                 refreshConsent()
+                refreshWearPermissions()
                 refreshAttestation()
                 pollAttestation()
             } catch (e: Exception) {
@@ -807,17 +813,90 @@ class SynheartController : ViewModel() {
                     "running — the SDK starts every module on startSession() and " +
                     "then immediately stops the ones consent does not cover. " +
                     "Grant it on the Consent tab and restart the session."
+            !Synheart.hasWearSource ->
+                "No wear source is attached. Declare `wearConfig` in " +
+                    "SynheartConfig to have the SDK attach one, or push your own " +
+                    "readings with pushWearHr / pushRr / pushRrBatch. Synthetic " +
+                    "data is deliberately NOT substituted — see " +
+                    "SynheartConfig.allowSyntheticBiosignals."
+            !isWearPlatformAvailable ->
+                "A wear source is attached, but Health Connect is not available " +
+                    "on this device, so there is no store to read from. Install " +
+                    "Health Connect, pair a BLE strap, or push readings yourself. " +
+                    "This is not a permission problem — the platform returns no " +
+                    "permission state at all."
+            !hasWearPermissions ->
+                "The wear source is attached and Health Connect is present, but " +
+                    "heart rate and HRV are not granted, so every read comes back " +
+                    "empty. A manifest declaration is not a grant — tap " +
+                    "\"Grant health access\"."
             wearEmittingButEmpty ->
-                "The wear module is running and emitting, but every sample so far " +
-                    "is empty — no heart rate, no HRV, no RR intervals."
+                "The source is emitting and access is granted, but every sample " +
+                    "so far is empty — a wearable that is paired but silent, or " +
+                    "no wearable at all."
             else ->
-                "The wear module is running but has no source attached. This SDK " +
-                    "registers no real wear source on Android: biosignals arrive " +
-                    "either from a vendor SDK that supplies one, or from the host " +
-                    "calling pushWearHr / pushRr / pushRrBatch with its own " +
-                    "readings. Synthetic data is deliberately NOT substituted — " +
-                    "see SynheartConfig.allowSyntheticBiosignals."
+                "The source is attached and permitted, but has produced no sample " +
+                    "yet. Health Connect returns nothing until a wearable has " +
+                    "written data to it."
         }
+
+    /**
+     * Whether Health Connect has actually granted heart rate and HRV.
+     *
+     * Manifest declarations are not grants. Tracked as Compose state because the
+     * grant arrives from a system prompt, and the SDK's own getter is a plain
+     * call that would leave the screen stale.
+     */
+    var hasWearPermissions: Boolean by mutableStateOf(false)
+        private set
+
+    var isRequestingWearPermissions: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * Send the user to Health Connect to grant heart rate and HRV.
+     *
+     * Not `Synheart.requestWearPermissions()`: that cannot raise a prompt,
+     * because Health Connect grants go through an ActivityResultContract and
+     * synheart-wear keeps its contract internal. It returns the existing grants
+     * with no UI shown, which reads as "the user declined".
+     */
+    fun requestWearPermissions() {
+        if (isRequestingWearPermissions) return
+        isRequestingWearPermissions = true
+        val opened = runCatching {
+            Synheart.openHealthPermissionSettings(requireContext())
+        }.getOrDefault(false)
+        if (!opened) {
+            SynheartLogger.log("[example] Health Connect settings could not be opened")
+        }
+        isRequestingWearPermissions = false
+    }
+
+    /** Re-read grants after returning from the Health Connect screen. */
+    fun onResumed() {
+        if (isInitialized) refreshWearPermissions()
+    }
+
+    /**
+     * Whether Health Connect exists on this device at all.
+     *
+     * An absent store returns an EMPTY permission map rather than an all-false
+     * one, so without this a missing Health Connect looks identical to a user
+     * who declined — and the example would tell you to tap a grant button that
+     * cannot help.
+     */
+    var isWearPlatformAvailable: Boolean by mutableStateOf(false)
+        private set
+
+    /** Whether the SDK attached a real wear source (i.e. wearConfig was declared). */
+    val hasWearSource: Boolean get() = runCatching { Synheart.hasWearSource }.getOrDefault(false)
+
+    fun refreshWearPermissions() {
+        hasWearPermissions = runCatching { Synheart.hasWearPermissions }.getOrDefault(false)
+        isWearPlatformAvailable =
+            runCatching { Synheart.isWearPlatformAvailable }.getOrDefault(false)
+    }
 
     /**
      * True when this build asked for invented biosignals.
@@ -848,36 +927,14 @@ class SynheartController : ViewModel() {
      * cover, so this needs no gating of its own.
      */
     fun recordTouch(event: MotionEvent) {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN ->
-                Synheart.behaviorEvents?.recordTap(event.x.toDouble(), event.y.toDouble())
-            // Every ACTION_MOVE would flood the aggregator — a single drag
-            // dispatches dozens. Record one scroll per gesture, at the end,
-            // and only when the pointer actually travelled.
-            MotionEvent.ACTION_UP -> {
-                val delta = scrollDistance(event)
-                if (delta > SCROLL_THRESHOLD_PX) {
-                    Synheart.behaviorEvents?.recordScroll(delta)
-                }
-                touchDownX = null
-                touchDownY = null
-            }
-        }
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            touchDownX = event.x
-            touchDownY = event.y
-        }
-    }
-
-    private var touchDownX: Float? = null
-    private var touchDownY: Float? = null
-
-    private fun scrollDistance(event: MotionEvent): Double {
-        val x0 = touchDownX ?: return 0.0
-        val y0 = touchDownY ?: return 0.0
-        val dx = (event.x - x0).toDouble()
-        val dy = (event.y - y0).toDouble()
-        return kotlin.math.sqrt(dx * dx + dy * dy)
+        // One call; the SDK derives the tap and scroll events.
+        //
+        // This used to be ~25 lines of gesture bookkeeping here — the Android
+        // counterpart of Flutter's `wrapWithBehaviorDetector`, which every host
+        // had to reimplement. It now lives in the SDK, including the part that
+        // is easy to get wrong: recording per ACTION_MOVE floods the aggregator,
+        // since one drag dispatches dozens.
+        Synheart.recordTouchEvent(event)
     }
 
     // ── 4. Diagnostics ─────────────────────────────────────────────────────
@@ -1178,5 +1235,3 @@ private const val ATTESTATION_POLL_MS = 1_500L
 /** Ticks before giving up — a device that cannot attest never becomes registered. */
 private const val ATTESTATION_POLL_LIMIT = 20
 
-/** Below this, a touch is a tap rather than a scroll. */
-private const val SCROLL_THRESHOLD_PX = 24.0

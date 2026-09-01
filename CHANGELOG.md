@@ -102,6 +102,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle is freed.
 
 ### Changed
+- **BREAKING: module activation now follows the config.** Declaring
+  `wearConfig`, `phoneConfig` or `behaviorConfig` activates that feature;
+  omitting one leaves the module inert. `ActivationManager` previously turned
+  wear, phone and behavior on unconditionally and ignored the config entirely, so
+  a host could not run one collector without the others — and `deviceRole`,
+  documented as controlling which modules are enabled, was read by nothing at
+  all. This is the rule `synheart-core-flutter` has always used.
+
+  **A host that declares none of the three now collects nothing.** Add the module
+  configs for the collectors you want. Activation is additionally intersected
+  with `DeviceRole.supportedFeatures`, so a watch build cannot activate
+  phone-context or behavior collection just because a config object was passed.
 - **BREAKING: the SDK no longer ships a built-in API host.** `ApiEndpoints`
   resolves the platform origin from `ApiEndpoints.baseUrlOverride`, the
   `synheart.baseUrl` system property, or `SYNHEART_BASE_URL`, defaulting to
@@ -121,6 +133,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle.
 
 ### Added
+- **Watch sessions: `startWatchSession`, `stopWatchSession`, `getWatchStatus`,
+  `watchSessionEvents`, `isWatchSessionActive`, `activeWatchSessionId`**, backed
+  by a new `WatchSessionModule`. Runs a session on a paired Wear OS watch over
+  the Wearable Data Layer, mirroring the Flutter facade.
+
+  This needed `synheart-session` to publish the relay first: the implementation
+  existed only inside `synheart-session-flutter`'s Android plugin, which declares
+  no `maven-publish`, so it was compiled into a Flutter plugin AAR that nothing
+  could depend on. See that repo's changelog.
+- **`Synheart.recordTouchEvent(MotionEvent)`** — the Android counterpart of the
+  Flutter SDK's `wrapWithBehaviorDetector`. Flutter wraps the widget tree;
+  Android has no equivalent hook, so a host forwards its `dispatchTouchEvent`
+  and this derives tap and scroll events. Every host previously reimplemented
+  the same bookkeeping, including the part that is easy to get wrong: recording
+  per `ACTION_MOVE` floods the aggregator, since one drag dispatches dozens.
+- **A real biosignal source on Android.** `SynheartWearSourceHandler` bridges
+  `synheart-wear` (already a dependency) into `WearModule`, mirroring the Flutter
+  SDK's handler of the same name. Nothing in this SDK previously registered a
+  wear source, so the only one that ever ran was the synthetic generator — and
+  with that correctly disabled the wear module had no source at all, leaving
+  biosignals reachable only if the host pushed them itself. Attached when the
+  config declares `wearConfig`; Health Connect and BLE are enabled by default
+  since neither needs vendor credentials.
+- **`Synheart.requestWearPermissions()` / `wearPermissionStatus()` /
+  `hasWearPermissions`.** Health Connect gates reads behind a runtime prompt, so
+  a manifest declaration alone leaves the source polling an empty store forever —
+  every sample arrives carrying nothing, which is indistinguishable from a
+  paired-but-silent wearable. Keyed by permission name rather than
+  `synheart-wear`'s `PermissionType`, which is not on a consumer's compile
+  classpath.
+- **`WearConfig`, `PhoneConfig` and `BehaviorConfig`**, matching
+  `synheart-core-flutter`. Declaring one activates that feature. The tuning
+  fields (`sampleRateHz`, `motionSensitivity`, `enableGestureTracking`, …) are
+  carried for parity and are not consumed by any collector in either SDK yet, so
+  a config written against the Flutter SDK ports across unchanged.
+- **`SynheartConfig.runtimeLogEnvFilter`** — a `tracing` filter for the native
+  runtime's own logs, applied by `initialize()` before any native work. Without
+  it the runtime logs nowhere, so the lines that explain a stalled integration —
+  an unattestable device, a closed cloud gate, a failing ingest POST — do not
+  exist, and the silence reads as "nothing happened" rather than "you never asked
+  to be told".
+- **`SynheartConfig.batchIngestOnStop`** — config-level default for the existing
+  runtime property.
+- **`WearSourceType.HEALTH_CONNECT`.**
 - **`SynheartConfig.allowSyntheticBiosignals`** (default `false`) — opt-in for the
   synthetic wear generator. Development only: its samples enter the session engine
   and the runtime's SRM baselines exactly as real readings would, so it must never

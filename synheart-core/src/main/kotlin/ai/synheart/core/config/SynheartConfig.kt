@@ -61,6 +61,70 @@ data class DeviceAuthConfig(
     val resolvedCapabilityBaseUrl: String get() = capabilityBaseUrl ?: authBaseUrl
 }
 
+/**
+ * Wear (biosignal) module configuration.
+ *
+ * Declaring this **activates** the wear feature — that is the load-bearing part,
+ * matching `synheart-core-flutter`. The tuning fields below are carried for
+ * parity and are not yet consumed by any collector in either SDK; they are here
+ * so a config written against the Flutter SDK ports across unchanged.
+ */
+data class WearConfig(
+    /** Enable high-frequency HRV sampling (requires extended capability). */
+    val enableHighFrequencyHrv: Boolean = false,
+    /** Enable offline caching. */
+    val enableCaching: Boolean = true,
+    /** Sample rate in Hz. */
+    val sampleRateHz: Double = 1.0,
+)
+
+/**
+ * Phone-context module configuration.
+ *
+ * Declaring this activates the phone-context feature. As with [WearConfig], the
+ * tuning fields are parity carriers rather than live settings.
+ */
+data class PhoneConfig(
+    /** Enable motion tracking. */
+    val enableMotion: Boolean = true,
+    /** Enable screen state tracking. */
+    val enableScreenState: Boolean = true,
+    /** Enable app switching tracking (hashed). */
+    val enableAppTracking: Boolean = false,
+    /** Motion sensitivity, 0.0–1.0. */
+    val motionSensitivity: Double = 0.5,
+)
+
+/**
+ * Behavior module configuration.
+ *
+ * Declaring this activates the behavior feature. Note that activation is not
+ * sufficient on Android: the SDK has no view-tree hook, so a host must also
+ * record interaction itself — see `Synheart.behaviorEvents`.
+ */
+data class BehaviorConfig(
+    /** Enable gesture tracking. */
+    val enableGestureTracking: Boolean = true,
+    /** Enable typing pattern tracking. */
+    val enableTypingTracking: Boolean = true,
+    /** Minimum idle gap to record, in seconds. */
+    val minIdleGapSeconds: Double = 1.0,
+    /**
+     * Enable on-device motion-state inference in `synheart-behavior`.
+     *
+     * Carried for parity with the Flutter SDK; the Kotlin behavior module has no
+     * motion pipeline yet, so this currently changes nothing.
+     */
+    val enableMotionLite: Boolean = false,
+    /**
+     * Forward raw 50 Hz accelerometer samples into the engine runtime so it
+     * derives motion features and classifies posture.
+     *
+     * Independent of [enableMotionLite]. Also parity-only for now.
+     */
+    val emitRawMotionSamples: Boolean = false,
+)
+
 /** Privacy sub-configuration. */
 data class PrivacyConfig(
     val allowResearch: Boolean = false
@@ -89,6 +153,20 @@ data class SynheartConfig(
     val storage: StorageConfig = StorageConfig(),
     val sync: SyncConfig = SyncConfig(),
     val privacy: PrivacyConfig = PrivacyConfig(),
+
+    /**
+     * Per-module configuration. Declaring one **activates** that feature; a null
+     * leaves the module inert.
+     *
+     * This mirrors `synheart-core-flutter`, and is a change in behaviour: the
+     * activation manager previously turned wear, phone and behavior on
+     * unconditionally, ignoring the config entirely, so a host had no way to run
+     * (say) behavior alone. Passing none of the three keeps every collector off,
+     * which is also what the Flutter SDK does.
+     */
+    val wearConfig: WearConfig? = null,
+    val phoneConfig: PhoneConfig? = null,
+    val behaviorConfig: BehaviorConfig? = null,
 
     val cloudConfig: CloudConfig? = null,
     val consentConfig: ConsentConfig? = null,
@@ -126,7 +204,27 @@ data class SynheartConfig(
      * Enable it only to exercise the pipeline, never on a build that touches a
      * real subject's baselines, and label it in any UI that shows the values.
      */
-    val allowSyntheticBiosignals: Boolean = false
+    val allowSyntheticBiosignals: Boolean = false,
+
+    /**
+     * Flush the upload queue when a session stops.
+     *
+     * Null leaves the decision to the runtime's own upload cadence, which is the
+     * default. `Synheart.setBatchIngestOnStop` overrides this at runtime.
+     */
+    val batchIngestOnStop: Boolean? = null,
+
+    /**
+     * `tracing`-style filter for the native runtime's own logs, e.g. `"info"` or
+     * `"synheart_core_runtime=debug"`.
+     *
+     * Null leaves runtime logging off. Worth setting during integration: without
+     * it the runtime logs nowhere, so the lines that explain a stalled
+     * integration — an unattestable device, a closed cloud gate, a failing ingest
+     * POST — simply do not exist, and the silence reads as "nothing happened"
+     * rather than "you never asked to be told".
+     */
+    val runtimeLogEnvFilter: String? = null
 ) {
     /** Validate config and throw on violations. */
     fun validate() {

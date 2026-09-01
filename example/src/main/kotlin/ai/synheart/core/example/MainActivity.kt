@@ -93,6 +93,16 @@ class MainActivity : ComponentActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    /**
+     * Health Connect grants are made in another app, so the result arrives as a
+     * resume rather than a callback — re-read them here or the screen keeps
+     * showing "not permitted" after the user has just granted.
+     */
+    override fun onResume() {
+        super.onResume()
+        controller.onResumed()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // Only on a real teardown — isFinishing is false for a rotation, where

@@ -15,6 +15,7 @@ import org.json.JSONObject
 import ai.synheart.core.modules.interfaces.CapabilityLevel
 import ai.synheart.core.modules.interfaces.ConsentSnapshot
 import ai.synheart.core.modules.interfaces.Module
+import ai.synheart.core.modules.wear.SynheartWearSourceHandler
 import ai.synheart.core.modules.wear.WearModule
 import ai.synheart.core.modules.phone.PhoneModule
 import ai.synheart.core.modules.behavior.BehaviorModule
@@ -25,6 +26,7 @@ import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.modules.interfaces.WindowType
 import ai.synheart.core.modules.session.BehaviorModuleAdapter
 import ai.synheart.core.modules.session.SessionModule
+import ai.synheart.core.modules.session.WatchSessionModule
 import ai.synheart.core.modules.session.WearModuleBiosignalAdapter
 import ai.synheart.core.modules.wear.WearSample
 import ai.synheart.session.SessionConfig
@@ -472,6 +474,17 @@ object Synheart {
         try {
             SynheartLogger.log("[Synheart] Initializing...")
 
+            // Route the runtime's own logs wherever the host asked, before any
+            // native work. Opt-in and easy to miss: with no filter the runtime
+            // logs nowhere, so the lines that explain a stalled integration do
+            // not exist and the silence reads as "nothing happened".
+            (config ?: SynheartConfig()).runtimeLogEnvFilter
+                ?.takeIf { it.isNotBlank() }
+                ?.let { filter ->
+                    val rc = runCatching { initRuntimeLogging(filter) }.getOrDefault(-1)
+                    SynheartLogger.log("[Synheart] runtime logging filter='$filter' rc=$rc")
+                }
+
             // 1. Initialize capability module with token validation
             SynheartLogger.log("[Synheart] Initializing capability module...")
             capabilityModule = CapabilityModule()
@@ -499,9 +512,33 @@ object Synheart {
 
             // 4. Initialize data collection modules
             SynheartLogger.log("[Synheart] Initializing data modules...")
+            // Attach a REAL biosignal source when the host declared wearConfig.
+            //
+            // Until now nothing in this SDK registered one, so the wear module's
+            // only source was the synthetic generator — and with that correctly
+            // disabled it had no source at all, leaving biosignals reachable
+            // only through the host's own pushWearHr / pushRr calls.
+            // `synheart-wear` is already a dependency and ships the Health
+            // Connect and BLE adapters, so the bridge is all that was missing.
+            //
+            // Built only when wearConfig is declared: constructing SynheartWear
+            // touches Health Connect, which a host that never asked for
+            // biosignals should not pay for.
+            val wearSources = if (resolvedConfig.wearConfig != null) {
+                runCatching { listOf(SynheartWearSourceHandler(this.context!!)) }
+                    .onFailure {
+                        SynheartLogger.log(
+                            "[Synheart] could not attach the wear source: ${it.message}",
+                        )
+                    }
+                    .getOrNull()
+            } else {
+                null
+            }
             wearModule = WearModule(
                 capabilities = capabilityModule!!,
                 consent = consentModule!!,
+                sources = wearSources,
                 allowSynthetic = resolvedConfig.allowSyntheticBiosignals,
             )
             phoneModule = PhoneModule(
@@ -512,6 +549,12 @@ object Synheart {
                 capabilities = capabilityModule!!,
                 consent = consentModule!!
             )
+
+            // The watch relay needs no consent gate of its own: the watch runs
+            // its own session and applies its own, and nothing is collected on
+            // this device. Registered outside moduleManager for the same reason
+            // — it has no start/stop tied to a phone session.
+            watchSessionModule = WatchSessionModule(this.context!!, scope).apply { initialize() }
 
             moduleManager.registerModule(wearModule!!, dependsOn = listOf("capabilities", "consent"))
             moduleManager.registerModule(phoneModule!!, dependsOn = listOf("capabilities", "consent"))
@@ -542,6 +585,12 @@ object Synheart {
             activationManager!!.activateFromConfig(resolvedConfig)
 
             synheartConfig = resolvedConfig
+
+            // Config supplies the default; setBatchIngestOnStop still overrides
+            // it at runtime.
+            if (batchIngestOnStop == null) {
+                batchIngestOnStop = resolvedConfig.batchIngestOnStop
+            }
 
             // 9. Attach WearableEventProcessor (bridge wired after coreRuntime init)
             if (wearModule != null) {
@@ -1331,6 +1380,11 @@ object Synheart {
             hsiToSessionJob = null
             activeMainSessionId = null
             sessionModule = null
+            // Releases the relay, which unregisters the Data Layer listener.
+            // Left dangling it would hold this Context and keep receiving watch
+            // events into a module nothing reads.
+            watchSessionModule?.dispose()
+            watchSessionModule = null
 
             currentSessionHandle = null
             synheartConfig = null
@@ -2448,6 +2502,165 @@ object Synheart {
     @get:JvmName("wearModule")
     val wearModulePublic: WearModule? get() = wearModule
 
+    // ══════════════════════════════════════════════════════════════════ //
+    // Watch session API                                                   //
+    //                                                                     //
+    // Runs a session on a paired Wear OS watch. The watch owns the session //
+    // and computes the metrics; the phone only relays commands and events. //
+    // ══════════════════════════════════════════════════════════════════ //
+
+    private var watchSessionModule: WatchSessionModule? = null
+
+    /** Whether a watch session is currently running. */
+    val isWatchSessionActive: Boolean get() = watchSessionModule?.isActive ?: false
+
+    /** The active watch session's id, if any. */
+    val activeWatchSessionId: String? get() = watchSessionModule?.activeSessionId
+
+    /**
+     * Events from the active watch session.
+     *
+     * `SessionStarted` → `SessionFrame*` → `SessionSummary`; each frame carries
+     * the HR metrics the watch computed. Empty before [initialize] rather than
+     * throwing, so a host can subscribe during composition.
+     */
+    val watchSessionEvents: Flow<ai.synheart.session.SessionEvent>
+        get() = watchSessionModule?.events ?: kotlinx.coroutines.flow.emptyFlow()
+
+    /**
+     * Watch connectivity, or null before [initialize].
+     *
+     * Null means this SDK was never initialized; a returned
+     * `WatchStatus(supported = false)` means the device has no watch transport
+     * at all. Worth telling apart — the first is a wiring mistake, the second is
+     * the hardware.
+     */
+    suspend fun getWatchStatus(): ai.synheart.session.WatchStatus? =
+        watchSessionModule?.getWatchStatus()
+
+    /**
+     * Start a session on the companion watch.
+     *
+     * @throws IllegalStateException before [initialize], or when a watch session
+     *   is already running.
+     */
+    fun startWatchSession(
+        config: ai.synheart.session.SessionConfig,
+    ): Flow<ai.synheart.session.SessionEvent> {
+        val mod = checkNotNull(watchSessionModule) {
+            "Synheart must be initialized before starting a watch session"
+        }
+        return mod.startSession(config)
+    }
+
+    /** Stop the active watch session. No-op when none is running. */
+    suspend fun stopWatchSession() {
+        watchSessionModule?.stopSession()
+    }
+
+    /**
+     * The real biosignal source, when one is attached.
+     *
+     * Present only when the config declared `wearConfig`; null otherwise, and
+     * null when the host is driving biosignals itself through [pushWearHr] /
+     * [pushRr].
+     */
+    private val wearSourceHandler: SynheartWearSourceHandler?
+        get() = wearModule?.attachedSources
+            ?.filterIsInstance<SynheartWearSourceHandler>()
+            ?.firstOrNull()
+
+    /**
+     * Whether a real biosignal source is attached.
+     *
+     * False when the config declared no `wearConfig`, or when the source failed
+     * to construct. Distinct from "no samples yet": an attached source that is
+     * emitting nothing is a permission or availability problem, not a wiring
+     * one, and the two have completely different fixes.
+     */
+    val hasWearSource: Boolean get() = wearSourceHandler != null
+
+    /**
+     * Whether the platform health store can be queried at all.
+     *
+     * False when Health Connect is not installed — the permission map comes back
+     * empty rather than all-false, so an absent store is otherwise
+     * indistinguishable from a store that simply denied everything.
+     */
+    val isWearPlatformAvailable: Boolean get() = wearPermissionStatus().isNotEmpty()
+
+    /**
+     * Ask `synheart-wear` to request the health permissions.
+     *
+     * **This cannot show a prompt on Health Connect today.** Health Connect
+     * grants are driven by an `ActivityResultContract`, and synheart-wear keeps
+     * its contract `internal` — so the call resolves without any UI appearing
+     * and returns the grants as they already stood. A host that treats the
+     * returned map as "the user answered" will conclude they declined.
+     *
+     * Use [openHealthPermissionSettings] instead until synheart-wear publishes
+     * its contract, or register Health Connect's own
+     * `PermissionController.createRequestPermissionResultContract()` in your
+     * Activity.
+     *
+     * Returns the grant map, empty when no wear source is attached.
+     */
+    suspend fun requestWearPermissions(): Map<String, Boolean> =
+        wearSourceHandler?.requestPermissions()?.mapKeys { it.key.name } ?: emptyMap()
+
+    /**
+     * Open Health Connect's permission screen for this app.
+     *
+     * The working grant path on Android today, and the reason it exists here:
+     * manifest declarations are not grants, Health Connect gates reads behind a
+     * user decision, and [requestWearPermissions] cannot raise that decision
+     * itself. Without a grant the wear source polls an empty store forever and
+     * every sample arrives carrying nothing — indistinguishable from a
+     * paired-but-silent wearable.
+     *
+     * Returns false when Health Connect is not present to open, so a caller can
+     * say so rather than appearing to do nothing.
+     */
+    fun openHealthPermissionSettings(context: Context): Boolean {
+        val intent = android.content.Intent(ACTION_MANAGE_HEALTH_PERMISSIONS)
+            .putExtra(android.content.Intent.EXTRA_PACKAGE_NAME, context.packageName)
+            // Callable from a non-Activity context (a ViewModel, say).
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }
+            .onFailure {
+                SynheartLogger.log(
+                    "[Synheart] could not open Health Connect permissions: ${it.message}",
+                )
+            }
+            .isSuccess
+    }
+
+    /**
+     * Health Connect's per-app permission screen.
+     *
+     * Declared here rather than taken from `androidx.health.connect` so this
+     * does not add a dependency for one string constant.
+     */
+    private const val ACTION_MANAGE_HEALTH_PERMISSIONS =
+        "android.health.connect.action.MANAGE_HEALTH_PERMISSIONS"
+
+    /**
+     * Current health-permission grants, without prompting.
+     *
+     * Keyed by permission NAME rather than `synheart-wear`'s `PermissionType`:
+     * that library is an `implementation` dependency, so its types are not on a
+     * consumer's compile classpath and returning one would make this method
+     * uncallable from a host that does not itself depend on synheart-wear.
+     */
+    fun wearPermissionStatus(): Map<String, Boolean> =
+        wearSourceHandler?.permissionStatus()?.mapKeys { it.key.name } ?: emptyMap()
+
+    /** True when heart rate and HRV are both readable. */
+    val hasWearPermissions: Boolean
+        get() = wearPermissionStatus().let { st ->
+            st.isNotEmpty() && st.values.all { it }
+        }
+
     /**
      * Live stream of raw wear samples. Empty before [initialize] rather than
      * throwing, so a host can subscribe during composition and have it start
@@ -2561,6 +2774,77 @@ object Synheart {
      */
     val behaviorEventStream: Flow<ai.synheart.core.modules.behavior.BehaviorEvent>
         get() = behaviorModule?.eventStreamInstance?.events ?: kotlinx.coroutines.flow.emptyFlow()
+
+    // ── Automatic interaction capture ────────────────────────────────────
+    //
+    // The Android counterpart of the Flutter SDK's `wrapWithBehaviorDetector`.
+    // Flutter can wrap the widget tree; Android has no equivalent hook, so the
+    // host forwards its touch dispatch here and this derives the events.
+    //
+    // Without it every host reimplements the same gesture bookkeeping — and
+    // getting it wrong is easy in one specific way: recording every ACTION_MOVE
+    // floods the aggregator, because a single drag dispatches dozens.
+
+    private var touchDownX: Float = 0f
+    private var touchDownY: Float = 0f
+    private var touchTracking = false
+
+    /**
+     * Derive behavior events from an Android touch dispatch.
+     *
+     * Forward every event from your activity and nothing else is required:
+     *
+     * ```kotlin
+     * override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+     *     Synheart.recordTouchEvent(ev)
+     *     return super.dispatchTouchEvent(ev)
+     * }
+     * ```
+     *
+     * Records one tap on press, and at most one scroll per gesture — measured
+     * from press to release, and only when the pointer actually travelled past
+     * [TOUCH_SCROLL_THRESHOLD_PX]. Recording per ACTION_MOVE instead would emit
+     * dozens of events for one drag and swamp the interaction window.
+     *
+     * A no-op before [initialize], and the behavior module drops what consent
+     * does not cover, so this needs no gating of its own. Safe to call from the
+     * UI thread: it only appends to a buffered flow.
+     *
+     * Touches are a genuine signal, so recording them is safe — and interaction
+     * alone is enough to ground the HSI digital axes. Contrast the biosignal
+     * push APIs, which must never carry invented readings.
+     */
+    fun recordTouchEvent(event: android.view.MotionEvent) {
+        val sink = behaviorEvents ?: return
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                touchTracking = true
+                sink.recordTap(event.x.toDouble(), event.y.toDouble())
+            }
+
+            android.view.MotionEvent.ACTION_UP -> {
+                if (touchTracking) {
+                    val dx = (event.x - touchDownX).toDouble()
+                    val dy = (event.y - touchDownY).toDouble()
+                    val travelled = kotlin.math.sqrt(dx * dx + dy * dy)
+                    if (travelled > TOUCH_SCROLL_THRESHOLD_PX) {
+                        sink.recordScroll(travelled)
+                    }
+                }
+                touchTracking = false
+            }
+
+            // A gesture the system took over — a parent view claiming the
+            // pointer, say. No release will arrive, so drop the tracking rather
+            // than attributing the next ACTION_UP's distance to this press.
+            android.view.MotionEvent.ACTION_CANCEL -> touchTracking = false
+        }
+    }
+
+    /** Below this travel, in pixels, a touch is a tap rather than a scroll. */
+    const val TOUCH_SCROLL_THRESHOLD_PX: Double = 24.0
 
     /**
      * The behavior event sink. Call `recordTap`, `recordScroll`, and friends

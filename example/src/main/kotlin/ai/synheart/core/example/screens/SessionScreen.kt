@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material3.HorizontalDivider
@@ -262,9 +263,15 @@ private fun SignalSources(c: SynheartController, running: Boolean) {
                 when {
                     c.hasBiosignalSource && c.usesSyntheticBiosignals -> "SYNTHETIC"
                     c.hasBiosignalSource -> "receiving"
-                    c.wearEmittingButEmpty -> "empty samples"
                     c.consentState?.biosignals != true -> "not consented"
-                    else -> "no source"
+                    !c.hasWearSource -> "no source"
+                    // Attached but with nothing behind it. Reporting "no source"
+                    // here sent you looking for a wiring bug when the source is
+                    // wired and the platform store is simply absent.
+                    !c.isWearPlatformAvailable -> "no health store"
+                    !c.hasWearPermissions -> "not permitted"
+                    c.wearEmittingButEmpty -> "empty samples"
+                    else -> "no data yet"
                 },
                 when {
                     // Loud, not green: invented numbers must never read as a
@@ -340,6 +347,29 @@ private fun SignalSources(c: SynheartController, running: Boolean) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(8.dp))
+                }
+                // Offered whenever the grant is missing. Health Connect gates
+                // reads behind a runtime prompt, so a manifest declaration alone
+                // leaves the source polling an empty store forever.
+                // Only when Health Connect is present: prompting on a device
+                // without it opens nothing and teaches the wrong fix.
+                if (c.isWearPlatformAvailable && !c.hasWearPermissions) {
+                    OutlinedButton(
+                        onClick = { c.requestWearPermissions() },
+                        enabled = !c.isRequestingWearPermissions,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.HealthAndSafety, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            if (c.isRequestingWearPermissions) {
+                                "Requesting…"
+                            } else {
+                                "Grant health access"
+                            },
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 Text(

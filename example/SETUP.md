@@ -35,9 +35,15 @@ SynheartConfig(
   // Development only. Production gates capabilities on a verified consent token.
   allowUnsignedCapabilities = true,
 
-  // No per-module configs, unlike the Flutter SDK: the Kotlin SDK creates wear,
-  // phone and behavior unconditionally and activates them from the device role.
-  // Read back which ended up active with Synheart.isActivated(...).
+  // Declaring a module config activates that feature; omitting one leaves that
+  // module inert. Read back what ended up active with Synheart.isActivated(...).
+  wearConfig = WearConfig(),
+  phoneConfig = PhoneConfig(),
+  behaviorConfig = BehaviorConfig(),
+
+  // Surfaces the runtime's own logs. Without a filter the runtime logs nowhere,
+  // so the lines explaining a stalled integration simply do not exist.
+  runtimeLogEnvFilter = "info",
 
   // Required for the runtime consent-form flow — consentSubmitFormTyped needs a
   // non-empty deviceId and platform, or consent can never be written.

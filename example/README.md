@@ -130,6 +130,9 @@ tree; the four tabs, the cards, and the copy are the same.
   none is. Source state comes from `isFeatureOperational`, not
   `isWearCollecting` — the latter tracks only the granular per-module API and
   reads false after a plain `startSession()`.
+- **Per-module configs gate activation.** Declaring `wearConfig`, `phoneConfig`
+  or `behaviorConfig` activates that feature; omitting one leaves the module
+  inert, the same rule as the Flutter SDK. This example declares all three.
 - **Behavior capture is the host's job** — the Kotlin SDK ships no gesture
   detector, so `MainActivity.dispatchTouchEvent` records taps and scrolls
   through `Synheart.behaviorEvents`. Activating the feature and granting consent
