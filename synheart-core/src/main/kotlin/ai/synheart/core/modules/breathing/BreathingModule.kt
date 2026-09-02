@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // High-level Kotlin wrapper around the native breathing compliance
-// detector. Mirrors the Flutter reference at
+// detector. Shared shape with the sibling SDKs at
 // `lib/src/modules/breathing/breathing_module.dart`.
 //
 // All RR samples pushed via [CoreRuntimeBridge.pushRr] (i.e. Tier-1

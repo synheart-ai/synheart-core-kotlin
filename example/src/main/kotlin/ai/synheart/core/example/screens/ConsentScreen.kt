@@ -196,9 +196,8 @@ fun ConsentScreen(c: SynheartController, padding: PaddingValues) {
             }
 
             item {
-                // The Kotlin SDK draws a distinction the Flutter one does not
-                // surface as prominently, and it is the usual cause of "consent
-                // says granted but nothing collects": hasConsent() answers
+                // A distinction worth surfacing, and the usual cause of
+                // "consent says granted but nothing collects": hasConsent() answers
                 // whether a channel is ENFORCEABLE right now, which a
                 // cloud-configured app reads as false until the consent service
                 // issues a token, whatever the user chose.

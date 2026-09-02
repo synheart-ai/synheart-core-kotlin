@@ -5,7 +5,7 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-02
 
 ### Fixed
 - **Every behavior event was silently dropped.** `BehaviorEventStream` backed its
@@ -102,6 +102,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle is freed.
 
 ### Changed
+- **BREAKING: module activation now follows the config.** Declaring
+  `wearConfig`, `phoneConfig` or `behaviorConfig` activates that feature;
+  omitting one leaves the module inert. `ActivationManager` previously turned
+  wear, phone and behavior on unconditionally and ignored the config entirely, so
+  a host could not run one collector without the others — and `deviceRole`,
+  documented as controlling which modules are enabled, was read by nothing at
+  all. This is the rule the sibling platform SDKs have always used.
+
+  **A host that declares none of the three now collects nothing.** Add the module
+  configs for the collectors you want. Activation is additionally intersected
+  with `DeviceRole.supportedFeatures`, so a watch build cannot activate
+  phone-context or behavior collection just because a config object was passed.
 - **BREAKING: the SDK no longer ships a built-in API host.** `ApiEndpoints`
   resolves the platform origin from `ApiEndpoints.baseUrlOverride`, the
   `synheart.baseUrl` system property, or `SYNHEART_BASE_URL`, defaulting to
@@ -121,6 +133,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle.
 
 ### Added
+- **Watch sessions: `startWatchSession`, `stopWatchSession`, `getWatchStatus`,
+  `watchSessionEvents`, `isWatchSessionActive`, `activeWatchSessionId`**, backed
+  by a new `WatchSessionModule`. Runs a session on a paired Wear OS watch over
+  the Wearable Data Layer, matching the shared facade.
+
+  This needed `synheart-session` to publish the relay first: the implementation
+  existed only inside the cross-platform session plugin's Android module, which
+  declares no `maven-publish`, so it was compiled into a plugin AAR that nothing
+  could depend on. See that repo's changelog.
+- **Watch heart rate reaches the engine.** `WatchSessionModule` forwards the
+  companion's samples into `pushWearHr`, so HSI has physiology on a phone that
+  has no PPG of its own — without it every canonical axis stays at zero
+  confidence however long the watch measures. `Synheart.watchHrSampleCount`
+  reports how many arrived, separately from the session's event count: the two
+  fail independently, since a companion can relay session events while its
+  sensor reads nothing.
+- **`Synheart.recordTouchEvent(MotionEvent)`** — the Android counterpart of the
+  widget-tree gesture detector the sibling SDKs ship. Android has no equivalent
+  hook, so a host forwards its `dispatchTouchEvent`
+  and this derives tap and scroll events. Every host previously reimplemented
+  the same bookkeeping, including the part that is easy to get wrong: recording
+  per `ACTION_MOVE` floods the aggregator, since one drag dispatches dozens.
+- **A real biosignal source on Android.** `SynheartWearSourceHandler` bridges
+  `synheart-wear` (already a dependency) into `WearModule`, matching the wear
+  source handler the sibling SDKs ship. Nothing in this SDK previously registered a
+  wear source, so the only one that ever ran was the synthetic generator — and
+  with that correctly disabled the wear module had no source at all, leaving
+  biosignals reachable only if the host pushed them itself. Attached when the
+  config declares `wearConfig`; Health Connect and BLE are enabled by default
+  since neither needs vendor credentials.
+- **`Synheart.requestWearPermissions()` / `wearPermissionStatus()` /
+  `hasWearPermissions`.** Health Connect gates reads behind a runtime prompt, so
+  a manifest declaration alone leaves the source polling an empty store forever —
+  every sample arrives carrying nothing, which is indistinguishable from a
+  paired-but-silent wearable. Keyed by permission name rather than
+  `synheart-wear`'s `PermissionType`, which is not on a consumer's compile
+  classpath.
+- **`WearConfig`, `PhoneConfig` and `BehaviorConfig`**, matching
+  the sibling platform SDKs. Declaring one activates that feature. The tuning
+  fields (`sampleRateHz`, `motionSensitivity`, `enableGestureTracking`, …) are
+  carried for parity and are not consumed by any collector in either SDK yet, so
+  a config written against another platform SDK ports across unchanged.
+- **`SynheartConfig.runtimeLogEnvFilter`** — a `tracing` filter for the native
+  runtime's own logs, applied by `initialize()` before any native work. Without
+  it the runtime logs nowhere, so the lines that explain a stalled integration —
+  an unattestable device, a closed cloud gate, a failing ingest POST — do not
+  exist, and the silence reads as "nothing happened" rather than "you never asked
+  to be told".
+- **`SynheartConfig.batchIngestOnStop`** — config-level default for the existing
+  runtime property.
+- **`WearSourceType.HEALTH_CONNECT`.**
 - **`SynheartConfig.allowSyntheticBiosignals`** (default `false`) — opt-in for the
   synthetic wear generator. Development only: its samples enter the session engine
   and the runtime's SRM baselines exactly as real readings would, so it must never
@@ -180,7 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SyniContextBuilder`** — projects live HSI plus session history into the
   Syni conditioning payload, skipping the heavy blocks for trivial messages.
 - **`doc/INTEGRATION.md`** — the ordered walkthrough from an empty project to a
-  device that uploads, ported from the Flutter SDK and adapted to Gradle,
+  device that uploads, adapted from the sibling SDKs to Gradle,
   `BuildConfig`, `jniLibs` and Play Integrity. Includes a symptom-keyed
   troubleshooting table and a pre-bug-report diagnostics checklist.
 - **`example/README.md` and `example/SETUP.md`** — what the example
@@ -194,8 +257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The README shipped `0.0.8` against a `0.1.0` build, so the documented
   dependency line was a version behind.
 - **Example-app credentials are read from `example/env/synheart.credentials.json`**
-  into `BuildConfig` — the Kotlin analogue of Flutter's
-  `--dart-define-from-file`. The key names match the credentials download from
+  into `BuildConfig`, read at configure time. The key names match the credentials download from
   platform.synheart.ai so it can be dropped in whole. Populated files are
   gitignored; only the template is checked in. A missing file leaves every
   field empty and the SDK local-only, so a fresh clone still builds. Previously
@@ -204,25 +266,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The example app packages the native runtime.** `:example` now points
   `jniLibs.srcDirs` at `example/synheart/vendor/runtime/android/jniLibs`
   (overridable via the `synheart.runtime.android.jniLibs` property), mirroring
-  the Flutter SDK. AGP reads only `src/main/jniLibs` by default, so the
+  the sibling SDKs. AGP reads only `src/main/jniLibs` by default, so the
   vendored `libsynheart_core_runtime.so` was present on disk but absent from
   the APK — every FFI call would have degraded to "native library not loaded".
 - **`.gitignore` now covers the vendored native binaries** (`*.so`, `*.dylib`,
-  `native/`, `example/synheart/vendor/`), matching the Flutter SDK. The
+  `native/`, `example/synheart/vendor/`), matching the sibling SDKs. The
   vendored tree is ~1.8 GB and was previously untracked but unignored, so a
   `git add .` would have tried to commit it.
 - **The example app is now a real Gradle module** (`:example`) that CI
   compiles. It was previously two loose source files nothing referenced, and
   had drifted out of sync with the SDK — `CanonicalExample` read
   `HSIState.hsiVersion` and `.observedAtUtc`, neither of which has ever existed
-  in either the Kotlin or the Flutter SDK. It is not published.
+  in any platform SDK. It is not published.
 - **`SYNHEART_CORE_VERSION`**, `BoundedBuffer`, `HsiDeliveryDeduper`,
   `MotionStateSnapshot`, `WearModuleStatus`, `HsiAxes`, and `SyncResult` /
   `SyncStatus`.
-- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
-  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
-  consent token scoped to the current subject (configure-cloud on init,
-  mint-on-grant, init self-heal) so uploads are attributed to that subject.
 
 ### Known gaps
 - **`minSdk 24` is not achievable by consumers.** `:synheart-core` declares
@@ -233,16 +291,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   library [ai.synheart:syni:0.0.3]`. The example app is pinned to 26 to build.
   Either raise the SDK's `minSdk` to 26, or make the Syni dependency optional
   so a host that does not use it can stay at 24.
-- **Watch-session relay is not available.** `isWatchSessionActive`,
-  `activeWatchSessionId`, `watchSessionEvents`, `getWatchStatus`,
-  `startWatchSession` and `stopWatchSession` have no Kotlin equivalent because
-  `ai.synheart:synheart-session:0.2.1` ships no watch-relay surface (no
-  `WatchStatus`, no watch start/stop). They land when the session SDK gains it.
+- **Watch-initiated start does not reach the phone.** The phone drives the
+  watch (`startWatchSession` / `stopWatchSession`) and receives its heart rate,
+  but a session begun on the watch itself raises no phone-side event, so the
+  two sides can disagree about whether a session is running.
+
+### Distribution
+- Maven Central: `ai.synheart:synheart-core:0.2.0`
+
+## [0.1.0] - 2026-06-29
+
+### Added
+- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
+  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
+  consent token scoped to the current subject (configure-cloud on init,
+  mint-on-grant, init self-heal) so uploads are attributed to that subject.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` and
   `BehaviorConsent.enabled` aliases — use `deviceMotion` / `systemState` /
   the individual behavior channels.
+
+### Distribution
+- Maven Central: `ai.synheart:synheart-core:0.1.0`
 
 ## [0.0.8] - 2026-06-17
 
@@ -381,7 +452,9 @@ a Kotlin surface.
 ### Distribution
 - Maven Central: `ai.synheart:synheart-core:0.0.4`
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-kotlin/compare/v0.0.7...HEAD
+[0.2.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.2.0
+[0.1.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.1.0
+[0.0.8]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.8
 [0.0.7]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.7
 [0.0.6]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.6
 [0.0.5]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.5

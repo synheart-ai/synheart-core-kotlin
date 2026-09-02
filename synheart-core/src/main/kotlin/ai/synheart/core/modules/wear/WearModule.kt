@@ -39,6 +39,9 @@ class WearModule(
     // signal, which is the truth. Fabricating one to avoid an empty screen is
     // what made "biosignals are working" indistinguishable from "biosignals are
     // invented".
+    /** The sources this module is driving; empty when none is attached. */
+    val attachedSources: List<WearSourceHandler> get() = actualSources
+
     private val actualSources = sources
         ?: if (allowSynthetic) listOf(MockWearSourceHandler()) else emptyList()
     private val cache = WearCache()

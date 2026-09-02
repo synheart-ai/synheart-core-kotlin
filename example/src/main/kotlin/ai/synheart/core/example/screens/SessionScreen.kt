@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material3.HorizontalDivider
@@ -245,7 +246,89 @@ fun SessionScreen(c: SynheartController, padding: PaddingValues) {
             }
 
             item { SignalSources(c, running) }
+            item { WatchCard(c) }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/**
+ * Companion-watch session.
+ *
+ * Separate from the phone session above: the watch runs its own engine and
+ * computes its own metrics. This only relays a command out and events back, so
+ * a watch session can run whether or not the phone is collecting.
+ */
+@Composable
+private fun WatchCard(c: SynheartController) {
+    val status = c.watchStatus
+    val running = c.isWatchSessionRunning
+    SectionCard(
+        title = "Companion watch",
+        subtitle = "Runs a session on a paired Wear OS watch over the Wearable Data " +
+            "Layer. Needs the companion app installed on the watch — it owns the " +
+            "listener that answers the start command.",
+        trailing = {
+            StatusPill(
+                when {
+                    running -> "running"
+                    status == null -> "unknown"
+                    // Told apart on purpose: no transport at all is a different
+                    // problem from a transport with no watch on the end.
+                    !status.supported -> "unsupported"
+                    !status.reachable -> "no watch"
+                    else -> "ready"
+                },
+                when {
+                    running || status?.canStartSession == true -> PillTone.GOOD
+                    status == null -> PillTone.NEUTRAL
+                    else -> PillTone.WARN
+                },
+            )
+        },
+    ) {
+        Column {
+            if (status == null) {
+                Text(
+                    "Not queried yet — initialize the SDK first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                KeyValueRow("supported", "${status.supported}")
+                KeyValueRow("reachable", "${status.reachable}")
+                KeyValueRow("events received", "${c.watchEventCount}")
+                KeyValueRow("hr samples → engine", "${c.watchHrSampleCount}")
+                KeyValueRow("last event", c.lastWatchEvent ?: "—")
+            }
+
+            c.watchError?.let {
+                Spacer(Modifier.height(8.dp))
+                ErrorBanner(it)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { c.refreshWatchStatus() }) { Text("Refresh") }
+                if (running) {
+                    OutlinedButton(onClick = { c.stopWatchSession() }) { Text("Stop watch") }
+                } else {
+                    FilledTonalButton(
+                        onClick = { c.startWatchSession() },
+                        enabled = status?.canStartSession == true,
+                    ) { Text("Start on watch") }
+                }
+            }
+
+            if (status?.supported == true && status.reachable != true) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Play Services is present but no Wear OS node is connected. Pair " +
+                        "the watch and make sure the companion app is installed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -262,9 +345,15 @@ private fun SignalSources(c: SynheartController, running: Boolean) {
                 when {
                     c.hasBiosignalSource && c.usesSyntheticBiosignals -> "SYNTHETIC"
                     c.hasBiosignalSource -> "receiving"
-                    c.wearEmittingButEmpty -> "empty samples"
                     c.consentState?.biosignals != true -> "not consented"
-                    else -> "no source"
+                    !c.hasWearSource -> "no source"
+                    // Attached but with nothing behind it. Reporting "no source"
+                    // here sent you looking for a wiring bug when the source is
+                    // wired and the platform store is simply absent.
+                    !c.isWearPlatformAvailable -> "no health store"
+                    !c.hasWearPermissions -> "not permitted"
+                    c.wearEmittingButEmpty -> "empty samples"
+                    else -> "no data yet"
                 },
                 when {
                     // Loud, not green: invented numbers must never read as a
@@ -340,6 +429,29 @@ private fun SignalSources(c: SynheartController, running: Boolean) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(8.dp))
+                }
+                // Offered whenever the grant is missing. Health Connect gates
+                // reads behind a runtime prompt, so a manifest declaration alone
+                // leaves the source polling an empty store forever.
+                // Only when Health Connect is present: prompting on a device
+                // without it opens nothing and teaches the wrong fix.
+                if (c.isWearPlatformAvailable && !c.hasWearPermissions) {
+                    OutlinedButton(
+                        onClick = { c.requestWearPermissions() },
+                        enabled = !c.isRequestingWearPermissions,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Outlined.HealthAndSafety, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            if (c.isRequestingWearPermissions) {
+                                "Requesting…"
+                            } else {
+                                "Grant health access"
+                            },
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 Text(

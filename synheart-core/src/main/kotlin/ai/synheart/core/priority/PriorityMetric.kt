@@ -2,7 +2,7 @@
 //
 // Public types for the multi-source priority resolver.
 //
-// Mirror of `synheart-core-flutter/lib/src/priority/priority_metric.dart`
+// Shared shape with the sibling platform SDKs' priority metric
 // and `synheart-core-swift/.../SynheartPriority.swift`. Wire names
 // are persisted in the runtime SQLite schema — renaming requires a
 // migration.

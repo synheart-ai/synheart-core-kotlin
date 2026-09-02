@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Typed Kotlin models for the snapshot-upload request / response pair.
-// Mirrors the Flutter reference at `lib/src/modules/cloud/upload_models.dart`
+// Shared upload model shape across the platform SDKs
 // and the Swift sibling at `SynheartCore/Modules/Cloud/UploadModels.swift`.
 // snake_case wire keys for cross-language byte-equivalent JSON.
 

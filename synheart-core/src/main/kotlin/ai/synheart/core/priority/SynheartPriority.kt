@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // High-level Kotlin API for the multi-source priority resolver
-// Mirror of the Flutter and Swift wrappers.
+// Shared shape with the sibling platform wrappers.
 //
 // When the loaded native library exposes the priority-resolver symbols
 // (the Synheart native runtime, 5.4.0+), all calls route through them.

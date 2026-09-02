@@ -3,7 +3,7 @@
 // Typed Kotlin models for the RFC-SLEEP-SCORE-PIPELINE-0001 batch
 // scorer. Mirrors the JSON shapes produced by the Synheart Runtime's
 // `SleepScore` computation. snake_case wire keys for cross-language
-// portability — Flutter (`lib/src/models/sleep_score.dart`) and Swift
+// portability — the sibling platform SDKs
 // emit the same JSON.
 
 package ai.synheart.core.models

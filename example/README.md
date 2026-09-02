@@ -31,20 +31,18 @@ cp env/synheart.credentials.example.json env/synheart.credentials.json
 
 `env/*.json` is gitignored apart from the template, so a populated file stays on
 your machine. Gradle reads it at configure time and surfaces the values as
-`BuildConfig` fields — the Kotlin analogue of Flutter's
-`--dart-define-from-file`. An absent or partial file is fine: every field falls
-back to empty and the SDK runs local-only.
+`BuildConfig` fields. An absent or partial file is fine: every field falls back
+to empty and the SDK runs local-only.
 
 The Setup tab's **Credentials** card shows which keys were picked up and what
 each missing one costs — the fastest way to see why attestation or upload is
 off. The platform download carries the four ids only; `base_url` is not among
 them and is what gates both.
 
-**One origin, not two.** Unlike the Flutter SDK, which takes
-`SYNHEART_BASE_URL` and `SYNHEART_AUTH_URL` separately, the Kotlin SDK resolves
-every per-service URL from a single origin through `ApiEndpoints`. Set `base_url`
-and device auth, consent, and ingest all follow it — there is no way to split a
-run across two environments by setting only half of it.
+**One origin, not two.** Every per-service URL resolves from a single origin
+through `ApiEndpoints`. Set `base_url` and device auth, consent, and ingest all
+follow it — there is no way to split a run across two environments by setting
+only half of a pair.
 
 **Attestation only**, without enabling upload — an org id is not required. Set
 `base_url` and leave `org_id` empty.
@@ -108,8 +106,7 @@ Start with `sdk/SynheartController.kt`. No screen imports `ai.synheart.core.*`
 — they read state from the controller and call its methods, so the whole
 integration is one readable file.
 
-The UI is Jetpack Compose, the Kotlin analogue of the Flutter example's widget
-tree; the four tabs, the cards, and the copy are the same.
+The UI is Jetpack Compose; the four tabs mirror the lifecycle order.
 
 ## What it demonstrates
 
@@ -130,6 +127,9 @@ tree; the four tabs, the cards, and the copy are the same.
   none is. Source state comes from `isFeatureOperational`, not
   `isWearCollecting` — the latter tracks only the granular per-module API and
   reads false after a plain `startSession()`.
+- **Per-module configs gate activation.** Declaring `wearConfig`, `phoneConfig`
+  or `behaviorConfig` activates that feature; omitting one leaves the module
+  inert. This example declares all three.
 - **Behavior capture is the host's job** — the Kotlin SDK ships no gesture
   detector, so `MainActivity.dispatchTouchEvent` records taps and scrolls
   through `Synheart.behaviorEvents`. Activating the feature and granting consent

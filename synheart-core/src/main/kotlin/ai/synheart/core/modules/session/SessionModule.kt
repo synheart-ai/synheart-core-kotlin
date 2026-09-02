@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * Provides:
  * - Session start/stop delegated to [SynheartSession]
  * - SharedFlow<SessionEvent> → cold Flow<Map<String, Any>> bridge so core
- *   consumers see the on-the-wire shape Flutter / Swift emit
+ *   consumers see the same on-the-wire shape every platform SDK emits
  * - HSI metrics ingestion pass-through (now session-scoped)
  *
  * Mirrors the Dart `WatchSessionModule` pattern.
@@ -52,7 +52,7 @@ class SessionModule(
      * Start a session with the given [config].
      *
      * Returns a cold [Flow] of session event maps (the on-the-wire shape
-     * shared with Flutter / Swift). The flow completes when the underlying
+     * shared across platform SDKs). The flow completes when the underlying
      * session emits a [SessionSummary] or [SessionErrorEvent].
      *
      * @throws IllegalStateException if a session is already active.

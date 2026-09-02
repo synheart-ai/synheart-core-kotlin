@@ -1,7 +1,7 @@
 // Example app for the Synheart Core SDK.
 //
 // A runnable Compose app that walks the SDK lifecycle across four tabs, mirroring
-// the core-flutter example. It is also here to be COMPILED by CI: before
+// the sibling platform SDK examples. It is also here to be COMPILED by CI: before
 // `example/` was a Gradle module it was two loose source files that nothing
 // referenced, and they drifted out of sync with the SDK silently (referencing
 // `HSIState.hsiVersion` and `.observedAtUtc`, neither of which ever existed). An
@@ -23,7 +23,7 @@ import groovy.json.JsonSlurper
 
 // Credentials come from a file downloaded from platform.synheart.ai and copied
 // to example/env/synheart.credentials.json (gitignored — see the template
-// beside it). The Kotlin analogue of Flutter's `--dart-define-from-file`.
+// beside it). Read at configure time and surfaced as BuildConfig fields.
 //
 // Absent or partial is fine: every field falls back to empty, and the SDK then
 // runs local-only. That is deliberate — a fresh clone must build without
@@ -89,7 +89,7 @@ android {
     // silently falls back to "native library not loaded" at runtime.
     //
     // Override with `synheart.runtime.android.jniLibs` in gradle.properties.
-    // Mirrors the wiring in the Flutter SDK's android/build.gradle.
+    // Mirrors the wiring the sibling SDKs use for the same vendored runtime.
     sourceSets {
         main {
             jniLibs.srcDirs = [
@@ -120,7 +120,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
-    // Compose, the Kotlin analogue of the Flutter example's widget tree. The
+    // Compose, this example's UI toolkit. The
     // BOM pins every artifact to one release so the compiler and the runtime
     // libraries cannot drift apart.
     implementation platform('androidx.compose:compose-bom:2024.09.03')

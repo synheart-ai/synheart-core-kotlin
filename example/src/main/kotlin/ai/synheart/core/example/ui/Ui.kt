@@ -55,8 +55,8 @@ fun SectionCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        // Flat with a hairline outline, matching the Flutter example's card
-        // theme. Elevation alone is invisible here: the card and the page share
+        // Flat with a hairline outline. Elevation alone is invisible here:
+        // the card and the page share
         // a surface colour, so without the border the sections run together.
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),

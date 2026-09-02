@@ -2,7 +2,7 @@
 //
 // Synheart-side gate around the Syni on-device agent SDK.
 //
-// Mirrors the Flutter shape: `SyniAgent` instance + install lifecycle
+// Shared shape: `SyniAgent` instance + install lifecycle
 // state machine + typed `chat()` / `chatStream()` returning
 // `SyniChatResponse` and `SyniChatEvent` respectively. The underlying
 // `ai.synheart.syni.SyniAgent` is wrapped with a `ConsentType.SYNI`

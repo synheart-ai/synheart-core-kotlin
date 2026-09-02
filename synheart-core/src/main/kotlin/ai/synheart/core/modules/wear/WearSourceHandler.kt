@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.Flow
 enum class WearSourceType {
     APPLE_HEALTH,
     GOOGLE_FIT,
+
+    /** Health Connect, the Android platform health store. */
+    HEALTH_CONNECT,
     WHOOP,
     GARMIN,
     MOCK

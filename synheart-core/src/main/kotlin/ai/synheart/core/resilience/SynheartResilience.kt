@@ -2,7 +2,7 @@
 //
 // HRV-CV resilience score — Kotlin binding.
 //
-// Mirror of the Flutter and Swift wrappers. Stateless; takes
+// Shared shape with the sibling platform wrappers. Stateless; takes
 // samples + sleep windows + config and returns a score with
 // provenance.
 //

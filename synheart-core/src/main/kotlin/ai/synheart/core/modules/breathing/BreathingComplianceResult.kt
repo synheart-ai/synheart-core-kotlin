@@ -2,7 +2,7 @@
 //
 // Result of evaluating breathing compliance over the current RR window.
 // Mirrors the breathing runtime's `ComplianceResult` JSON shape and
-// the Flutter reference at
+// the sibling SDK reference at
 // `lib/src/modules/breathing/breathing_compliance_result.dart`.
 //
 // See RFC-Breathing-001 for verdict semantics.

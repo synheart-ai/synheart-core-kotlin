@@ -10,4 +10,4 @@ package ai.synheart.core
  * Distinct from the native runtime's own version, which is read through
  * `Synheart.runtimeVersion`.
  */
-const val SYNHEART_CORE_VERSION: String = "0.1.0"
+const val SYNHEART_CORE_VERSION: String = "0.2.0"

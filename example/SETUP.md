@@ -35,9 +35,15 @@ SynheartConfig(
   // Development only. Production gates capabilities on a verified consent token.
   allowUnsignedCapabilities = true,
 
-  // No per-module configs, unlike the Flutter SDK: the Kotlin SDK creates wear,
-  // phone and behavior unconditionally and activates them from the device role.
-  // Read back which ended up active with Synheart.isActivated(...).
+  // Declaring a module config activates that feature; omitting one leaves that
+  // module inert. Read back what ended up active with Synheart.isActivated(...).
+  wearConfig = WearConfig(),
+  phoneConfig = PhoneConfig(),
+  behaviorConfig = BehaviorConfig(),
+
+  // Surfaces the runtime's own logs. Without a filter the runtime logs nowhere,
+  // so the lines explaining a stalled integration simply do not exist.
+  runtimeLogEnvFilter = "info",
 
   // Required for the runtime consent-form flow — consentSubmitFormTyped needs a
   // non-empty deviceId and platform, or consent can never be written.
@@ -60,8 +66,8 @@ Two fields are non-negotiable:
 
 ### Behavior collection needs a host-side hook
 
-Unlike the Flutter SDK, which ships a gesture-detector widget, the Kotlin SDK
-has no view-tree hook. Nothing observes taps until the host records them:
+The SDK has no view-tree hook. Nothing observes taps until the host records
+them:
 
 ```kotlin
 override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -159,7 +165,7 @@ Then add the two fields the download does not carry:
 
 `example/env/*.json` is gitignored apart from the template, so a populated file
 stays on your machine. The build reads it into `BuildConfig` — the Kotlin
-analogue of Flutter's `--dart-define-from-file`. A missing or partial file is
+read at configure time. A missing or partial file is
 fine: every field falls back to empty and the app runs local-only, so a fresh
 clone builds without anyone's organization ids.
 
