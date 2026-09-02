@@ -116,7 +116,7 @@ dependencies {
     // `implementation` those types are off a consumer's compile classpath and
     // the whole watch API is uncallable. The sibling platform SDKs re-export
     // their session package for the same reason.
-    api 'ai.synheart:synheart-session:0.2.1'
+    api 'ai.synheart:synheart-session:0.3.0'
 
     // synheart-session declares these `compileOnly` so a phone-only consumer is
     // not forced to ship Play Services. This SDK exposes the watch API, so it is

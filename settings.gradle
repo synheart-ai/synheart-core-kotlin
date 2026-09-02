@@ -42,9 +42,25 @@ def siblings = [
         'syni-kotlin'             : [module: 'ai.synheart:syni', project: ':syni'],
 ]
 
+// Build exactly as CI does:
+//
+//   ./gradlew assemble -Psynheart.useSiblingBuilds=false
+//
+// Run this before pushing anything that touches a sibling SDK's API. A local
+// checkout silently replaces the published artifact, so code calling an
+// unreleased API compiles here and fails in CI with unresolved references.
+//
+// `providers.gradleProperty`, not `findProperty`: settings scripts have no
+// `project`. Reads both -P flags and gradle.properties.
+def useSiblings = providers.gradleProperty('synheart.useSiblingBuilds')
+        .getOrElse('true').toBoolean()
+if (!useSiblings) {
+    logger.lifecycle('[synheart] sibling composite builds DISABLED — resolving published artifacts')
+}
+
 siblings.each { dir, info ->
     def siblingDir = file("../${dir}")
-    if (siblingDir.exists() && (new File(siblingDir, 'settings.gradle').exists() || new File(siblingDir, 'settings.gradle.kts').exists())) {
+    if (useSiblings && siblingDir.exists() && (new File(siblingDir, 'settings.gradle').exists() || new File(siblingDir, 'settings.gradle.kts').exists())) {
         includeBuild("../${dir}") {
             dependencySubstitution {
                 substitute module(info.module) using project(info.project)
