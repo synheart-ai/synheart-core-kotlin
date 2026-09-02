@@ -5,7 +5,7 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-02
 
 ### Fixed
 - **Every behavior event was silently dropped.** `BehaviorEventStream` backed its
@@ -281,10 +281,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SYNHEART_CORE_VERSION`**, `BoundedBuffer`, `HsiDeliveryDeduper`,
   `MotionStateSnapshot`, `WearModuleStatus`, `HsiAxes`, and `SyncResult` /
   `SyncStatus`.
-- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
-  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
-  consent token scoped to the current subject (configure-cloud on init,
-  mint-on-grant, init self-heal) so uploads are attributed to that subject.
 
 ### Known gaps
 - **`minSdk 24` is not achievable by consumers.** `:synheart-core` declares
@@ -295,16 +291,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   library [ai.synheart:syni:0.0.3]`. The example app is pinned to 26 to build.
   Either raise the SDK's `minSdk` to 26, or make the Syni dependency optional
   so a host that does not use it can stay at 24.
-- **Watch-session relay is not available.** `isWatchSessionActive`,
-  `activeWatchSessionId`, `watchSessionEvents`, `getWatchStatus`,
-  `startWatchSession` and `stopWatchSession` have no Kotlin equivalent because
-  `ai.synheart:synheart-session:0.2.1` ships no watch-relay surface (no
-  `WatchStatus`, no watch start/stop). They land when the session SDK gains it.
+- **Watch-initiated start does not reach the phone.** The phone drives the
+  watch (`startWatchSession` / `stopWatchSession`) and receives its heart rate,
+  but a session begun on the watch itself raises no phone-side event, so the
+  two sides can disagree about whether a session is running.
+
+### Distribution
+- Maven Central: `ai.synheart:synheart-core:0.2.0`
+
+## [0.1.0] - 2026-06-29
+
+### Added
+- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
+  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
+  consent token scoped to the current subject (configure-cloud on init,
+  mint-on-grant, init self-heal) so uploads are attributed to that subject.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` and
   `BehaviorConsent.enabled` aliases — use `deviceMotion` / `systemState` /
   the individual behavior channels.
+
+### Distribution
+- Maven Central: `ai.synheart:synheart-core:0.1.0`
 
 ## [0.0.8] - 2026-06-17
 
@@ -443,7 +452,9 @@ a Kotlin surface.
 ### Distribution
 - Maven Central: `ai.synheart:synheart-core:0.0.4`
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-kotlin/compare/v0.0.7...HEAD
+[0.2.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.2.0
+[0.1.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.1.0
+[0.0.8]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.8
 [0.0.7]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.7
 [0.0.6]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.6
 [0.0.5]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.5
