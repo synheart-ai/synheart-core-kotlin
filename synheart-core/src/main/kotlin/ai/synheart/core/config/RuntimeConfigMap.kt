@@ -1,5 +1,6 @@
 package ai.synheart.core.config
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -106,5 +107,18 @@ fun buildRuntimeConfigMap(config: SynheartConfig, dataDir: String? = null): JSON
             },
         )
         put("privacy", JSONObject().put("allow_research", config.privacy.allowResearch))
+
+        config.windowMs?.takeIf { it > 0 }?.let { put("window_ms", it) }
+        if (config.extraHeads.isNotEmpty()) {
+            put("extra_heads", JSONArray(config.extraHeads.map { it.wire }))
+        }
+
+        // Host declarations are spread rather than nested: the runtime reads
+        // `sensing` / `device_class` / `mask_profile` / `cfi_structural_components`
+        // as top-level keys. An absent key means *undeclared*, which is a
+        // distinct state from a declared default — so nothing is emitted for a
+        // null field.
+        val declarations = config.hostDeclarations.toJson()
+        for (key in declarations.keys()) put(key, declarations.get(key))
     }
 }

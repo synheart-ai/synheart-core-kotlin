@@ -84,6 +84,32 @@ data class HSIState(
     val modalities: Modalities = Modalities(),
     val tiers: Tiers = Tiers(),
     /**
+     * Axes the engine omitted, mapped to why — `meta.synheart.state_withheld`.
+     *
+     * Empty when nothing was withheld. Read this alongside [hsi]: an axis
+     * missing from both is genuinely unsupported by the build, whereas one
+     * listed here was deliberately not produced and must be rendered as
+     * unavailable rather than as a neutral default. A canonical member is
+     * complete over `axes.<domain>` ∪ this map.
+     *
+     * Common mobile reasons: `episodic_sensing` withholds `capacity` and
+     * `mental_fatigue` on every frame; `cold_start_confidence_exhausted` marks
+     * a Capacity reading whose confidence chain was consumed by the cold-start
+     * penalty, which is unavailable rather than a score of zero.
+     */
+    val stateWithheld: Map<String, String> = emptyMap(),
+    /**
+     * `meta.synheart.sensing` — the sensing profile this window was produced
+     * under, or null when the host declared none.
+     *
+     * Present only for a host that passed `HostDeclarations.sensing`. Consumers
+     * comparing across platforms should **stratify on this block rather than
+     * pooling**: a Cognitive Load built without notification observation and
+     * without a context layer measures a structurally thinner subset of the
+     * same construct. `rest_declared` also rides here.
+     */
+    val sensing: JSONObject? = null,
+    /**
      * Why the payload could not be parsed, or null on success.
      *
      * A failed parse yields all-null axes, which is indistinguishable from
@@ -118,6 +144,8 @@ data class HSIState(
                     rawJson = json,
                     modalities = deriveModalities(map),
                     tiers = deriveTiers(map),
+                    stateWithheld = deriveStateWithheld(map),
+                    sensing = synheartMeta(map)?.optJSONObject("sensing"),
                 )
             } catch (e: Exception) {
                 HSIState(subjectId = subjectId, timestampMs = System.currentTimeMillis(),
@@ -138,6 +166,32 @@ data class HSIState(
             "touch", "scroll", "app_switch", "typing", "notification", "clipboard" ->
                 "digital"
             else -> null
+        }
+
+        /**
+         * `meta.synheart` off a parsed payload, or null when absent.
+         *
+         * Legitimately missing: `sensing` appears only when the host declared a
+         * profile, and a runtime that predates the block emits neither it nor
+         * `state_withheld`.
+         */
+        private fun synheartMeta(payload: JSONObject): JSONObject? =
+            payload.optJSONObject("meta")?.optJSONObject("synheart")
+
+        /**
+         * `meta.synheart.state_withheld` — axis name to the reason it was
+         * omitted. Non-string values are skipped rather than coerced: a reason
+         * is a reason, and a stringified number in front of a developer trying
+         * to explain a missing axis is worse than nothing.
+         */
+        private fun deriveStateWithheld(payload: JSONObject): Map<String, String> {
+            val withheld = synheartMeta(payload)?.optJSONObject("state_withheld")
+                ?: return emptyMap()
+            val out = linkedMapOf<String, String>()
+            for (key in withheld.keys()) {
+                (withheld.opt(key) as? String)?.let { out[key] = it }
+            }
+            return out
         }
 
         /** `meta.provenance.sources` as an object, or null when absent. */

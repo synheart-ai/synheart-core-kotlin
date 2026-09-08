@@ -250,6 +250,45 @@ class SynheartInstance private constructor(
      */
     fun tick(nowMs: Long): String? = if (disposed) null else bridge.tick(nowMs)
 
+    // ── Mobile host surface ──────────────────────────────────────────────
+
+    /**
+     * Push a typed behavior event carrying its full payload — most importantly
+     * a windowed `TypingSessionData`, which the legacy int-coded path cannot
+     * express at all.
+     *
+     * `true` accepted, `false` rejected, `null` when this instance is disposed
+     * or the runtime does not export the symbol. Do not also push the raw
+     * keystrokes behind a `Typing` summary — the engine counts both and every
+     * rate feature roughly doubles.
+     */
+    fun pushBehaviorEvent(event: ai.synheart.core.models.BehaviorEventInput): Boolean? =
+        if (disposed) null else bridge.pushBehaviorEvent(event.toJson().toString())
+
+    /**
+     * Declare the window containing [tsMs] to be a rest window. One-shot: call
+     * once per rest window, not once when a break begins.
+     */
+    fun declareRestWindow(tsMs: Long) {
+        if (!disposed) bridge.declareRestWindow(tsMs)
+    }
+
+    /** Drain every completed window as a JSON array. Prefer this to [tick] after a gap. */
+    fun tickAll(nowMs: Long): String? = if (disposed) null else bridge.tickAll(nowMs)
+
+    /** Emit every window still held by the lateness budget. */
+    fun flushPending(nowMs: Long): String? = if (disposed) null else bridge.flushPending(nowMs)
+
+    /** Export this instance's per-head session state for persistence. */
+    fun exportSessionState(): String? = if (disposed) null else bridge.exportSessionState()
+
+    /** Restore session state. Must run before this instance's first [tick]. */
+    fun loadSessionState(json: String): Boolean? =
+        if (disposed) null else bridge.loadSessionState(json)
+
+    /** This instance's comparability key. Persist it beside any cached score. */
+    fun configId(): String? = if (disposed) null else bridge.configId()
+
     // ── Lab session ──────────────────────────────────────────────────────
 
     /** Whether the lab-metadata C ABI is available in the loaded native build. */
