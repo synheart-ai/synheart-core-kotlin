@@ -6,9 +6,9 @@ import ai.synheart.core.SynheartLogger
 import ai.synheart.core.config.ApiEndpoints
 import ai.synheart.core.config.CloudConfig
 import ai.synheart.core.config.BehaviorConfig
+import ai.synheart.core.config.ExtraHead
 import ai.synheart.core.config.ConsentConfig
 import ai.synheart.core.config.DeviceAuthConfig
-import ai.synheart.core.config.PhoneConfig
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.config.SynheartFeature
 import ai.synheart.core.config.SynheartMode
@@ -240,6 +240,39 @@ class SynheartController : ViewModel() {
     var hsiWindowCount: Int by mutableStateOf(0)
         private set
 
+    /**
+     * The host-driven half of the mobile integration — the tick loop, rest
+     * declaration, the three snapshots, the daily loop, the keep-alive, and the
+     * simulated cardiac stream.
+     *
+     * Split out rather than inlined here because it is *driving* rather than
+     * configuring: this class ends at `startSession()`, and everything in
+     * [MobileHostRunner] is what has to keep happening afterwards. Both halves
+     * are still the only code in the example that touches the SDK.
+     */
+    val host = MobileHostRunner(viewModelScope)
+
+    /**
+     * The `device_class` this host stores its SRM snapshot under.
+     *
+     * Separate from the declaration itself: the runtime resolves `"auto"` to a
+     * class through its own tables and rejects a cross-class SRM load with
+     * `ERR_SRM_CONFIG_MISMATCH` — so the host needs a stable file key even
+     * while it declares `"auto"`, and a phone and a tablet must not share one.
+     */
+    val hostDeviceClass: String = "phone"
+
+    /** Turn the §2 host declarations on or off. Only meaningful before [initialize]. */
+    fun setDeclareHostProfile(value: Boolean) {
+        if (isInitialized) return
+        host.declareHostProfile = value
+    }
+
+    fun setClaimContinuousSensing(value: Boolean) {
+        if (isInitialized) return
+        host.claimContinuousSensing = value
+    }
+
     private var appContext: Context? = null
     private var hsiJob: Job? = null
     private var wearJob: Job? = null
@@ -384,12 +417,49 @@ class SynheartController : ViewModel() {
         allowUnsignedCapabilities = true,
 
         // Declaring a module config both activates the feature and tells the SDK
-        // which collectors to wire. Omit one and that module never starts — the
-        // All three are declared here so the Session screen can show what each
-        // contributes.
+        // which collectors to wire. Omit one and that module never starts.
         wearConfig = WearConfig(),
-        phoneConfig = PhoneConfig(),
-        behaviorConfig = BehaviorConfig(),
+
+        // phoneConfig is deliberately NOT declared.
+        //
+        // Declaring it starts PhoneModule, whose four collectors are Random()
+        // generators — motion, screen state, app focus, notifications
+        // (`modules/phone/PhoneCollectors.kt`). Cardiac is the only thing this
+        // example is allowed to simulate, and those four are not cardiac. It
+        // also contradicted the sensing roster: the runner declares
+        // screen_state and app_focus unavailable because nothing real observes
+        // them, while the phone module was busy inventing exactly those two.
+        // The data never reached the runtime anyway — PhoneModule holds no
+        // bridge reference — so nothing of value is lost.
+
+        behaviorConfig = BehaviorConfig(
+            // §4.2 — without this no accelerometer sample reaches the runtime
+            // and the kinematic modality has no input. On Kotlin this now wires
+            // the SDK's own AccelForwarder at 50 Hz; before, the flag turned on
+            // a callback that nothing fed. Necessary but not sufficient: the
+            // kinematic heads also need a body-worn placement (§4.3), and
+            // UNKNOWN — the default — withholds all of them.
+            emitRawMotionSamples = true,
+        ),
+
+        // §2 — the four declarations that change engine output. Off unless the
+        // Setup screen turns them on, because declaring device_class invalidates
+        // every persisted SRM baseline.
+        hostDeclarations = host.buildHostDeclarations(),
+
+        // §2.4 — the kinematic heads are opt-in and withhold until a placement
+        // is declared. Requested so the Host tab can show them moving from "not
+        // requested" to "withheld, no placement" to a real reading.
+        extraHeads = listOf(
+            ExtraHead.MOVEMENT_REGULARITY,
+            ExtraHead.POSTURAL_STATE,
+            ExtraHead.ACTIVITY_STATE,
+            ExtraHead.LOCOMOTION_STATE,
+        ),
+
+        // The runtime default, stated explicitly because the rest detector's
+        // one-shot bookkeeping counts on the same grid.
+        windowMs = 60_000,
 
         // Surface the runtime's own logs. Without a filter the runtime logs
         // nowhere, and the lines that explain a stalled integration — an
@@ -489,6 +559,14 @@ class SynheartController : ViewModel() {
                     autoStart = false,
                 )
                 isInitialized = true
+
+                // §7 — restore the three snapshots now, while there is still no
+                // window 1. load_session_state MUST run before the first tick:
+                // window 1 writes each head's state slot, so a later restore is
+                // overwritten by a cold window. Doing it here rather than in
+                // startSession() makes that ordering unconditional.
+                host.restore(requireContext(), subjectId.orEmpty(), hostDeviceClass)
+
                 refreshConsent()
                 refreshWearPermissions()
                 refreshWatchStatus()
@@ -615,6 +693,12 @@ class SynheartController : ViewModel() {
                         Synheart.onStateUpdate.collect { state ->
                             latestState = state
                             hsiWindowCount++
+                            // §7 — export session state once per emitted
+                            // window. Only on background loses everything since
+                            // the last one whenever the process is killed
+                            // without a pause callback, which on Android is
+                            // routine.
+                            host.persistSessionState()
                         }
                     }
                 }
@@ -671,6 +755,10 @@ class SynheartController : ViewModel() {
 
                 session = Synheart.currentSession
                 isSessionRunning = Synheart.isSessionRunning
+
+                // §6.1 — the tick loop for the WHOLE session, started after
+                // startSession() so the pipeline exists for the first tick.
+                if (isSessionRunning) host.start(requireContext())
             } catch (e: Exception) {
                 sessionError = e.message ?: e.toString()
             }
@@ -681,6 +769,10 @@ class SynheartController : ViewModel() {
         if (!isSessionRunning) return
         viewModelScope.launch {
             try {
+                // Before Synheart.stopSession(), not after: flush_pending and
+                // the snapshot exports need a live handle, and the SRM export at
+                // session end is what stops baselines reporting Warming forever.
+                host.stop(requireContext())
                 // Symmetrically, stopSession() stops the modules it started;
                 // stopWearCollection() and friends would throw on a module that
                 // is no longer running.
@@ -696,22 +788,25 @@ class SynheartController : ViewModel() {
         }
     }
 
-    // ── Real signal sources ────────────────────────────────────────────────
+    // ── Signal sources ─────────────────────────────────────────────────────
     //
-    // This example never fabricates biosignals. Synthetic heart rates would
-    // teach the wrong integration AND pollute real state: pushed samples feed
-    // the runtime's longitudinal baselines (SRM), so fake beats would corrupt
-    // the user's actual reference ranges on the device they ran the demo on.
-    //
-    // Signal arrives from the modules the config activated:
+    // Real signal arrives from the modules the config activated:
     //   wear      — Health Connect / BLE strap / watch companion
-    //   phone     — device motion and context
-    //   behavior  — taps and scrolls, via the activity's touch dispatch
+    //   behavior  — taps and scrolls via the activity's touch dispatch, and
+    //               accelerometer via the SDK's AccelForwarder
     //
-    // The SDK pushes those into the runtime itself. `Synheart.pushWearHr`,
-    // `pushRr`, and `pushRrBatch` exist for hosts that own a source the SDK
-    // does not adapt — a proprietary strap, say — and should carry that
-    // source's real readings, never placeholders.
+    // ── And a simulated one, behind a button ───────────────────────────────
+    //
+    // `host.startCardiacStream()` streams fabricated beats through the real
+    // ingest path, because on a bare phone with no strap and no health
+    // permission it is the only way to see the cardiac path work at all. Two
+    // things keep that a demo rather than a lie: it is tagged sdk_wear
+    // (Tier 3), never ble_hrm; and it is never automatic. Cardiac is the ONLY
+    // simulated source — no motion, speed, screen state or context is invented.
+    //
+    // The cost is real: those samples reach the SRM, which builds this
+    // person's longitudinal reference ranges on this device. Run it under a
+    // throwaway subject_id and use [wipeLocalData] afterwards.
 
     /**
      * Live raw samples from the wear module, so the UI can show what is actually
@@ -876,6 +971,16 @@ class SynheartController : ViewModel() {
     /** Re-read grants after returning from the Health Connect screen. */
     fun onResumed() {
         if (isInitialized) refreshWearPermissions()
+        // §6.4 on wake: drain first, then tick — the runner does both.
+        host.onForegrounded()
+    }
+
+    /**
+     * Backgrounding is where §6 gets specific: flush_pending on the way out, or
+     * up to one lateness budget's worth of completed windows is stranded.
+     */
+    fun onPaused() {
+        host.onBackgrounded()
     }
 
     /**
@@ -1061,6 +1166,15 @@ class SynheartController : ViewModel() {
      * resolved".
      */
     val diagnostics: JSONObject? get() = Synheart.runtimeDiagnostics()
+
+    /**
+     * Compile-time facts about the vendored runtime — crate versions, profile,
+     * and the cargo features it was built with. The features list is the one
+     * to read when a context event is rejected: without `app-context`,
+     * push_context_event is an inert stub returning 1, byte-identical to a
+     * rejected payload.
+     */
+    val buildInfo: JSONObject? get() = Synheart.buildInfo()
 
     /** True when the FFI bridge loaded and the runtime is answering. */
     val isRuntimeAvailable: Boolean get() = Synheart.isRuntimeAvailable
@@ -1301,6 +1415,11 @@ class SynheartController : ViewModel() {
     fun wipeLocalData() {
         viewModelScope.launch {
             runCatching { Synheart.wipeLocalData() }
+            // The host's own snapshots are NOT runtime storage — they live in
+            // this app's preferences, so Synheart.wipeLocalData() does not touch
+            // them. Left behind, they would restore the wiped baselines on the
+            // next launch.
+            host.clearSnapshots()
             latestState = null
             hsiWindowCount = 0
             refreshConsent()
@@ -1308,6 +1427,7 @@ class SynheartController : ViewModel() {
     }
 
     override fun onCleared() {
+        host.dispose()
         watchJob?.cancel()
         attestationPoll?.cancel()
         hsiJob?.cancel()

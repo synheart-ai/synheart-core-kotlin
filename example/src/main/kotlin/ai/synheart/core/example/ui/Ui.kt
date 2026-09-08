@@ -154,9 +154,14 @@ fun ConsentToggle(
         verticalAlignment = Alignment.Top,
     ) {
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
+                // weight(fill = false), not a bare Text: a title long enough to
+                // need two lines otherwise sizes to its natural width and pushes
+                // the "unsaved" pill off the edge. The declaration titles name
+                // config keys, so they are long by nature.
                 Text(
                     title,
+                    modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )

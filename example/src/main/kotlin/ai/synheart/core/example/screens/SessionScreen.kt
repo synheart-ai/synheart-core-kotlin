@@ -26,6 +26,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CloudUpload
@@ -45,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.Instant
@@ -64,10 +68,13 @@ import java.time.format.DateTimeFormatter
  *
  * What grounds those axes is physiological signal. Behavior and motion are
  * collected and do reach the runtime, but they feed the digital and kinematic
- * modalities, which the Live HSI card renders separately. On a bare phone with
- * nothing attached the screen says all of this plainly rather than fabricating
- * beats: synthetic samples would flow into the same longitudinal baselines as
- * real ones and corrupt the reference ranges the runtime builds on device.
+ * modalities, which the Live HSI card renders separately.
+ *
+ * On a bare phone with nothing attached, the Simulated cardiac source card will
+ * stream fabricated beats through the real ingest path so that path can be seen
+ * working. It is opt-in per session and tagged Tier 3 on the way in, and the
+ * card states the cost in place: those samples reach the same longitudinal
+ * baselines real ones do. Cardiac is the only thing simulated.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -245,6 +252,7 @@ fun SessionScreen(c: SynheartController, padding: PaddingValues) {
                 }
             }
 
+            item { CardiacSimulatorCard(c) }
             item { SignalSources(c, running) }
             item { WatchCard(c) }
             item { Spacer(Modifier.height(24.dp)) }
@@ -337,9 +345,9 @@ private fun WatchCard(c: SynheartController) {
 private fun SignalSources(c: SynheartController, running: Boolean) {
     SectionCard(
         title = "Signal sources",
-        subtitle = "What is actually feeding the runtime. This example never fabricates " +
-            "biosignals — synthetic beats would corrupt the longitudinal baselines the " +
-            "runtime builds on this device.",
+        subtitle = "What is actually feeding the runtime. Anything the simulator above " +
+            "contributes arrives here as a Tier-3 provider, alongside whatever real sources " +
+            "are available.",
         trailing = {
             StatusPill(
                 when {
@@ -368,22 +376,26 @@ private fun SignalSources(c: SynheartController, running: Boolean) {
         Column {
             SourceRow(
                 label = "Wear",
-                detail = "Heart rate, RR intervals, vendor HRV → runtime",
+                // Honest: WearModule caches and streams samples, but nothing in
+                // the SDK pushes them into the runtime — the session adapter
+                // forwards them to synheart-session, not to the engine. A real
+                // strap stops at wearSampleStream today.
+                detail = "Heart rate, RR → wearSampleStream only; not pushed to the runtime",
                 active = c.isWearCollecting,
-                reachesRuntime = true,
+                reachesRuntime = false,
             )
             SourceRow(
                 label = "Behavior",
-                detail = "Taps, scrolls, app switches → digital modality",
+                detail = "Taps, scrolls → digital; accelerometer at 50 Hz → kinematic",
                 active = c.isBehaviorCollecting,
                 reachesRuntime = true,
             )
             SourceRow(
                 label = "Phone",
-                // Collected into an in-memory PhoneCache that nothing reads.
-                // Unlike wear and behavior, PhoneModule has no runtime wiring,
-                // so this data does not influence HSI.
-                detail = "Motion and device context — cached locally only",
+                // Not enabled, on purpose. PhoneModule's four collectors are
+                // Random() generators, and cardiac is the only thing this
+                // example simulates. They never reached the runtime either.
+                detail = "Not enabled — its collectors emit Random() values",
                 active = c.isPhoneCollecting,
                 reachesRuntime = false,
             )
@@ -528,6 +540,35 @@ private fun AxisTable(state: HSIState, c: SynheartController) {
             )
         }
 
+        // §9.1 — an axis with no contributing modality is OMITTED, with its
+        // reason in meta.synheart.state_withheld. On mobile that is the common
+        // case, not an error. A canonical member is complete over axes.<domain>
+        // ∪ this map, so a UI that reads only the axes cannot tell "withheld,
+        // and here is why" from "this build does not produce that axis". The
+        // thing never to do is paint a default over it.
+        if (state.stateWithheld.isNotEmpty()) {
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Text("withheld this window", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(6.dp))
+            for ((axis, reason) in state.stateWithheld) KeyValueRow(axis, reason)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                withheldExplanation(state.stateWithheld.values.toSet()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // §9.4 — meta.synheart.sensing is present only for a host that declared
+        // a profile. Shown because it is the block a consumer must stratify on
+        // rather than pool across.
+        state.sensing?.let { sensing ->
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Text("sensing declaration", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(6.dp))
+            for (key in sensing.keys()) KeyValueRow(key, sensing.opt(key).toString())
+        }
+
         HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
         // Which modalities the runtime saw in this window, derived from
@@ -546,24 +587,28 @@ private fun AxisTable(state: HSIState, c: SynheartController) {
             ModalityChip("digital", state.modalities.digital, state.tiers.digital)
         }
 
+        // Do NOT read an empty modality set as "nothing was collected".
+        // Modality is derived from meta.provenance.sources[*].signals, and in
+        // core-runtime only the ingest_batch path registers a source at all:
+        // push_rr_batch, push_behavior_event, push_behavior and push_accel all
+        // feed the engine without ever appearing in provenance. So a window can
+        // be built from plenty of signal — with grounded axes above to prove
+        // it — and still report every modality absent.
         if (state.modalities.isEmpty) {
             Spacer(Modifier.height(8.dp))
             Text(
-                // Deliberately does not claim nothing was collected. Modality is
-                // derived from `meta.provenance.sources[*].signals`, so a window
-                // can carry behavior events the runtime never lists as a
-                // source — watch the behavior counter to tell the two apart.
                 if (c.behaviorEventCount > 0) {
                     "The runtime listed no source in this window's provenance, though " +
-                        "${c.behaviorEventCount} behavior events were captured and " +
-                        "pushed.\n\nDigital readings lag by one window: the runtime " +
-                        "flushes interaction events for the window that just closed and " +
-                        "attaches them to the NEXT emission. Keep the session running and " +
-                        "watch the digital axes above."
+                        "${c.behaviorEventCount} behavior events were captured and pushed — " +
+                        "and the axes above may well be grounded.\n\nThat is not a " +
+                        "contradiction. Only the ingest_batch path registers a source: the " +
+                        "direct FFI pushes (push_rr_batch, push_behavior_event, push_behavior, " +
+                        "push_accel) reach the engine without appearing in provenance. Trust " +
+                        "the axis confidences above over these chips."
                 } else {
-                    "No modality is present. The runtime closed this window without a " +
-                        "source it recognised, so every axis is reported at zero " +
-                        "confidence."
+                    "No modality is present. Either the runtime closed this window without a " +
+                        "source it recognised, or every contributing push arrived by a direct " +
+                        "FFI call, which registers no source. Read the axis confidences above."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -571,9 +616,11 @@ private fun AxisTable(state: HSIState, c: SynheartController) {
         } else if (!state.modalities.physiological) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Signal is arriving, but none of it is physiological. The five axes above " +
-                    "are derived from heart rate and HRV, so they stay at zero confidence " +
-                    "until a wearable or BLE strap is connected.",
+                "No PHYSIOLOGICAL source is listed in this window's provenance. If the five " +
+                    "axes above are at zero confidence, that is the reason — connect a " +
+                    "wearable or start the simulator. If they are grounded, the source simply " +
+                    "was not registered: only ingest_batch registers one, so RR pushed by " +
+                    "push_rr_batch counts toward the axes without showing up here.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -718,6 +765,157 @@ private fun SourceRow(
             },
         )
     }
+}
+
+/**
+ * The simulated cardiac source, and the one button that starts it.
+ *
+ * Deliberately the loudest card on the screen when it is running. A demo that
+ * streams invented physiology and looks identical to one reading a real strap
+ * is how fabricated numbers end up in a screenshot, a bug report, or a
+ * baseline — so the state, the tier and the cost to the on-device baselines
+ * are all stated where the button is.
+ */
+@Composable
+private fun CardiacSimulatorCard(c: SynheartController) {
+    val host = c.host
+    val streaming = host.isStreamingCardiac
+
+    SectionCard(
+        title = "Simulated cardiac source",
+        subtitle = "Fabricated beats through the real ingest path — push_rr_batch for the " +
+            "intervals, push_wear_hr for the rate. The only simulated source in this " +
+            "example; for exercising the integration when no wearable is attached.",
+        trailing = {
+            StatusPill(if (streaming) "streaming" else "off", if (streaming) PillTone.WARN else PillTone.NEUTRAL)
+        },
+    ) {
+        Column {
+            // The live readout is the point: a developer needs to see the rate
+            // move, stay inside a plausible envelope, and HRV collapse when the
+            // rate climbs. A single static number would prove none of that.
+            Row(Modifier.fillMaxWidth()) {
+                SimMetric("heart rate", host.latestSimBpm?.let { "%.0f".format(it) } ?: "—", "bpm", emphasis = true, modifier = Modifier.weight(1f))
+                SimMetric("RMSSD", host.latestSimRmssd?.let { "%.1f".format(it) } ?: "—", "ms", modifier = Modifier.weight(1f))
+                SimMetric("episode", host.simActivity, null, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (streaming) {
+                OutlinedButton(onClick = { host.stopCardiacStream() }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.StopCircle, null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Stop HR stream")
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = { host.startCardiacStream() },
+                    // With no pipeline there is nothing to ingest into.
+                    enabled = c.isSessionRunning,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Outlined.FavoriteBorder, null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Start HR stream")
+                }
+            }
+            if (!c.isSessionRunning) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Start a session first — with no pipeline there is nothing to ingest into.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (streaming) {
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                KeyValueRow("RR packets pushed", "${host.rrPacketsPushed}")
+                KeyValueRow("beats in those packets", "${host.beatsPushed}")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "One packet per notification, several intervals under a single arrival " +
+                        "timestamp — the shape a BLE Heart Rate Measurement arrives in. " +
+                        "push_rr_batch reconstructs a per-beat clock from the anchor; a loop of " +
+                        "push_rr walked backwards has every beat after the first rejected by " +
+                        "the ordering gate.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.WarningAmber, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    Text("These beats are not real", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "They reach the SRM, which builds this subject's longitudinal reference " +
+                        "ranges on this device — so run the simulator under a throwaway " +
+                        "subject_id and wipe local data afterwards (Setup tab).\n\nCardiac is " +
+                        "the only thing simulated here — no motion, speed, screen state, app " +
+                        "focus or notifications is fabricated alongside it.\n\nPushed as " +
+                        "provider \"sdk_wear\" (Tier 3), never \"ble_hrm\": that label routes " +
+                        "into the breathing detector's Tier-1 series. Withholding stops " +
+                        "working the moment a host lies about where a number came from.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimMetric(label: String, value: String, unit: String?, emphasis: Boolean = false, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            // weight(fill = false) so a long episode label ("moderate activity")
+            // wraps instead of overflowing a third of the card.
+            Text(
+                value,
+                modifier = Modifier.weight(1f, fill = false),
+                style = if (emphasis) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (unit != null) {
+                Spacer(Modifier.width(3.dp))
+                Text(unit, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/**
+ * Plain-language gloss for the withholding reasons a mobile host actually sees,
+ * so a developer does not have to find the rule pack to learn that two missing
+ * axes are a correct outcome rather than a bug.
+ */
+private fun withheldExplanation(reasons: Set<String>): String {
+    val lines = mutableListOf<String>()
+    if ("episodic_sensing" in reasons) {
+        lines += "episodic_sensing: capacity and mental_fatigue are withheld on every frame of " +
+            "an episodic host. Both integrate a trajectory, and an app that only runs in " +
+            "foreground slices cannot supply an unbroken one — so the engine withholds them " +
+            "with a reason rather than publishing a torn session clock."
+    }
+    if ("cold_start_confidence_exhausted" in reasons) {
+        lines += "cold_start_confidence_exhausted: a real reading at confidence 0, produced when " +
+            "the additive cold-start penalty consumed the whole multiplicative confidence " +
+            "chain. Render it as unavailable, not as a score of zero."
+    }
+    if (lines.isEmpty()) {
+        lines += "Each axis above was omitted for the stated reason. Show it as unavailable — " +
+            "never substitute a neutral default, which reads as a measurement."
+    }
+    return lines.joinToString("\n\n")
 }
 
 private val ISO = DateTimeFormatter.ISO_LOCAL_DATE_TIME
