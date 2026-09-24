@@ -113,6 +113,13 @@ fun buildRuntimeConfigMap(config: SynheartConfig, dataDir: String? = null): JSON
             put("extra_heads", JSONArray(config.extraHeads.map { it.wire }))
         }
 
+        // Both default to the runtime's own default (false), so the key is
+        // emitted only when the host asked for it. Sending `false` explicitly
+        // would be harmless but makes a config diff read as if the host made a
+        // choice it did not make.
+        if (config.emitDiagnostics) put("emit_diagnostics", true)
+        if (config.researchBaseline) put("research_baseline", true)
+
         // Host declarations are spread rather than nested: the runtime reads
         // `sensing` / `device_class` / `mask_profile` / `cfi_structural_components`
         // as top-level keys. An absent key means *undeclared*, which is a
