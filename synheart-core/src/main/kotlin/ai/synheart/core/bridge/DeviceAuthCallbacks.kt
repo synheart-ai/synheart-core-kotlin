@@ -1,7 +1,9 @@
 package ai.synheart.core.bridge
 
+import ai.synheart.core.SynheartLogger
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.sun.jna.Callback
@@ -117,41 +119,127 @@ internal object DeviceAuthCallbacks {
 
     // ---- Secure-storage callbacks (strong refs) -------------------------- //
 
-    private val prefs: SharedPreferences? by lazy {
-        val ctx = appContext ?: return@lazy null
-        runCatching {
-            val masterKey = MasterKey.Builder(ctx)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                ctx,
-                "synheart_core_secure_store",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-        }.getOrNull()
+    /**
+     * The secure store, opened on first successful use and reused afterwards.
+     *
+     * Deliberately NOT a `lazy` that caches a failure: `EncryptedSharedPreferences`
+     * creation goes through the Android Keystore, which is not ready for a
+     * moment after boot and faults on some OEM builds, and a `lazy` that
+     * memoised that first null made secure storage unavailable for the rest
+     * of the process — every `load` then read as "absent".
+     */
+    @Volatile private var prefsInstance: SharedPreferences? = null
+    private val prefsLock = Any()
+
+    private fun openPrefs(): SharedPreferences? {
+        prefsInstance?.let { return it }
+        val ctx = appContext ?: return null
+        synchronized(prefsLock) {
+            prefsInstance?.let { return it }
+            return try {
+                val masterKey = MasterKey.Builder(ctx)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    ctx,
+                    "synheart_core_secure_store",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                ).also { prefsInstance = it }
+            } catch (e: Exception) {
+                SynheartLogger.log(
+                    "[DeviceAuthCallbacks] secure store unavailable: " +
+                        "${e::class.java.name}: ${e.message}",
+                )
+                null
+            }
+        }
     }
+
+    /**
+     * Bounded retry budget for a transiently unavailable secure store
+     * (Keystore not ready right after boot, `UserNotAuthenticatedException`,
+     * OEM Keystore hiccups). ~1 s total (150 + 300 + 600 ms). The runtime
+     * holds its mutex across the storage callbacks, so this stays short on
+     * purpose.
+     */
+    private const val SECURE_LOAD_ATTEMPTS = 4
+    private const val SECURE_LOAD_INITIAL_BACKOFF_MS = 150L
 
     private fun storeKey(service: String, key: String) = "$service::$key"
 
     val store = StoreCb { svc, key, value ->
-        val p = prefs ?: return@StoreCb 1
+        val p = openPrefs() ?: return@StoreCb 1
         val s = svc?.getString(0); val k = key?.getString(0); val v = value?.getString(0)
         if (s == null || k == null || v == null) return@StoreCb 1
-        if (p.edit().putString(storeKey(s, k), v).commit()) 0 else 1
+        try {
+            if (p.edit().putString(storeKey(s, k), v).commit()) 0 else 1
+        } catch (e: Exception) {
+            SynheartLogger.log("[DeviceAuthCallbacks] secure_store($s, $k) failed: ${e.message}")
+            1
+        }
     }
+
+    /**
+     * `secure_load`: returns NULL ONLY when the key is genuinely absent.
+     *
+     * The C signature has no error channel, so a storage failure — the store
+     * could not be opened, or the read threw — is retried with a short bounded
+     * backoff and, if it still fails, ALSO returns NULL. On a runtime ≥ 0.31.1
+     * the provisioning marker turns that NULL into
+     * `ERR_SECURE_STORAGE_UNAVAILABLE` (retryable) instead of a re-minted
+     * storage master key; on an older runtime the re-mint — which orphans
+     * every blob sealed so far — remains (SDK-CONTRACT-CHANGES §4.4).
+     * Previously any failure returned NULL on the first try and read as
+     * "fresh install".
+     */
     val load = LoadCb { svc, key ->
-        val p = prefs ?: return@LoadCb null
         val s = svc?.getString(0); val k = key?.getString(0)
         if (s == null || k == null) return@LoadCb null
-        p.getString(storeKey(s, k), null)?.let(::cString)
+        val storageKey = storeKey(s, k)
+        var lastError: Throwable? = null
+        var backoffMs = SECURE_LOAD_INITIAL_BACKOFF_MS
+        for (attempt in 1..SECURE_LOAD_ATTEMPTS) {
+            val p = openPrefs()
+            if (p != null) {
+                try {
+                    // `contains` is the absent/present question; a null value
+                    // for a present key is treated as absent too.
+                    if (!p.contains(storageKey)) return@LoadCb null
+                    return@LoadCb p.getString(storageKey, null)?.let(::cString)
+                } catch (e: Exception) {
+                    lastError = e
+                }
+            }
+            if (attempt < SECURE_LOAD_ATTEMPTS) {
+                SynheartLogger.log(
+                    "[DeviceAuthCallbacks] secure_load($s, $k): secure storage unavailable " +
+                        "(${lastError?.message ?: "store could not be opened"}), " +
+                        "retry $attempt/${SECURE_LOAD_ATTEMPTS - 1}",
+                )
+                SystemClock.sleep(backoffMs)
+                backoffMs *= 2
+            }
+        }
+        SynheartLogger.log(
+            "[DeviceAuthCallbacks] secure_load($s, $k): secure storage unavailable after " +
+                "$SECURE_LOAD_ATTEMPTS attempts — returning NULL, which the runtime " +
+                "cannot tell from absent" + (lastError?.let { ": ${it.message}" } ?: ""),
+        )
+        null
     }
+
     val delete = DeleteStoreCb { svc, key ->
-        val p = prefs ?: return@DeleteStoreCb 1
+        val p = openPrefs() ?: return@DeleteStoreCb 1
         val s = svc?.getString(0); val k = key?.getString(0)
         if (s == null || k == null) return@DeleteStoreCb 1
-        if (p.edit().remove(storeKey(s, k)).commit()) 0 else 1
+        try {
+            if (p.edit().remove(storeKey(s, k)).commit()) 0 else 1
+        } catch (e: Exception) {
+            SynheartLogger.log("[DeviceAuthCallbacks] secure_delete($s, $k) failed: ${e.message}")
+            1
+        }
     }
 
     /** Allocate a NUL-terminated C string with the system allocator. The runtime
