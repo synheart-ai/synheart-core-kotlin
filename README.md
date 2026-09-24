@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -235,7 +235,7 @@ Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.2.0'
+    implementation 'ai.synheart:synheart-core:0.3.0'
 }
 ```
 
@@ -554,10 +554,12 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
+| `runtimeCompatibility` | Version gate result: the loaded runtime against `RuntimeCompat.WRITTEN_AGAINST` (0.31.1) and `MINIMUM` (0.20.0); `initialize` refuses below the minimum |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
 | `initRuntimeLoggingBuffered(filter)` / `drainRuntimeLogs()` | Pull-based logging |
+| `isHsiDeliveryBuffered` / `droppedHsiFrames` | Whether HSI is polled from the runtime's ring (runtime ≥ 0.31.1) and how many frames it evicted |
 
 > `runtimeDiagnostics()["missingSymbols"]` lists the symbols the loaded native
 > library turned out not to export. Check it before concluding a feature is
