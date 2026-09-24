@@ -266,6 +266,55 @@ class SynheartInstance private constructor(
         if (disposed) null else bridge.pushBehaviorEvent(event.toJson().toString())
 
     /**
+     * Whether the loaded runtime takes rich behavior events on this instance.
+     * Same probe the static [Synheart.supportsRichBehaviorEvents] runs for the
+     * personal runtime. Both instances load one native library, but a host
+     * feeding two handles should ask the handle it is about to feed.
+     */
+    val supportsRichBehaviorEvents: Boolean
+        get() = !disposed && bridge.supportsRichBehaviorEvents
+
+    // ── Context fan-in (app identity + keystroke context during a lab window) ─
+    //
+    // The static `Synheart.pushAppForeground` / `Synheart.pushContextEvent`
+    // reach the PERSONAL runtime only. A host running a second, research
+    // instance had no way to give it an app identity or context evidence, so
+    // every research window resolved to the `Unknown` app category (an
+    // all-zero interpretation-mask row) and carried `context_label: UK` with
+    // no evidence behind it. These are the per-instance equivalents.
+
+    /**
+     * Declare which application is in the foreground for THIS instance.
+     *
+     * Same contract as the static call: send at session start, on every
+     * foreground change, and on a slow heartbeat — repeats are steady-state
+     * observations, not switches. [app] is the Android package name.
+     * `true` accepted, `false` rejected, `null` when this instance is disposed
+     * or the runtime lacks `push_behavior_event`.
+     */
+    fun pushAppForeground(app: String, tsMs: Long = System.currentTimeMillis()): Boolean? =
+        pushBehaviorEvent(ai.synheart.core.models.BehaviorEventInput.appForeground(tsMs, app))
+
+    /**
+     * Push one privacy-preserving context event into this instance — the only
+     * source of `context.deviation.*`, and therefore of CFI. Mirrors the static
+     * [Synheart.pushContextEvent]; see it for the send-both-directions rule.
+     *
+     * `true` accepted, `false` rejected, `null` when this instance is disposed
+     * or the runtime does not export the symbol. A `false` most often means the
+     * runtime was built without the `app-context` cargo feature.
+     */
+    fun pushContextEvent(event: ai.synheart.core.models.ContextEventInput): Boolean? =
+        if (disposed) null else bridge.pushContextEvent(event.toJson().toString())
+
+    /**
+     * Raw-payload escape hatch for [pushContextEvent]; the static
+     * [Synheart.pushContextEventJson] explains when to prefer the typed call.
+     */
+    fun pushContextEventJson(event: JSONObject): Boolean? =
+        if (disposed) null else bridge.pushContextEvent(event.toString())
+
+    /**
      * Declare the window containing [tsMs] to be a rest window. One-shot: call
      * once per rest window, not once when a break begins.
      */
