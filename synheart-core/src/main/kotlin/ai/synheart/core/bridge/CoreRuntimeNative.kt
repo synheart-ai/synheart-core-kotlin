@@ -738,12 +738,41 @@ interface CoreRuntimeNative : Library {
     /** Unregister the HSI callback. */
     fun synheart_core_clear_hsi_callback(handle: Pointer?)
 
+    // Buffered (pull-based) HSI delivery — runtime ≥ 0.31.1. Optional: a
+    // runtime that predates these keeps the push-callback path. JNA raises
+    // UnsatisfiedLinkError at the call site, which CoreRuntimeBridge absorbs.
+
+    /**
+     * Switch this handle to buffered HSI delivery with a ring of `capacity`
+     * frames. Retires any registered push callback first (waiting for an
+     * in-flight dispatch) and resets the dropped-frame counter. The oldest
+     * frame is evicted when the ring is full. Returns 0, or 1 on a null handle.
+     */
+    fun synheart_core_init_hsi_buffered(handle: Pointer?, capacity: Int): Int
+
+    /**
+     * Every frame pending in the ring as a JSON array, oldest first; NULL —
+     * never an empty array — when nothing is pending. Caller frees.
+     */
+    fun synheart_core_drain_hsi(handle: Pointer?): Pointer?
+
+    /** Frames evicted from the ring since `init_hsi_buffered`. `u64` read as Long. */
+    fun synheart_core_dropped_hsi_frames(handle: Pointer?): Long
+
     /** Register a callback for streaming pipeline events. */
     fun synheart_core_set_stream_callback(
         handle: Pointer?,
         callback: StreamEventCallbackNative?,
         user_data: Pointer?,
     )
+
+    /**
+     * Unregister the stream callback. Runtime ≥ 0.31.1. Returns only once the
+     * callback can no longer be invoked, so its peer may be released at once;
+     * older runtimes have no clear entrypoint and the peer must be retired
+     * until `synheart_core_free`.
+     */
+    fun synheart_core_clear_stream_callback(handle: Pointer?)
 
     /** Start the streaming pipeline with a JSON config. Returns 0 on success. */
     fun synheart_core_stream_start(handle: Pointer?, config_json: String?): Int
