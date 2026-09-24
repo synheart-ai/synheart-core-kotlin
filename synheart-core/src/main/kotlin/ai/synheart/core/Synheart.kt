@@ -21,6 +21,8 @@ import ai.synheart.core.modules.phone.PhoneModule
 import ai.synheart.core.modules.behavior.BehaviorModule
 import ai.synheart.core.bridge.CoreRuntimeBridge
 import ai.synheart.core.bridge.DeviceAuthCallbacks
+import ai.synheart.core.bridge.RuntimeCompat
+import ai.synheart.core.bridge.RuntimeCompatResult
 import ai.synheart.core.config.SynheartMode
 import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.modules.interfaces.WindowType
@@ -635,6 +637,18 @@ object Synheart {
                 )
                 if (coreRuntime != null) {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
+
+                    // Version gate. The C ABI is additive, so an old vendored
+                    // library links fine and diverges silently; this is where
+                    // it becomes visible.
+                    val compat = RuntimeCompat.check(CoreRuntimeBridge.buildInfo())
+                    runtimeCompatibility = compat
+                    SynheartLogger.log(compat.message)
+                    if (!compat.isAcceptable) {
+                        coreRuntime?.close()
+                        coreRuntime = null
+                        throw IllegalStateException(compat.message)
+                    }
 
                     // Capture the canonical subject the runtime resolved (a
                     // device-auth derive may have changed it) so SDK subject
@@ -1411,6 +1425,16 @@ object Synheart {
      */
     val runtimeVersion: String?
         get() = CoreRuntimeBridge.runtimeVersion()
+
+    /**
+     * Result of the runtime version gate run at initialisation: the loaded
+     * runtime's version against [RuntimeCompat.WRITTEN_AGAINST] /
+     * [RuntimeCompat.MINIMUM]. Null before initialisation. Below the minimum
+     * [initialize] throws an [IllegalStateException] carrying the same
+     * message; between minimum and written-against it logs a warning once.
+     */
+    var runtimeCompatibility: RuntimeCompatResult? = null
+        private set
 
     private fun handleConsentChange(newConsent: ConsentSnapshot) {
         previousConsent = newConsent

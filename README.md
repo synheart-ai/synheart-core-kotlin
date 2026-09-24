@@ -554,6 +554,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
+| `runtimeCompatibility` | Version gate result: the loaded runtime against `RuntimeCompat.WRITTEN_AGAINST` (0.31.1) and `MINIMUM` (0.20.0); `initialize` refuses below the minimum |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
