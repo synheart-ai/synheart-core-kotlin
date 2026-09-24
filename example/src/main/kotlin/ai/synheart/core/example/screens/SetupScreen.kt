@@ -2,6 +2,7 @@ package ai.synheart.core.example.screens
 
 import ai.synheart.core.example.sdk.SynheartController
 import ai.synheart.core.example.ui.CodeBlock
+import ai.synheart.core.example.ui.ConsentToggle
 import ai.synheart.core.example.ui.ErrorBanner
 import ai.synheart.core.example.ui.KeyValueRow
 import ai.synheart.core.example.ui.PillTone
@@ -288,6 +289,70 @@ fun SetupScreen(c: SynheartController, padding: PaddingValues) {
                 }
             }
 
+            // §2 — the four declarations that change engine output. On this
+            // screen rather than the Host tab because they are config, read
+            // once at synheart_core_new: changing one after initialize() does
+            // nothing until the SDK is torn down and rebuilt.
+            item {
+                SectionCard(
+                    title = "Host declarations",
+                    subtitle = "Four declarations that change what the engine outputs. All " +
+                        "opt-in rather than derived from platform, because each one changes " +
+                        "the output of a host already in the field — the default, declaring " +
+                        "nothing, reproduces pre-0.16.0 behaviour exactly.",
+                    trailing = {
+                        StatusPill(
+                            if (c.host.declareHostProfile) "declared" else "undeclared",
+                            if (c.host.declareHostProfile) PillTone.GOOD else PillTone.NEUTRAL,
+                        )
+                    },
+                ) {
+                    Column {
+                        ConsentToggle(
+                            title = "Declare host profile",
+                            description = "Sends sensing, device_class, mask_profile and " +
+                                "cfi_structural_components: 4. Declaring device_class folds into " +
+                                "the SRM config_hash and INVALIDATES every persisted baseline — " +
+                                "the person re-warms 30 observations across 3 distinct days. " +
+                                "Declare it once at first launch and keep it stable.",
+                            value = c.host.declareHostProfile,
+                            onChanged = { if (!c.isInitialized) c.setDeclareHostProfile(it) },
+                        )
+                        ConsentToggle(
+                            title = "Claim continuous sensing",
+                            description = "Android earns continuous with the dataSync foreground " +
+                                "service the runner starts alongside the session, so this " +
+                                "declaration is already continuous here. The toggle exists for " +
+                                "parity with hosts that default to episodic — an iOS app with no " +
+                                "connected BLE peripheral — where flipping it is a way to SEE " +
+                                "Capacity and Mental Fatigue come back, not a way to earn them.",
+                            value = c.host.claimContinuousSensing,
+                            onChanged = {
+                                if (!c.isInitialized && c.host.declareHostProfile) {
+                                    c.setClaimContinuousSensing(it)
+                                }
+                            },
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (c.isInitialized) {
+                                "Locked while initialized — the config JSON is read once at " +
+                                    "synheart_core_new. Dispose on this tab to change them."
+                            } else {
+                                "The sensing roster names only the streams this host actually " +
+                                    "observes — cardiac, accelerometer, keystrokes — rather than " +
+                                    "taking the Android platform default, which would claim " +
+                                    "app_focus, notifications and screen_state this app never " +
+                                    "feeds. cfi_structural_components: 4 LOWERS conf_CFI for " +
+                                    "identical evidence by widening the coverage denominator."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
             item {
                 SectionCard(
                     title = "Config being used",
@@ -395,8 +460,20 @@ private fun ConfigListing(c: SynheartController) {
         add("")
         add("  // Declaring a module config activates that feature.")
         add("  wearConfig = WearConfig(),")
-        add("  phoneConfig = PhoneConfig(),")
-        add("  behaviorConfig = BehaviorConfig(),")
+        add("  // no phoneConfig — its collectors emit Random() values")
+        add("  behaviorConfig = BehaviorConfig(emitRawMotionSamples = true),")
+        add("")
+        add("  // §2 host declarations — off unless toggled above")
+        add(
+            if (c.host.declareHostProfile) {
+                "  hostDeclarations = HostDeclarations(sensing = Declared.Value(SensingProfile(…)), " +
+                    "deviceClass = Declared.Auto, maskProfile = Declared.Auto, cfiStructuralComponents = 4),"
+            } else {
+                "  hostDeclarations = HostDeclarations(),   // undeclared: pre-0.16.0 behaviour"
+            },
+        )
+        add("  extraHeads = listOf(MOVEMENT_REGULARITY, POSTURAL_STATE, ACTIVITY_STATE, LOCOMOTION_STATE),")
+        add("  windowMs = 60_000,")
         add("")
         add("  // Surfaces the runtime's own logs; without it the runtime logs nowhere.")
         add("  runtimeLogEnvFilter = \"info\",")

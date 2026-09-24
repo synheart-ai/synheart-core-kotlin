@@ -119,3 +119,8 @@ example/synheart/
 # below would be ignored too.
 example/env/*
 !example/env/synheart.credentials.example.json
+
+# Agent instruction files. Local working guidance, not part of the published
+# SDK — kept out of the repo so it can be edited freely without a review cycle.
+CLAUDE.md
+AGENTS.md

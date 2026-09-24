@@ -170,6 +170,65 @@ interface CoreRuntimeNative : Library {
     /** Push a fully-formed behavior event as JSON. Returns 0 on success. */
     fun synheart_core_push_behavior_event(handle: Pointer?, event_json: String?): Int
 
+    // ------------------------------------------------------------------ //
+    // Mobile host surface (engine 0.16.0 / core-runtime 0.26.0)           //
+    //                                                                    //
+    // JNA resolves each method lazily on first call, so a symbol the      //
+    // vendored runtime does not export surfaces as UnsatisfiedLinkError    //
+    // at the call site rather than at library load. CoreRuntimeBridge      //
+    // wraps every one of these in `soft()` for exactly that reason, and    //
+    // probes them for `mobileHostAbiSupport`. Do not call them directly.   //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Push a foreground-app context event as JSON. Returns 0 on acceptance.
+     * Compiled as an inert stub returning 1 unless the runtime was built with
+     * the `app-context` cargo feature.
+     */
+    fun synheart_core_push_context_event(handle: Pointer?, event_json: String?): Int
+
+    /** Push a GPS-derived ground speed sample in m/s. Ungated by ordering. */
+    fun synheart_core_push_speed(handle: Pointer?, ts_ms: Long, speed_mps: Double)
+
+    /** Declare the accelerometer mount. Discriminant per `AccelPlacement.code`. */
+    fun synheart_core_set_accel_placement(handle: Pointer?, placement: Int)
+
+    /** Declare the window containing `ts_ms` a rest window. One-shot. */
+    fun synheart_core_declare_rest_window(handle: Pointer?, ts_ms: Long)
+
+    /** Drain every completed window as a JSON array, oldest first. Caller frees. */
+    fun synheart_core_tick_all(handle: Pointer?, now_ms: Long): Pointer?
+
+    /** Emit every window held by the lateness budget, as a JSON array. Caller frees. */
+    fun synheart_core_flush_pending(handle: Pointer?, now_ms: Long): Pointer?
+
+    /**
+     * Advance the daily accumulator. `day_index` is days since epoch in the
+     * host's LOCAL zone and must strictly advance; returns
+     * ERR_DAILY_DAY_NOT_ADVANCING otherwise.
+     */
+    fun synheart_core_roll_day(handle: Pointer?, day_index: Int): Int
+
+    /** Export per-head session state as JSON. Caller frees. */
+    fun synheart_core_export_session_state(handle: Pointer?): Pointer?
+
+    /** Restore per-head session state. Must run before the first tick. Returns 0 on success. */
+    fun synheart_core_load_session_state(handle: Pointer?, json: String?): Int
+
+    /** The comparability key. Opaque; compare for equality only. Caller frees. */
+    fun synheart_core_config_id(handle: Pointer?): Pointer?
+
+    /** Most recent human-state vector as JSON, or null before the first window. Caller frees. */
+    fun synheart_core_last_hsv(handle: Pointer?): Pointer?
+
+    /**
+     * Score today's accumulated Strain and queue it onto the next HSI frame.
+     * Returns the score JSON, or null when nothing is scorable yet. Call
+     * BEFORE roll_day — rolling clears the values Strain is computed from.
+     * Caller frees.
+     */
+    fun synheart_core_attach_strain_score_json(handle: Pointer?): Pointer?
+
     /** Push sleep-stage data as a JSON array. */
     fun synheart_core_push_sleep_stages(handle: Pointer?, json: String?)
 

@@ -123,6 +123,35 @@ data class BehaviorConfig(
      * Independent of [enableMotionLite]. Also parity-only for now.
      */
     val emitRawMotionSamples: Boolean = false,
+
+    /**
+     * Report which application is in the foreground, so the engine has an app
+     * identity to type each window against.
+     *
+     * On by default, and the default matters: with no identity the runtime's
+     * `current_app` stays `None`, which resolves to the `Unknown` app category,
+     * whose interpretation-mask row is **all zeros**. CFI / Cognitive Load,
+     * Stress `B`, Mental Fatigue `B` and Focus's deviation sub-terms then read
+     * `0` for a person who was working the whole time.
+     *
+     * The identity reported is [foregroundAppId] when set, else the
+     * `DeviceAuthConfig.packageName`, else the application's own package name.
+     * Only reports while the app is foregrounded — naming your own app while
+     * the person is in someone else's attributes that app's window to yours.
+     * Supply [foregroundAppSource] to report the *real* foreground app
+     * (Android `UsageStatsManager`).
+     */
+    val reportForegroundApp: Boolean = true,
+
+    /** Explicit application identifier to report — an Android package name. */
+    val foregroundAppId: String? = null,
+
+    /**
+     * A real foreground-app source, replacing the self-reporting default.
+     * Implement over `UsageStatsManager` (permission `PACKAGE_USAGE_STATS`,
+     * granted through Settings).
+     */
+    val foregroundAppSource: ai.synheart.core.modules.behavior.ForegroundAppSource? = null,
 )
 
 /** Privacy sub-configuration. */
@@ -224,7 +253,34 @@ data class SynheartConfig(
      * POST — simply do not exist, and the silence reads as "nothing happened"
      * rather than "you never asked to be told".
      */
-    val runtimeLogEnvFilter: String? = null
+    val runtimeLogEnvFilter: String? = null,
+
+    /**
+     * Host declarations that change engine output — `sensing`, `device_class`,
+     * `mask_profile`, `cfi_structural_components`.
+     *
+     * Defaults to declaring nothing, so the runtime reproduces pre-0.16.0
+     * behaviour exactly. Declaring any of them is a deliberate act with
+     * consequences documented on [HostDeclarations] — most sharply, declaring
+     * `device_class` invalidates every persisted SRM baseline and costs the
+     * person a 30-observation re-warm across 3 days.
+     */
+    val hostDeclarations: HostDeclarations = HostDeclarations(),
+
+    /**
+     * Opt-in kinematic heads. Empty by default; they also require a body-worn
+     * accelerometer placement before they produce anything.
+     */
+    val extraHeads: List<ExtraHead> = emptyList(),
+
+    /**
+     * Inference window length in ms. Null leaves the runtime default (60 000).
+     *
+     * Note `step_ms` is **not** settable through this family — the full
+     * `synheart_core_*` runtime derives it from [mode]. Only the bare
+     * `synheart_core_edge_*` handle takes an explicit `step_ms`.
+     */
+    val windowMs: Long? = null,
 ) {
     /** Validate config and throw on violations. */
     fun validate() {

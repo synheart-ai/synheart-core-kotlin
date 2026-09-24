@@ -2,6 +2,7 @@ package ai.synheart.core.example
 
 import ai.synheart.core.example.screens.ConsentScreen
 import ai.synheart.core.example.screens.DiagnosticsScreen
+import ai.synheart.core.example.screens.HostScreen
 import ai.synheart.core.example.screens.SessionScreen
 import ai.synheart.core.example.screens.SetupScreen
 import ai.synheart.core.example.sdk.SynheartController
@@ -13,11 +14,13 @@ import androidx.activity.viewModels
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.PrivacyTip
+import androidx.compose.material.icons.outlined.SettingsInputAntenna
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,13 +50,20 @@ import kotlinx.coroutines.launch
 /**
  * Synheart Core SDK — reference example.
  *
- * Four tabs, one per step of the SDK lifecycle, in the order a host app
+ * Five tabs, one per step of the SDK lifecycle, in the order a host app
  * performs them:
  *
  *   Setup       → build a config and initialize
  *   Consent     → the runtime editable-form flow
  *   Session     → start collection, watch HSI arrive
+ *   Host        → what the host has to keep DOING once a session is live:
+ *                 the tick loop, rest declaration, snapshots, daily loop
  *   Runtime     → native runtime health
+ *
+ * The Host tab is the one that is easy to skip and shouldn't be. Everything
+ * before it is configuration; a host that stops there gets a session that
+ * emits no windows from interaction, scores every break as engaged, and
+ * re-warms its baselines from cold on every launch.
  *
  * All SDK calls live in [SynheartController]. Screens only read state from it
  * and call its methods, so the integration is legible in one file.
@@ -102,6 +112,15 @@ class MainActivity : ComponentActivity() {
         controller.onResumed()
     }
 
+    /**
+     * §6 — flush and persist on the way out. An Android process may not be
+     * scheduled again before it is killed, so this cannot wait for onStop.
+     */
+    override fun onPause() {
+        controller.onPaused()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // Only on a real teardown — isFinishing is false for a rotation, where
@@ -140,6 +159,7 @@ private val TABS = listOf(
     Tab("Setup", Icons.Outlined.Tune, Icons.Filled.Tune),
     Tab("Consent", Icons.Outlined.PrivacyTip, Icons.Filled.PrivacyTip),
     Tab("Session", Icons.Outlined.PlayCircleOutline, Icons.Filled.PlayCircle),
+    Tab("Host", Icons.Outlined.SettingsInputAntenna, Icons.Filled.SettingsInputAntenna),
     Tab("Runtime", Icons.Outlined.MonitorHeart, Icons.Filled.MonitorHeart),
 )
 
@@ -202,6 +222,7 @@ private fun HomeShell(c: SynheartController) {
             0 -> SetupScreen(c, padding)
             1 -> ConsentScreen(c, padding)
             2 -> SessionScreen(c, padding)
+            3 -> HostScreen(c, padding)
             else -> DiagnosticsScreen(c, padding)
         }
     }

@@ -709,29 +709,10 @@ object Synheart {
                         SynheartLogger.log("[Synheart] init consent self-heal failed: ${e.message}")
                     }
 
-                    // Wire HSI callback (consent-gated) + bridge to session engine
-                    coreRuntime!!.setHsiCallback { hsiJson ->
-                        if (consentModule?.current()?.biosignals != true) return@setHsiCallback
-                        // A window completed by a per-event push arrives twice —
-                        // once here and once as an ingest return value. Drop the
-                        // repeat so subscribers and the session buffer see it once.
-                        if (!hsiDeduper.shouldDeliver(hsiJson)) return@setHsiCallback
-                        _hsiJsonFlow.value = hsiJson
-                        synchronized(sessionHsiWindows) { sessionHsiWindows.add(hsiJson) }
-
-                        // Bridge HSI metrics to session engine
-                        val sid = activeMainSessionId
-                        if (sid != null && sessionModule != null) {
-                            try {
-                                val parsed = org.json.JSONObject(hsiJson)
-                                val metricsMap = mutableMapOf<String, Any>()
-                                parsed.keys().forEach { key ->
-                                    parsed.opt(key)?.let { metricsMap[key] = it }
-                                }
-                                sessionModule?.ingestHsiMetrics(metricsMap)
-                            } catch (_: Exception) {}
-                        }
-                    }
+                    // Wire HSI callback (consent-gated) + bridge to session engine.
+                    // The body lives in [deliverHsiWindow] so the host-driven
+                    // tick family reaches the same streams by the same rules.
+                    coreRuntime!!.setHsiCallback { hsiJson -> deliverHsiWindow(hsiJson) }
 
                     // Update WearableEventProcessor with the live bridge
                     wearModule?.eventProcessor?.updateBridge(coreRuntime)
@@ -747,8 +728,40 @@ object Synheart {
                     behaviorModule?.pushBehaviorToRuntime = { tsMs, eventType, value ->
                         coreRuntime?.pushBehavior(tsMs, eventType, value)
                     }
+                    // The rich path, tried first by the module. Returns null when
+                    // the vendored runtime predates
+                    // `synheart_core_push_behavior_event`, which is the module's
+                    // signal to fall back to the int-coded call above. Passing
+                    // the null through unchanged is load-bearing — swallowing it
+                    // would drop every event on an older runtime instead of
+                    // degrading to the legacy path.
+                    behaviorModule?.pushBehaviorEventToRuntime = { event ->
+                        coreRuntime?.pushBehaviorEvent(event.toJson().toString())
+                    }
+                    // The context-evidence channel, additional to the behaviour
+                    // channel above rather than an alternative to it. Different
+                    // runtime buffer, different consumer: it feeds the
+                    // person-relative context window, the only source of
+                    // `context.deviation.*` and so of Cognitive Load's friction
+                    // index. Unwired, pause / error / scroll deviation are
+                    // structurally zero on every window.
+                    behaviorModule?.pushContextEventToRuntime = { event ->
+                        coreRuntime?.pushContextEvent(event.toJson().toString())
+                    }
                     behaviorModule?.pushAccelToRuntime = { tsMs, ax, ay, az ->
                         coreRuntime?.pushAccel(tsMs, ax, ay, az)
+                    }
+                    // The sensor behind that callback. Nothing fed it before:
+                    // this module is driven by the host's touch dispatch, not by
+                    // the synheart-behavior collectors, so `emitRawMotionSamples`
+                    // turned on a forwarder with no accelerometer behind it and
+                    // the kinematic modality could not reach the runtime on
+                    // Android at all.
+                    this.context?.let { ctx ->
+                        behaviorModule?.attachAccelerometer(
+                            ctx,
+                            enabled = resolvedConfig.behaviorConfig?.emitRawMotionSamples == true,
+                        )
                     }
 
                     // Breathing compliance rides the same RR stream the fusion
@@ -821,6 +834,7 @@ object Synheart {
                     // Still start Kotlin-side modules for data collection pipeline
                     moduleManager.startAll()
                     reevaluateAllFeatures()
+                    startForegroundAppReporter()
                     return
                 } catch (e: Exception) {
                     SynheartLogger.log("[Synheart] CoreRuntimeBridge startSession parse failed, falling back: $e")
@@ -867,6 +881,7 @@ object Synheart {
 
         isRunning = true
         reevaluateAllFeatures()
+        startForegroundAppReporter()
         SynheartLogger.log("[Synheart] Session started")
     }
 
@@ -883,6 +898,7 @@ object Synheart {
             if (cr.stopSession()) {
                 SynheartLogger.log("[Synheart] Session stopped via CoreRuntimeBridge")
                 maybeFlushOnStop()
+                stopForegroundAppReporter()
                 currentSessionHandle = null
                 isRunning = false
                 reevaluateAllFeatures()
@@ -914,11 +930,114 @@ object Synheart {
             }
         }
 
+        stopForegroundAppReporter()
         currentSessionHandle = null
         isRunning = false
         reevaluateAllFeatures()
         moduleManager.stopAll()
         SynheartLogger.log("[Synheart] Session stopped")
+    }
+
+    // ── Foreground-app identity ──────────────────────────────────────────
+
+    /**
+     * Resolves the foreground app for the life of the session. See
+     * [ai.synheart.core.config.BehaviorConfig.reportForegroundApp] for why an
+     * app identity is load-bearing rather than decorative.
+     */
+    private var activeForegroundAppReporter: ai.synheart.core.modules.behavior.ForegroundAppReporter? = null
+
+    /**
+     * Gates the reporter on app lifecycle.
+     *
+     * The default self source reports *this* app's id, which is the truth while
+     * the person is here and a lie the moment they leave — a heartbeat that
+     * kept asserting it from the background would attribute another app's
+     * window to this one. So it runs only while an Activity is started, and
+     * resumes with an immediate resolve so the window the person came back into
+     * is typed. Counted, not per-Activity: a transition between two of the
+     * host's own Activities goes stop→start with the count never reaching 0.
+     */
+    private var foregroundGate: android.app.Application.ActivityLifecycleCallbacks? = null
+    private var startedActivities = 0
+
+    /** The reporter, for host diagnostics. Null when off or no usable id was found. */
+    val foregroundAppReporter: ai.synheart.core.modules.behavior.ForegroundAppReporter?
+        get() = activeForegroundAppReporter
+
+    /**
+     * Pick a foreground-app identity: explicit config, else the attestation
+     * package name, else the application's own package name. `appId` is NOT a
+     * fallback — hosts legitimately set it to a Synheart-issued `app_…` id,
+     * which would never match the taxonomy.
+     */
+    private fun resolveForegroundAppId(): String? {
+        val behavior = synheartConfig?.behaviorConfig
+        behavior?.foregroundAppId?.takeIf { it.isNotEmpty() }?.let { return it }
+        synheartConfig?.deviceAuthConfig?.packageName?.takeIf { it.isNotEmpty() }?.let { return it }
+        return context?.packageName
+    }
+
+    private fun startForegroundAppReporter() {
+        // A host that passes no BehaviorConfig still gets the reporter: the
+        // field defaults to true, and an absent config is "I did not think about
+        // this", not "do not report".
+        val behavior = synheartConfig?.behaviorConfig ?: ai.synheart.core.config.BehaviorConfig()
+        if (!behavior.reportForegroundApp) return
+        if (activeForegroundAppReporter != null) return
+
+        val source = behavior.foregroundAppSource
+            ?: resolveForegroundAppId()?.let {
+                ai.synheart.core.modules.behavior.SelfForegroundAppSource(it)
+            }
+        if (source == null) {
+            SynheartLogger.log(
+                "[Synheart] reportForegroundApp is on but no usable application id was found — " +
+                    "set BehaviorConfig.foregroundAppId. Until then every window is typed " +
+                    "against the Unknown app category, whose interpretation-mask row is all zeros.",
+            )
+            return
+        }
+
+        val reporter = ai.synheart.core.modules.behavior.ForegroundAppReporter(
+            source = source,
+            push = { event -> coreRuntime?.pushBehaviorEvent(event.toJson().toString()) },
+            scope = scope,
+        )
+        activeForegroundAppReporter = reporter
+        reporter.start()
+        attachForegroundGate(reporter)
+    }
+
+    private fun attachForegroundGate(reporter: ai.synheart.core.modules.behavior.ForegroundAppReporter) {
+        if (foregroundGate != null) return
+        val app = context?.applicationContext as? android.app.Application ?: return
+        startedActivities = 0
+        val gate = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: android.app.Activity) {
+                if (startedActivities++ == 0) reporter.start()
+            }
+            override fun onActivityStopped(activity: android.app.Activity) {
+                startedActivities = (startedActivities - 1).coerceAtLeast(0)
+                if (startedActivities == 0) reporter.stop()
+            }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) = Unit
+            override fun onActivityResumed(a: android.app.Activity) = Unit
+            override fun onActivityPaused(a: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(a: android.app.Activity) = Unit
+        }
+        app.registerActivityLifecycleCallbacks(gate)
+        foregroundGate = gate
+    }
+
+    private fun stopForegroundAppReporter() {
+        foregroundGate?.let { gate ->
+            (context?.applicationContext as? android.app.Application)?.unregisterActivityLifecycleCallbacks(gate)
+        }
+        foregroundGate = null
+        activeForegroundAppReporter?.stop()
+        activeForegroundAppReporter = null
     }
 
     /**
@@ -1506,7 +1625,71 @@ object Synheart {
      * Only needed by hosts driving the runtime manually; normal collection
      * ticks itself.
      */
-    fun tick(nowMs: Long = System.currentTimeMillis()): String? = coreRuntime?.tick(nowMs)
+    fun tick(nowMs: Long = System.currentTimeMillis()): String? {
+        val hsi = coreRuntime?.tick(nowMs)
+        // A host-driven tick is the only clock a behavior-only session has, and
+        // its window would otherwise never reach [onStateUpdate] — the native
+        // callback does not fire for it. Deduplicated by `hsi_id`, so this is
+        // safe alongside that callback.
+        if (!hsi.isNullOrEmpty()) deliverHsiWindow(hsi)
+        return hsi
+    }
+
+    /**
+     * Consent-gate one completed HSI window and fan it out to [onHSIUpdate] /
+     * [onStateUpdate], the session buffer, and the session engine.
+     *
+     * Shared by every producer — the native callback, [tick], [tickAll],
+     * [flushPending] — so they all obey the same consent rule and the same
+     * dedup. Before this was factored out only the native callback fed the
+     * streams, so a host that ticked explicitly (which §6.1 of the mobile host
+     * guide requires for the whole session, since `push_behavior` does not
+     * advance the clock) saw `onStateUpdate` stay silent for every window its
+     * own loop drained.
+     */
+    private fun deliverHsiWindow(hsiJson: String) {
+        if (consentModule?.current()?.biosignals != true) return
+        // A window completed by a per-event push arrives twice — once via the
+        // native callback and once as an ingest/tick return value. Drop the
+        // repeat so subscribers and the session buffer see it once.
+        if (!hsiDeduper.shouldDeliver(hsiJson)) return
+        _hsiJsonFlow.value = hsiJson
+        synchronized(sessionHsiWindows) { sessionHsiWindows.add(hsiJson) }
+
+        // Bridge HSI metrics to session engine
+        val sid = activeMainSessionId
+        if (sid != null && sessionModule != null) {
+            try {
+                val parsed = org.json.JSONObject(hsiJson)
+                val metricsMap = mutableMapOf<String, Any>()
+                parsed.keys().forEach { key ->
+                    parsed.opt(key)?.let { metricsMap[key] = it }
+                }
+                sessionModule?.ingestHsiMetrics(metricsMap)
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Fan a `tick_all` / `flush_pending` JSON array out to the HSI streams.
+     *
+     * Both return an array of HSI documents rather than the single document
+     * [tick] returns. Each is re-encoded rather than passed as a parsed object
+     * because the delivery path is string-based end to end — the deduper reads
+     * `meta.ids.hsi_id` off the raw text and [HSIState] keeps it as `rawJson`.
+     */
+    private fun deliverHsiArray(arrayJson: String?) {
+        if (arrayJson.isNullOrEmpty()) return
+        val windows = try {
+            org.json.JSONArray(arrayJson)
+        } catch (e: Exception) {
+            SynheartLogger.log("[Synheart] tick_all/flush_pending returned unparseable JSON: ${e.message}")
+            return
+        }
+        for (i in 0 until windows.length()) {
+            windows.optJSONObject(i)?.let { deliverHsiWindow(it.toString()) }
+        }
+    }
 
     /** Last computed feature vector as JSON, or null. */
     fun lastFeatures(): String? = coreRuntime?.lastFeatures()
@@ -1628,9 +1811,46 @@ object Synheart {
         coreRuntime?.pushRrBatch(anchorTsMs, rrMs, order, provider)
     }
 
-    /** Push a heart-rate sample in BPM. */
-    fun pushWearHr(tsMs: Long, bpm: Double) {
-        coreRuntime?.pushHr(tsMs, bpm)
+    /**
+     * Push a heart-rate sample in BPM, with provider attribution.
+     *
+     * Routed through `ingest_batch` as a single-event batch rather than the
+     * bare `push_hr` FFI, for two reasons that both matter on a phone:
+     *
+     * * `ingest_batch` is the **only** path in core-runtime that registers a
+     *   source in `meta.provenance.sources`. A sample pushed through `push_hr`
+     *   moves the axes but never appears in provenance, so the physiological
+     *   modality reads absent while the rate is visibly grounded.
+     * * It carries [provider], which the direct FFI cannot, and the provider
+     *   table is what decides the tier and the signal kinds registered.
+     *
+     * Use a provider the runtime knows. `ble_hrm` is Tier 1 and routes into
+     * the breathing detector's Tier-1 series — never claim it for anything
+     * that is not a real true-RR strap. `sdk_wear` is Tier 3 and registers
+     * `hr`; `default_sensor` is also Tier 3 but has **no row in the signal
+     * table**, so it registers nothing and blinds modality derivation. The
+     * default here is therefore `sdk_wear`.
+     */
+    fun pushWearHr(tsMs: Long, bpm: Double, provider: String = "sdk_wear") {
+        ingestSingleEvent(
+            org.json.JSONObject()
+                .put("type", "hr")
+                .put("ts_ms", tsMs)
+                .put("bpm", bpm)
+                .put("provider", provider),
+        )
+    }
+
+    /**
+     * Serialize one sensor event and hand it to `ingest_batch`. When the batch
+     * completes a window the result is delivered through the same deduped,
+     * consent-gated path the native callback uses, so `onStateUpdate` and the
+     * session buffer both see it exactly once.
+     */
+    private fun ingestSingleEvent(event: org.json.JSONObject) {
+        val runtime = coreRuntime ?: return
+        val hsi = runtime.ingestBatch(org.json.JSONArray().put(event).toString(), System.currentTimeMillis())
+        if (!hsi.isNullOrEmpty()) deliverHsiWindow(hsi)
     }
 
     /** Push a 3-axis accelerometer sample. */
@@ -1684,6 +1904,205 @@ object Synheart {
      */
     fun ingestBatch(batchJson: String, nowMs: Long = System.currentTimeMillis()): String? =
         coreRuntime?.ingestBatch(batchJson, nowMs)
+
+    // ══════════════════════════════════════════════════════════════════ //
+    // Mobile host surface — engine 0.16.0                                  //
+    //                                                                     //
+    // The typed path and the lifecycle calls a mobile host has to drive.  //
+    // Every one degrades when the vendored runtime predates the symbol;   //
+    // [mobileHostAbiSupport] says which do anything on this device.       //
+    // ══════════════════════════════════════════════════════════════════ //
+
+    /**
+     * Which mobile-host ABI calls the loaded native runtime exports.
+     *
+     * A binding existing in this SDK is not the same as the call working on
+     * the device: the vendored runtime is a pinned artifact and lags the source
+     * tree. Every `false` entry is a call that silently no-ops (or returns
+     * `null`) — drive a capability table off this rather than assuming, and
+     * re-vendor with `synheart install runtime` to close a gap.
+     *
+     * Empty when the native runtime is not loaded at all.
+     */
+    val mobileHostAbiSupport: Map<String, Boolean>
+        get() = coreRuntime?.mobileHostAbiSupport ?: emptyMap()
+
+    /**
+     * Whether the loaded runtime can take rich behavior events. Check this
+     * before choosing between the windowed-summary path and the per-keystroke
+     * legacy path — the two must never both run for the same keystrokes.
+     */
+    val supportsRichBehaviorEvents: Boolean
+        get() = coreRuntime?.supportsRichBehaviorEvents ?: false
+
+    /**
+     * Push a typed behavior event carrying its full payload.
+     *
+     * `true` accepted, `false` rejected, `null` when the loaded runtime does
+     * not export `synheart_core_push_behavior_event` — a `null` means "this
+     * build cannot take rich events", not "the event was bad".
+     *
+     * **Do not double-count.** If you send a windowed `Typing` summary, do not
+     * also push the raw keystrokes that produced it: the engine counts both and
+     * every rate feature roughly doubles.
+     */
+    fun pushBehaviorEvent(event: ai.synheart.core.models.BehaviorEventInput): Boolean? =
+        coreRuntime?.pushBehaviorEvent(event.toJson().toString())
+
+    /**
+     * Push one privacy-preserving context event — keyboard, pointer or shortcut.
+     *
+     * The **only** source of `context.deviation.*`, and therefore of Cognitive
+     * Load's friction index. A host pushing rich behaviour events but no
+     * context events leaves `pause_elevation`, `err_elevation` and
+     * `scroll_deviation` structurally zero on every window.
+     *
+     * A *second* channel, not an alternative to [pushBehaviorEvent]: different
+     * buffers, different consumers, so one event on each per user action is not
+     * a double count. **Keyboard events must come from the host's text layer**
+     * via [ai.synheart.core.models.ContextEventInput.textChange], sent for both
+     * directions — `err_rate` is `N_corr / N_key`.
+     *
+     * `true` accepted, `false` rejected, `null` symbol absent. A `false` most
+     * often means the runtime was built without the `app-context` cargo
+     * feature, which compiles the call as an inert stub that always returns 1.
+     */
+    fun pushContextEvent(event: ai.synheart.core.models.ContextEventInput): Boolean? =
+        coreRuntime?.pushContextEvent(event.toJson().toString())
+
+    /**
+     * Push a raw context-event payload. Escape hatch for a shape this SDK's
+     * [ai.synheart.core.models.ContextEventInput] does not model yet. Prefer
+     * the typed call: the wire form is an externally-tagged Rust enum, a payload
+     * that does not parse buffers nothing, and the failure is indistinguishable
+     * from a runtime built without the context feature.
+     */
+    fun pushContextEventJson(event: org.json.JSONObject): Boolean? =
+        coreRuntime?.pushContextEvent(event.toString())
+
+    /**
+     * Declare which application is in the foreground.
+     *
+     * The call that gives the engine an app identity at all. Without it the
+     * runtime's `current_app` stays `None`, `None` resolves to the `Unknown`
+     * app category, and `Unknown`'s interpretation-mask row is **all zeros** —
+     * CFI / Cognitive Load, Stress `B`, Mental Fatigue `B` and Focus's
+     * deviation sub-terms all read `0` for a person who was working the whole
+     * time. The SDK runs a 30 s heartbeat of this for you; call it directly
+     * only for a source the SDK does not have. Repeats are steady-state
+     * observations, not switches.
+     */
+    fun pushAppForeground(app: String, tsMs: Long = System.currentTimeMillis()): Boolean? =
+        pushBehaviorEvent(ai.synheart.core.models.BehaviorEventInput.appForeground(tsMs, app))
+
+    /**
+     * Score today's accumulated Strain and attach it to the next HSI frame.
+     *
+     * Returns the score JSON, or `null` when the symbol is absent **or** the day
+     * has nothing scorable yet. **Call before [rollDay]** — rolling clears the
+     * values Strain is computed from, so a host that rolls first never emits a
+     * Strain score. `rollDay` does not score for you.
+     */
+    fun attachStrainScore(): String? = coreRuntime?.attachStrainScoreJson()
+
+    /**
+     * Push a GPS-derived ground speed sample in **m/s** — the high-confidence
+     * input for `locomotion_state`. Ordering does not matter: speed is drained
+     * by window range and reduced to a median.
+     */
+    fun pushSpeed(tsMs: Long, speedMps: Double) {
+        coreRuntime?.pushSpeed(tsMs, speedMps)
+    }
+
+    /**
+     * Declare where the accelerometer physically sits.
+     *
+     * The four kinematic heads withhold entirely under
+     * [ai.synheart.core.models.AccelPlacement.UNKNOWN], and only `POCKET` and
+     * `WAIST` are inside the validated envelope. Placement on a phone is
+     * dynamic — re-declare it as it changes rather than setting it once.
+     */
+    fun setAccelPlacement(placement: ai.synheart.core.models.AccelPlacement) {
+        coreRuntime?.setAccelPlacement(placement.code)
+    }
+
+    /**
+     * Declare the window containing [tsMs] to be a rest window.
+     *
+     * Composite definition: screen off for ≥ 2 min **and** no interaction
+     * **and** low motion, with a wall-clock sleep window as an override.
+     * Screen-off alone is not rest.
+     *
+     * One-shot: call it once per rest *window*, not once when a break begins.
+     * Without it Focus is never zeroed on a break and Capacity never takes the
+     * recovery path, so break windows score as engaged.
+     */
+    fun declareRestWindow(tsMs: Long) {
+        coreRuntime?.declareRestWindow(tsMs)
+    }
+
+    /**
+     * Drain every completed window as a JSON array, oldest first.
+     *
+     * Prefer this to [tick] after any gap — `tick` polls a single window, so a
+     * backgrounded stretch silently skips the windows it spanned. `null` when
+     * the runtime predates `synheart_core_tick_all`; fall back to [tick] in
+     * that case rather than assuming there were no windows.
+     *
+     * Every window it drains is also delivered through [onHSIUpdate] /
+     * [onStateUpdate], so a host running its own tick loop does not have to
+     * parse the return value to keep the documented streams alive.
+     */
+    fun tickAll(nowMs: Long = System.currentTimeMillis()): String? {
+        val json = coreRuntime?.tickAll(nowMs)
+        deliverHsiArray(json)
+        return json
+    }
+
+    /**
+     * Emit every window still held by the lateness budget.
+     *
+     * Call on backgrounding and at session end, or up to one budget's worth of
+     * windows is stranded forever. Same array shape as [tickAll], and likewise
+     * delivered to the streams; `null` when the symbol is absent.
+     */
+    fun flushPending(nowMs: Long = System.currentTimeMillis()): String? {
+        val json = coreRuntime?.flushPending(nowMs)
+        deliverHsiArray(json)
+        return json
+    }
+
+    /**
+     * Advance the daily accumulator. [dayIndex] is days since epoch in the
+     * host's **local** zone and must strictly advance.
+     *
+     * Skip it and the engine adopts a provisional UTC day, which is wrong for
+     * most of the world. `null` when the symbol is absent.
+     */
+    fun rollDay(dayIndex: Int): Int? = coreRuntime?.rollDay(dayIndex)
+
+    /**
+     * Export per-head session state — Capacity, Mental Fatigue, Stress, Valence
+     * and the context engine. Persist once per emitted window and on
+     * background/terminate.
+     */
+    fun exportSessionState(): String? = coreRuntime?.exportSessionState()
+
+    /**
+     * Restore session state. **Must run before the first tick** — window 1
+     * writes each head's state slot, so a later restore is overwritten by a
+     * cold window. `true` success, `false` rejected, `null` symbol absent.
+     */
+    fun loadSessionState(json: String): Boolean? = coreRuntime?.loadSessionState(json)
+
+    /**
+     * The comparability key. Persist it beside any cached score: a score
+     * computed under a different `config_id` is not comparable to a new one.
+     */
+    fun configId(): String? = coreRuntime?.configId()
+
+    /** Most recent human-state vector as JSON, or `null` before the first window has closed. */
+    fun lastHsv(): String? = coreRuntime?.lastHsv()
 
     // ══════════════════════════════════════════════════════════════════ //
     // Personalization — task, focus, workout                              //
@@ -1742,9 +2161,10 @@ object Synheart {
      * Feed one day of a wearable-derived dimension into the SRM — the path
      * historical import uses to populate baselines.
      *
-     * Recognized dimensions include `hrv_rmssd_ms`, `resting_hr_bpm`,
-     * `sleep_efficiency`, `recovery_score`, `deep_sleep_min`, `rem_sleep_min`
-     * and `daily_strain`.
+     * Recognized dimensions: `sleep_need`, `sleep_regularity`, `hrv_rmssd`,
+     * `hrv_sdnn`, `resting_hr`, `recovery_score`, `deep_sleep_min`,
+     * `rem_sleep_min` and `daily_strain`. (Not `hrv_rmssd_ms` /
+     * `resting_hr_bpm` — an unrecognised dimension is dropped silently.)
      *
      * [dayIndex] is the unix-epoch day (see [epochDayFor]). [fidelity] is
      * `0 = raw observation`, `1 = vendor summary`; most vendor backfill pushes

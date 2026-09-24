@@ -13,6 +13,23 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        Foreground service for the sensing session (mobile host guide §6.2).
+
+        The runtime has no internal ticker — the host drives tick_all once a
+        second — so a backgrounded process that Android stops scheduling stops
+        emitting HSI windows entirely, silently, while the session still reads
+        as "collecting". This keeps the process alive for the whole session
+        rather than only while a keyboard is up.
+
+        Android 14+ requires the TYPED permission alongside the generic one, and
+        the type must be declared both here and at the startForeground() call
+        site; declaring only FOREGROUND_SERVICE throws
+        MissingForegroundServiceTypeException on 14+.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Health Connect, required for the wear module to read heart rate and HRV.
          Grant these at first launch; with no wearable paired Health Connect has
          no data to give, and the Session screen says so rather than inventing
@@ -44,6 +61,33 @@
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
         </activity>
+
+        <!--
+            dataSync: keeps streaming and processing sensor data. Android 15+
+            caps dataSync services at roughly six hours per day; past that the
+            system stops them, and the host relies on flush_pending plus the
+            three persisted snapshots to make the resumption lossless.
+        -->
+        <service
+            android:name=".SensingForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!--
+            Notification listener (§5.2.1). Also declared by synheart-behavior's
+            own library manifest as of this change, so this is redundant when the
+            sibling checkout is used — but the published artifact predates that,
+            and an identical declaration merges cleanly. It is inert until the
+            person grants notification access in system settings.
+        -->
+        <service
+            android:name="ai.synheart.behavior.SynheartNotificationListenerService"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Health Connect requires a permission-usage target. -->
         <activity-alias

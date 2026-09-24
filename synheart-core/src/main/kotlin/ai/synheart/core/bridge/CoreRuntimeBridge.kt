@@ -1,6 +1,7 @@
 package ai.synheart.core.bridge
 
 import ai.synheart.core.config.unwrapSyncEnvelope
+import com.sun.jna.NativeLibrary
 import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
 import org.json.JSONArray
@@ -463,9 +464,199 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         lib.synheart_core_push_behavior(requireHandle(), tsMs, eventType, value)
     }
 
-    /** Push a fully-formed behavior event as JSON. Returns true on success. */
-    fun pushBehaviorEvent(eventJson: String): Boolean = soft("push_behavior_event", false) {
+    /**
+     * Push a fully-formed behavior event as JSON.
+     *
+     * Returns `true` when the runtime accepted it, `false` when it rejected it,
+     * and **`null` when the loaded runtime does not export the symbol**. The
+     * three-way result is load-bearing: `BehaviorModule` reads `null` as "fall
+     * back to the legacy int-coded push" and anything else as "the rich path
+     * handled it". Collapsing null into false would send every event down both
+     * paths on an old runtime and double-count all of them.
+     *
+     * Prefer the typed `BehaviorEventInput` wrapper on the facade — the `kind`
+     * string is a closed set and an unrecognised one is dropped silently.
+     */
+    fun pushBehaviorEvent(eventJson: String): Boolean? = soft("push_behavior_event", null) {
         lib.synheart_core_push_behavior_event(requireHandle(), eventJson) == 0
+    }
+
+    // ------------------------------------------------------------------ //
+    // Mobile host surface                                                 //
+    //                                                                    //
+    // Each of these degrades when the vendored runtime predates the       //
+    // symbol. Where a result matters, `null` means "absent from this       //
+    // runtime" and is distinct from a rejection, so a caller can tell an   //
+    // unavailable ABI from a bad event.                                   //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Whether the loaded library exports [symbol].
+     *
+     * JNA binds lazily, so the only way to know before calling is to ask the
+     * loader. `getFunction` throws for an absent export, which is the probe.
+     * Result is not cached here — the caller table [mobileHostAbiSupport]
+     * is the thing hosts read, and it is cheap enough to recompute.
+     */
+    private fun hasSymbol(symbol: String): Boolean = try {
+        NativeLibrary.getInstance("synheart_core_runtime").getFunction(symbol)
+        true
+    } catch (e: UnsatisfiedLinkError) {
+        false
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Which mobile-host ABI calls the *loaded* runtime actually exports.
+     *
+     * The vendored `.so` a host ships is a pinned artifact, not this source
+     * tree, so a binding existing here says nothing about whether the call does
+     * anything on the device in front of you. Every entry below degrades to a
+     * no-op (or a `null` return) when false.
+     *
+     * Keys are the Kotlin-facing names, not the C symbols, so a host can drive
+     * a capability table off this map without hard-coding `synheart_core_…`
+     * strings.
+     */
+    val mobileHostAbiSupport: Map<String, Boolean>
+        get() = linkedMapOf(
+            "pushBehaviorEvent" to hasSymbol("synheart_core_push_behavior_event"),
+            "pushContextEvent" to hasSymbol("synheart_core_push_context_event"),
+            "pushSpeed" to hasSymbol("synheart_core_push_speed"),
+            "setAccelPlacement" to hasSymbol("synheart_core_set_accel_placement"),
+            "declareRestWindow" to hasSymbol("synheart_core_declare_rest_window"),
+            "tickAll" to hasSymbol("synheart_core_tick_all"),
+            "flushPending" to hasSymbol("synheart_core_flush_pending"),
+            "rollDay" to hasSymbol("synheart_core_roll_day"),
+            "exportSessionState" to hasSymbol("synheart_core_export_session_state"),
+            "loadSessionState" to hasSymbol("synheart_core_load_session_state"),
+            "configId" to hasSymbol("synheart_core_config_id"),
+            "lastHsv" to hasSymbol("synheart_core_last_hsv"),
+            "attachStrainScore" to hasSymbol("synheart_core_attach_strain_score_json"),
+        )
+
+    /** Whether the loaded runtime can take rich behavior events at all. */
+    val supportsRichBehaviorEvents: Boolean
+        get() = hasSymbol("synheart_core_push_behavior_event")
+
+    /**
+     * Push a foreground-app context event as JSON. `true` accepted, `false`
+     * rejected, `null` symbol absent.
+     *
+     * A `false` here most often means the runtime was built without the
+     * `app-context` cargo feature, in which case the symbol is an inert stub
+     * that always returns 1 — far more likely than a malformed payload.
+     *
+     * Send the app *category*, never a context label: the engine derives the
+     * 12-class `ContextLabel` itself, and two-letter app codes collide with
+     * live label codes (`BR` is `BreakRecovery`, not "browsing/reading").
+     */
+    fun pushContextEvent(eventJson: String): Boolean? = soft("push_context_event", null) {
+        lib.synheart_core_push_context_event(requireHandle(), eventJson) == 0
+    }
+
+    /**
+     * Push a GPS-derived ground speed sample in **m/s** — the high-confidence
+     * input for `locomotion_state`, which otherwise runs on its accel-only
+     * fallback. Drained by window range and reduced to a median, so ordering
+     * does not matter.
+     */
+    fun pushSpeed(tsMs: Long, speedMps: Double) = soft("push_speed", Unit) {
+        lib.synheart_core_push_speed(requireHandle(), tsMs, speedMps)
+    }
+
+    /** Declare where the accelerometer sits. See `AccelPlacement`. */
+    fun setAccelPlacement(placementCode: Int) = soft("set_accel_placement", Unit) {
+        lib.synheart_core_set_accel_placement(requireHandle(), placementCode)
+    }
+
+    /**
+     * Declare that the window containing [tsMs] is a rest window.
+     *
+     * Three semantics bite in this order: the declaration lands on the window
+     * whose bounds **contain** [tsMs], not the next one to emerge; it is
+     * **one-shot**, so call it once per rest *window* rather than once when a
+     * break begins — a sticky flag would pin Focus at `0.0` for the rest of
+     * the session; and a declaration for an already-emitted window is
+     * discarded, not carried forward.
+     */
+    fun declareRestWindow(tsMs: Long) = soft("declare_rest_window", Unit) {
+        lib.synheart_core_declare_rest_window(requireHandle(), tsMs)
+    }
+
+    /**
+     * Drain **every** completed window, oldest first, as a JSON array.
+     *
+     * Prefer this to [tick] after any gap: `tick` polls one window, so a
+     * background stretch silently skips the windows it spanned. `null` when
+     * the symbol is absent — fall back to [tick] rather than assuming no
+     * windows.
+     */
+    fun tickAll(nowMs: Long): String? = soft("tick_all", null) {
+        readAndFreeString(lib.synheart_core_tick_all(requireHandle(), nowMs))
+    }
+
+    /**
+     * Emit every window still held by the lateness budget, in the same array
+     * shape [tickAll] returns. Call on backgrounding and at session end, or up
+     * to one budget's worth of windows is stranded forever.
+     */
+    fun flushPending(nowMs: Long): String? = soft("flush_pending", null) {
+        readAndFreeString(lib.synheart_core_flush_pending(requireHandle(), nowMs))
+    }
+
+    /**
+     * Advance the daily accumulator to [dayIndex] (days since epoch in the
+     * host's **local** zone). Returns the runtime status, or `null` when the
+     * symbol is absent. The index must strictly advance.
+     */
+    fun rollDay(dayIndex: Int): Int? = soft("roll_day", null) {
+        lib.synheart_core_roll_day(requireHandle(), dayIndex)
+    }
+
+    /** Export per-head session state. Persist once per emitted window and on background. */
+    fun exportSessionState(): String? = soft("export_session_state", null) {
+        readAndFreeString(lib.synheart_core_export_session_state(requireHandle()))
+    }
+
+    /**
+     * Restore session state. **Must run before the first tick** — window 1
+     * writes each head's state slot, so a later restore is overwritten by a
+     * cold window. `true` success, `false` rejected, `null` symbol absent.
+     */
+    fun loadSessionState(json: String): Boolean? = soft("load_session_state", null) {
+        lib.synheart_core_load_session_state(requireHandle(), json) == 0
+    }
+
+    /**
+     * The comparability key. Changes whenever anything value-affecting changes,
+     * including the `sensing` and `mask_profile` declarations. Opaque — compare
+     * for equality, never parse.
+     */
+    fun configId(): String? = soft("config_id", null) {
+        readAndFreeString(lib.synheart_core_config_id(requireHandle()))
+    }
+
+    /** Most recent human-state vector as JSON, or null before the first window closed. */
+    fun lastHsv(): String? = soft("last_hsv", null) {
+        readAndFreeString(lib.synheart_core_last_hsv(requireHandle()))
+    }
+
+    /**
+     * Score today's accumulated Strain and queue it onto the next HSI frame.
+     *
+     * Returns the score JSON, `null` when the symbol is absent, and also `null`
+     * when the day has nothing scorable yet — normal on a fresh install.
+     *
+     * **Call this BEFORE [rollDay].** Rolling finalises the day and clears the
+     * very values the Strain computation reads, so a host that rolls first gets
+     * `null` every day and never emits a Strain score. `rollDay` does not do
+     * this for you. Takes no input: the engine accumulated Strain's inputs
+     * itself over the day.
+     */
+    fun attachStrainScoreJson(): String? = soft("attach_strain_score_json", null) {
+        readAndFreeString(lib.synheart_core_attach_strain_score_json(requireHandle()))
     }
 
     /** Push sleep-stage data as a JSON array. */
