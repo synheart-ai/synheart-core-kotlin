@@ -5,6 +5,76 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — runtime version gate
+
+- **The SDK now states which runtime its bindings assume and checks it at
+  init.** `RuntimeCompat.WRITTEN_AGAINST` (`0.31.1`) and `RuntimeCompat.MINIMUM`
+  (`0.20.0`) are compared against `build_info.core_runtime` once the bridge is
+  created; the result is logged and exposed as `Synheart.runtimeCompatibility`.
+  Below the minimum, `initialize` refuses with an `IllegalStateException`
+  naming the fix (`synheart install runtime`); between minimum and
+  written-against it warns once. Until now nothing in this package recorded
+  the runtime version the hand-written JNA surface was written for, so every
+  behavioural change in the runtime's `SDK-CONTRACT-CHANGES.md` was invisible
+  to a consumer — the C ABI is additive, so an old vendored `.so` links fine
+  and diverges silently.
+
+### Added — research instance fan-in
+
+- **`SynheartInstance` can now be given an app identity and keystroke
+  context.** `pushAppForeground`, `pushContextEvent`, `pushContextEventJson`
+  and `supportsRichBehaviorEvents` are the per-instance equivalents of the
+  `Synheart.*` calls, which reach the personal runtime only. A host running a
+  second (research) instance had no way to feed either, so every research
+  window resolved to the `Unknown` app category — an all-zero
+  interpretation-mask row — and carried `context_label: UK` with no evidence
+  behind it, starving CFI / Cognitive Load's digital term, Valence's friction
+  index and the behaviour-only Stress path on every research row. No new
+  native calls: both route through the existing bridge symbols.
+
+### Fixed — HSI callback lifetime (runtime ≥ 0.31.1)
+
+- **HSI delivery is now buffered (pull-based) when the runtime supports it.**
+  The push path hands the runtime a function pointer into a JNA trampoline
+  whose lifetime its tokio workers know nothing about; `retiredCallbacks` kept
+  that pointer valid for a handle's lifetime, but nothing could once the
+  Kotlin side that owned the peer was gone while the native runtime, its
+  workers and the HSI listener survived in the process — the next completed
+  window was dispatched through a dangling pointer and the process aborted on
+  a `tokio-rt-worker` thread. On a runtime ≥ 0.31.1 the bridge now calls
+  `synheart_core_init_hsi_buffered` instead of registering a callback and
+  drains `synheart_core_drain_hsi` from a daemon thread every
+  `CoreRuntimeBridge.hsiDrainIntervalMs` (1 s; ring
+  `CoreRuntimeBridge.hsiBufferCapacity`, default 64 — the oldest frame is
+  evicted when full). `Synheart.tick` / `tickAll` / `flushPending` drain in
+  the same call, so a host that ticks itself sees no added latency; delivery
+  stays deduplicated by `hsi_id`. Older runtimes fall back to the push
+  callback unchanged. `Synheart.isHsiDeliveryBuffered` and
+  `Synheart.droppedHsiFrames` expose the mode and the runtime's eviction
+  counter. Same pattern as the buffered logging path.
+- **Stream callback teardown uses `synheart_core_clear_stream_callback`**
+  when exported (≥ 0.31.1) and drops the peer immediately; older runtimes
+  keep the retire-until-`synheart_core_free` path. The stream callback itself
+  is still a pushed function pointer — 0.31.1 adds clear-only, no buffered
+  mode.
+
+### Fixed — `secure_load` no longer reports a failed read as "no such key"
+
+- The secure-storage callbacks opened `EncryptedSharedPreferences` through a
+  `lazy` that memoised a failed first attempt, and `load` returned NULL for
+  every failure — Keystore not ready after boot, OEM Keystore faults, a read
+  that threw. The runtime reads NULL as "absent", so one such launch minted a
+  new storage master key over the existing one and orphaned every sealed
+  blob. The store is now reopened on each failure, absence is decided by
+  `contains`, an unavailable store is retried with a bounded ~1 s backoff, and
+  the cause is logged. The callback still has to return NULL when storage is
+  genuinely unavailable — the C signature has no error channel. On runtime
+  ≥ 0.31.1 the provisioning marker turns that into
+  `ERR_SECURE_STORAGE_UNAVAILABLE` (retryable) rather than a re-mint; older
+  runtimes keep the re-mint exposure.
+
 ## [0.2.0] - 2026-09-02
 
 ### Fixed
