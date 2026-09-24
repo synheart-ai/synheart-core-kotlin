@@ -5,7 +5,32 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-09-24
+
+### Added — mobile host surface of the core-runtime C ABI
+
+- Bindings for `push_context_event`, `push_speed`, `set_accel_placement`,
+  `declare_rest_window`, `tick_all`, `flush_pending`, `roll_day`,
+  `export_session_state` / `load_session_state`, `config_id`, `last_hsv` and
+  `attach_strain_score_json`, each degrading to `null` when the vendored
+  runtime lacks the symbol; `mobileHostAbiSupport` reports which ones it has.
+  `HostDeclarations`, `BehaviorEventInput` / `TypingSessionData`,
+  `ContextEventInput`, `AccelPlacement` and `HSIState` withholding metadata.
+  The behavior module tries the rich path first, feeds the context channel,
+  reports the foreground app on a 30 s heartbeat, and now has an accelerometer
+  behind `emitRawMotionSamples` (50 Hz, m/s² → g). `tick` / `tickAll` /
+  `flushPending` deliver into `onStateUpdate`; `pushWearHr` goes through
+  `ingest_batch` with a provider so the source registers in provenance.
+- `SynheartConfig.emitDiagnostics` publishes per-head evidence terms in
+  `meta.synheart.diagnostics` (off by default — debug telemetry that roughly
+  doubles every stored window); `SynheartConfig.researchBaseline` selects the
+  single-visit baseline profile (`d_min = 1`) without switching the instance
+  into `RESEARCH` mode and its lab-session lifecycle.
+- Example app: Host tab, tick loop, rest declaration, persisted snapshots,
+  daily loop with strain scored before `roll_day`, `dataSync` foreground
+  service, typing micro-windows on both channels, and an opt-in simulated
+  cardiac source — the only simulated input, tagged `sdk_wear`.
+
 
 ### Added — runtime version gate
 

@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -235,7 +235,7 @@ Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.2.0'
+    implementation 'ai.synheart:synheart-core:0.3.0'
 }
 ```
 

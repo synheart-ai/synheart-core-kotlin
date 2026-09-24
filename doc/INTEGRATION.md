@@ -63,7 +63,7 @@ most common cause of "consent is on but nothing uploads".
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.2.0'
+    implementation 'ai.synheart:synheart-core:0.3.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
 
