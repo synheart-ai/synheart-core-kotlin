@@ -1,9 +1,13 @@
 package ai.synheart.core.bridge
 
+import ai.synheart.core.SynheartLogger
 import ai.synheart.core.config.unwrapSyncEnvelope
 import com.sun.jna.NativeLibrary
 import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -39,6 +43,23 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     companion object {
         /** Default `env_filter` when [initLogging] is called with a null/empty filter. */
         var defaultLogEnvFilter: String = "info"
+
+        /**
+         * Ring capacity handed to `init_hsi_buffered`. Frames arrive at ~1 Hz
+         * during an active session and the **oldest** is evicted when the ring
+         * is full, so size it for the worst gap between drains the host
+         * expects, not for typical operation. 64 covers a minute with nobody
+         * polling. Read when [setHsiCallback] switches to buffered mode.
+         */
+        var hsiBufferCapacity: Int = 64
+
+        /**
+         * Drain cadence in buffered mode, in milliseconds. Frames are ~1 Hz,
+         * so polling faster buys nothing; slower adds that much latency to
+         * `onStateUpdate`. A host that ticks the engine itself gets its frames
+         * in the same call regardless — see [drainHsi].
+         */
+        var hsiDrainIntervalMs: Long = 1_000L
 
         /**
          * Create a new runtime instance from a JSON configuration string.
@@ -352,6 +373,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun close() {
         val h = handle ?: return
         runCatching { clearStreamCallback() }
+        // Buffered mode: final drain + pump shutdown; push mode: retire the peer.
         runCatching { clearHsiCallback() }
         lib.synheart_core_free(h)
         handle = null
@@ -1443,13 +1465,57 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     private val retiredCallbacks = mutableListOf<com.sun.jna.Callback>()
 
     /**
-     * Register a callback for real-time HSI state updates.
+     * True while HSI reaches Kotlin through the runtime's ring buffer
+     * (`synheart_core_init_hsi_buffered` + `synheart_core_drain_hsi`, runtime
+     * ≥ 0.31.1) instead of a JNA callback.
      *
-     * The callback fires on a native background thread. Post to
-     * `Dispatchers.Main` before touching UI state.
+     * Same class of problem the buffered logging path removed, and the one
+     * [retiredCallbacks] works around: a push callback is a function pointer
+     * into a JNA trampoline whose lifetime the runtime's tokio workers know
+     * nothing about. Retiring peers until `synheart_core_free` keeps that
+     * pointer valid for the handle's lifetime, but it cannot help once the
+     * Kotlin side that owned the peer is gone while the native runtime, its
+     * workers and the HSI listener survive in the process — the next completed
+     * window is dispatched through a dangling pointer and the process aborts
+     * on a `tokio-rt-worker` thread. In buffered mode no function pointer ever
+     * crosses the boundary: the runtime buffers, this side polls, and the sink
+     * runs on a thread the SDK owns and stops.
      */
-    fun setHsiCallback(onHsi: (String) -> Unit) {
+    @Volatile private var hsiBufferedMode = false
+    private var hsiDrainExecutor: ScheduledExecutorService? = null
+    @Volatile private var hsiSink: ((String) -> Unit)? = null
+    private var lastReportedDroppedHsi = 0L
+
+    /** Serialises the drain so frames reach the sink oldest-first even when the pump and a host tick overlap. */
+    private val hsiDrainLock = Any()
+
+    /** Whether the loaded runtime exports the buffered HSI delivery symbols. */
+    val supportsBufferedHsi: Boolean
+        get() = hasSymbol("synheart_core_init_hsi_buffered") && hasSymbol("synheart_core_drain_hsi")
+
+    /** Whether HSI is currently delivered by polling rather than by callback. */
+    val isHsiBuffered: Boolean get() = hsiBufferedMode
+
+    /**
+     * Register a sink for real-time HSI state updates.
+     *
+     * Only one delivery path can be active. Call [clearHsiCallback] to
+     * unregister. The sink fires on a background thread either way — the
+     * SDK's drain thread in buffered mode, a native tokio worker in push mode.
+     * Post to `Dispatchers.Main` before touching UI state.
+     *
+     * Prefers **buffered (pull-based) delivery** when the runtime supports it
+     * (≥ 0.31.1): `init_hsi_buffered` retires any native callback, waits for
+     * an in-flight dispatch, and from then on the runtime queues frames in a
+     * ring this bridge drains every [hsiDrainIntervalMs]. Falls back to the
+     * legacy push callback on an older runtime — same behaviour as before,
+     * including its callback-lifetime exposure, until the vendored library is
+     * updated.
+     */
+    fun setHsiCallback(preferBuffered: Boolean = true, onHsi: (String) -> Unit) {
         clearHsiCallback()
+        if (preferBuffered && initHsiBuffered(onHsi)) return
+
         val cb = object : HsiCallbackNative {
             override fun invoke(hsiJson: Pointer?, userData: Pointer?) {
                 val json = hsiJson?.getString(0, "UTF-8") ?: return
@@ -1461,10 +1527,21 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     }
 
     /**
-     * Unregister the HSI callback. The Kotlin peer stays reachable until
-     * [close] — see [retiredCallbacks].
+     * Unregister HSI delivery.
+     *
+     * Buffered mode: one final drain so a window completed since the last poll
+     * is not lost, then the pump stops — nothing to join, no trampoline was
+     * ever registered. Push mode: tells the runtime to stop dispatching, then
+     * retires the Kotlin peer until [close] — see [retiredCallbacks].
      */
     fun clearHsiCallback() {
+        if (hsiBufferedMode) {
+            runCatching { drainHsi() }
+            hsiDrainExecutor?.shutdownNow()
+            hsiDrainExecutor = null
+            hsiBufferedMode = false
+            hsiSink = null
+        }
         val cb = hsiCallback ?: return
         hsiCallback = null
         retiredCallbacks.add(cb)
@@ -1472,8 +1549,94 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     }
 
     /**
+     * Switch the runtime to buffered delivery and start the drain pump.
+     * Returns false — with nothing changed — when the runtime lacks the
+     * symbols or refuses, so the caller can fall back to the push path.
+     */
+    private fun initHsiBuffered(onHsi: (String) -> Unit): Boolean {
+        val h = handle ?: return false
+        if (!supportsBufferedHsi) return false
+        val rc = try {
+            lib.synheart_core_init_hsi_buffered(h, hsiBufferCapacity)
+        } catch (e: UnsatisfiedLinkError) {
+            _missingSymbols.add("init_hsi_buffered")
+            return false
+        }
+        if (rc != 0) return false
+        hsiBufferedMode = true
+        hsiSink = onHsi
+        lastReportedDroppedHsi = 0L // the runtime resets its counter on init
+        hsiDrainExecutor?.shutdownNow()
+        val interval = hsiDrainIntervalMs.coerceAtLeast(50L)
+        hsiDrainExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "synheart-hsi-drain").apply { isDaemon = true }
+        }.also {
+            it.scheduleWithFixedDelay({ runCatching { drainHsi() } }, interval, interval, TimeUnit.MILLISECONDS)
+        }
+        return true
+    }
+
+    /**
+     * Deliver every frame pending in the runtime's ring to the registered
+     * sink, oldest first. No-op outside buffered mode.
+     *
+     * Safe — and cheap — to call from the host's own tick loop as well as from
+     * the periodic pump: an empty ring returns NULL (never an empty array) and
+     * costs one FFI call. Frames a host already received as a `tick` /
+     * `tick_all` return value are deduplicated downstream by `hsi_id`.
+     */
+    fun drainHsi() {
+        if (!hsiBufferedMode) return
+        val sink = hsiSink ?: return
+        synchronized(hsiDrainLock) {
+            val h = handle ?: return
+            val blob = try {
+                readAndFreeString(lib.synheart_core_drain_hsi(h))
+            } catch (e: UnsatisfiedLinkError) {
+                _missingSymbols.add("drain_hsi")
+                return
+            } catch (e: IllegalStateException) {
+                return // closed between the check and the call
+            } ?: return // nothing pending — the normal idle case
+            if (blob.isEmpty()) return
+            val frames = try {
+                JSONArray(blob)
+            } catch (e: Exception) {
+                return
+            }
+            for (i in 0 until frames.length()) {
+                // The delivery path is string-based end to end (the deduper
+                // reads `meta.ids.hsi_id` off the raw text and `HSIState` keeps
+                // `rawJson`), so hand each element on as its own JSON document.
+                frames.optJSONObject(i)?.let { frame -> runCatching { sink(frame.toString()) } }
+            }
+            reportDroppedHsiIfChanged()
+        }
+    }
+
+    /**
+     * Frames the runtime evicted from the ring (or lost to channel lag) since
+     * buffered mode was last initialised. Always `0` while something drains at
+     * least every [hsiBufferCapacity] frames; anything else is a gap in the
+     * host's drain loop, not back-pressure to tune.
+     */
+    fun droppedHsiFrames(): Long = soft("dropped_hsi_frames", 0L) {
+        handle?.let { lib.synheart_core_dropped_hsi_frames(it) } ?: 0L
+    }
+
+    private fun reportDroppedHsiIfChanged() {
+        val dropped = droppedHsiFrames()
+        if (dropped == lastReportedDroppedHsi) return
+        lastReportedDroppedHsi = dropped
+        SynheartLogger.log(
+            "[Synheart] HSI ring has dropped $dropped frame(s) in total — nothing " +
+                "drained for longer than hsiBufferCapacity ($hsiBufferCapacity) frames.",
+        )
+    }
+
+    /**
      * Register a callback for streaming pipeline events. Fires on a native
-     * background thread, same as [setHsiCallback].
+     * background thread, same as the push path of [setHsiCallback].
      */
     fun setStreamCallback(onEvent: (String) -> Unit) = soft("set_stream_callback", Unit) {
         clearStreamCallback()
@@ -1487,12 +1650,34 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         lib.synheart_core_set_stream_callback(requireHandle(), cb, null)
     }
 
-    /** Unregister the stream callback, retaining the peer until [close]. */
-    fun clearStreamCallback() = soft("set_stream_callback", Unit) {
-        val cb = streamCallback ?: return@soft
+    /**
+     * Unregister the stream callback.
+     *
+     * On a runtime ≥ 0.31.1 `synheart_core_clear_stream_callback` returns only
+     * once the callback can no longer be invoked, so the peer is dropped on
+     * the spot. Older runtimes have no clear entrypoint (the listener holds
+     * the callback by value), so the registration is replaced with null and
+     * the peer retired until [close] — see [retiredCallbacks]. Never call this
+     * from inside the stream callback itself: the runtime waits for the
+     * in-flight dispatch and deadlocks. The stream callback is still a pushed
+     * function pointer — 0.31.1 adds clear-only, no buffered mode.
+     */
+    fun clearStreamCallback() {
+        val cb = streamCallback ?: return
         streamCallback = null
+        val h = handle
+        if (h != null) {
+            val cleared = try {
+                lib.synheart_core_clear_stream_callback(h)
+                true
+            } catch (e: UnsatisfiedLinkError) {
+                _missingSymbols.add("clear_stream_callback")
+                false
+            }
+            if (cleared) return
+            soft("set_stream_callback", Unit) { lib.synheart_core_set_stream_callback(h, null, null) }
+        }
         retiredCallbacks.add(cb)
-        handle?.let { lib.synheart_core_set_stream_callback(it, null, null) }
     }
 
     /** Start the streaming pipeline with a JSON config. Returns the raw code. */

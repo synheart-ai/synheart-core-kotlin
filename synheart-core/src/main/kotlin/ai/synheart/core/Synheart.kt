@@ -713,6 +713,17 @@ object Synheart {
                     // The body lives in [deliverHsiWindow] so the host-driven
                     // tick family reaches the same streams by the same rules.
                     coreRuntime!!.setHsiCallback { hsiJson -> deliverHsiWindow(hsiJson) }
+                    SynheartLogger.log(
+                        if (coreRuntime!!.isHsiBuffered) {
+                            "[Synheart] HSI delivery: buffered (ring " +
+                                "${CoreRuntimeBridge.hsiBufferCapacity}, drain " +
+                                "${CoreRuntimeBridge.hsiDrainIntervalMs} ms)"
+                        } else {
+                            "[Synheart] HSI delivery: push callback — runtime predates " +
+                                "0.31.1 buffered delivery; the callback-lifetime exposure " +
+                                "remains until the vendored runtime is updated."
+                        },
+                    )
 
                     // Update WearableEventProcessor with the live bridge
                     wearModule?.eventProcessor?.updateBridge(coreRuntime)
@@ -1571,6 +1582,25 @@ object Synheart {
     val isRuntimeAvailable: Boolean
         get() = coreRuntime?.isOpen == true && CoreRuntimeBridge.isAvailable()
 
+    /**
+     * True when HSI frames are delivered by polling the runtime's ring buffer
+     * (runtime ≥ 0.31.1) rather than through a native callback. In buffered
+     * mode no function pointer crosses the FFI boundary, so no callback peer
+     * can dangle; see `CoreRuntimeBridge.setHsiCallback`. Tune the ring and
+     * cadence through `CoreRuntimeBridge.hsiBufferCapacity` /
+     * `CoreRuntimeBridge.hsiDrainIntervalMs` before [initialize].
+     */
+    val isHsiDeliveryBuffered: Boolean
+        get() = coreRuntime?.isHsiBuffered ?: false
+
+    /**
+     * Frames evicted from the HSI ring since buffered delivery was initialised.
+     * `0` unless the host stopped draining for longer than the ring holds; log
+     * it beside your frame count for field visibility.
+     */
+    val droppedHsiFrames: Long
+        get() = coreRuntime?.droppedHsiFrames() ?: 0L
+
     /** Native runtime build metadata (profile, features, commit), or null. */
     fun buildInfo(): JSONObject? = CoreRuntimeBridge.buildInfo()
 
@@ -1627,6 +1657,7 @@ object Synheart {
      */
     fun tick(nowMs: Long = System.currentTimeMillis()): String? {
         val hsi = coreRuntime?.tick(nowMs)
+        coreRuntime?.drainHsi() // see [tickAll]
         // A host-driven tick is the only clock a behavior-only session has, and
         // its window would otherwise never reach [onStateUpdate] — the native
         // callback does not fire for it. Deduplicated by `hsi_id`, so this is
@@ -2055,6 +2086,10 @@ object Synheart {
      */
     fun tickAll(nowMs: Long = System.currentTimeMillis()): String? {
         val json = coreRuntime?.tickAll(nowMs)
+        // In buffered mode the runtime queued these same windows for the drain
+        // pump; take them now so they reach the streams in this call rather
+        // than up to a drain interval later (deduplicated by `hsi_id` either way).
+        coreRuntime?.drainHsi()
         deliverHsiArray(json)
         return json
     }
@@ -2068,6 +2103,7 @@ object Synheart {
      */
     fun flushPending(nowMs: Long = System.currentTimeMillis()): String? {
         val json = coreRuntime?.flushPending(nowMs)
+        coreRuntime?.drainHsi() // see [tickAll]
         deliverHsiArray(json)
         return json
     }

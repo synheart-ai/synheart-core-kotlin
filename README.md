@@ -558,6 +558,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
 | `initRuntimeLoggingBuffered(filter)` / `drainRuntimeLogs()` | Pull-based logging |
+| `isHsiDeliveryBuffered` / `droppedHsiFrames` | Whether HSI is polled from the runtime's ring (runtime ≥ 0.31.1) and how many frames it evicted |
 
 > `runtimeDiagnostics()["missingSymbols"]` lists the symbols the loaded native
 > library turned out not to export. Check it before concluding a feature is
