@@ -556,6 +556,8 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
             "configId" to hasSymbol("synheart_core_config_id"),
             "lastHsv" to hasSymbol("synheart_core_last_hsv"),
             "attachStrainScore" to hasSymbol("synheart_core_attach_strain_score_json"),
+            "pushWristAccel" to hasSymbol("synheart_core_push_wrist_accel"),
+            "pushWornAccel" to hasSymbol("synheart_core_push_worn_accel"),
         )
 
     /** Whether the loaded runtime can take rich behavior events at all. */
@@ -592,6 +594,27 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun setAccelPlacement(placementCode: Int) = soft("set_accel_placement", Unit) {
         lib.synheart_core_set_accel_placement(requireHandle(), placementCode)
     }
+
+    /**
+     * Push one sample from a wrist-worn accelerometer (a watch), in **g** with
+     * gravity included. A second motion stream beside the device's own: the
+     * runtime reports wrist motion separately and never mixes the two.
+     * [tsMs] is the sensor's sample time, not the arrival time.
+     */
+    fun pushWristAccel(tsMs: Long, x: Double, y: Double, z: Double) = soft("push_wrist_accel", Unit) {
+        lib.synheart_core_push_wrist_accel(requireHandle(), tsMs, x, y, z)
+    }
+
+    /**
+     * Push one sample from a body-worn accelerometer, in **g**, tagged with its
+     * placement so the engine can pick the kinematic model for that mount.
+     * Unlike [setAccelPlacement], which declares where the *device* sits, the
+     * placement here travels with every sample.
+     */
+    fun pushWornAccel(tsMs: Long, x: Double, y: Double, z: Double, placementCode: Int) =
+        soft("push_worn_accel", Unit) {
+            lib.synheart_core_push_worn_accel(requireHandle(), tsMs, x, y, z, placementCode)
+        }
 
     /**
      * Declare that the window containing [tsMs] is a rest window.

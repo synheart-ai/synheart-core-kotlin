@@ -5,6 +5,49 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — per-instance HSI delivery
+- **`SynheartInstance` can now receive every HSI window it completes.**
+  `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are the
+  per-instance equivalent of `Synheart.onStateUpdate`, which reaches the
+  personal runtime only. A host reading a second instance's output had
+  `tick()`'s return value alone — but `startSession` also starts the runtime's
+  own 1 s background tick loop on the same pipeline, and a window that loop
+  closes first never comes back from `tick()`. The listener subscribes to the
+  engine's broadcast, so it sees windows from both paths; a host that also
+  reads `tick()` deduplicates. Buffered delivery on runtime ≥ 0.31.1, push
+  callback on older runtimes. No new native calls: the bridge was already
+  per-handle.
+
+### Added — host notification support
+- **`Synheart.runtimeBehaviorEvents`.** Every behavior event in the rich form
+  the personal runtime receives it, so a host feeding a second
+  `SynheartInstance`, which has no collectors, can forward what it needs with
+  `pushBehaviorEvent`. A facade-level flow: one collector outlives the behavior
+  module being rebuilt.
+- **`HostDeclarations.notificationsObservable`** sends
+  `notifications_observable` (runtime ≥ 0.32.0). Absent, the runtime resolves
+  it to `true` on Android, so a host without a running notification listener
+  must declare `false`. Older runtimes ignore it.
+
+### Added — worn accelerometer streams
+- **`pushWristAccel` and `pushWornAccel`** on `Synheart` and `SynheartInstance`
+  bind `synheart_core_push_wrist_accel` and `synheart_core_push_worn_accel`:
+  a wrist stream the runtime keeps apart from the device's motion, and a
+  body-worn stream tagged with its `AccelPlacement` per sample. Samples are in
+  g with gravity included. Both degrade to no-ops on a runtime without the
+  symbol; `mobileHostAbiSupport` reports them.
+
+### Fixed — notification follow-ups counted as arrivals
+- **A notification's later outcome no longer reaches the runtime as a new
+  arrival.** The host reports a notification on arrival and again when it is
+  opened; the engine counts every notification event as an arrival, so an
+  opened notification counted twice, inflating the notification rate,
+  Interruption Pressure and the lab `notification_count`. Follow-ups
+  (`BehaviorModule.isNotificationFollowUp`) are no longer pushed to the
+  runtime; `behaviorEventStream` still carries them.
+
 ## [0.3.0] - 2026-09-24
 
 ### Added — mobile host surface of the core-runtime C ABI

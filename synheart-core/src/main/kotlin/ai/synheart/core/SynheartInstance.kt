@@ -247,8 +247,58 @@ class SynheartInstance private constructor(
     /**
      * Advance the pipeline clock so windows that should close by [nowMs] are
      * flushed — the same window-closing the personal runtime's ticker drives.
+     *
+     * The return value is NOT every window this instance completes: once
+     * [startSession] runs, the runtime's own background tick loop closes
+     * windows on the same pipeline, and a window it closes first never comes
+     * back from here. Use [setHsiListener] to receive all of them.
      */
     fun tick(nowMs: Long): String? = if (disposed) null else bridge.tick(nowMs)
+
+    // ── HSI delivery ─────────────────────────────────────────────────────
+    //
+    // The per-instance equivalent of [Synheart.onStateUpdate], which reaches
+    // the PERSONAL runtime only. Without it a host reading this instance's
+    // output had [tick]'s return value alone, and lost every window the
+    // runtime's background loop closed first — those windows were still
+    // emitted (and uploaded), just unreachable from the host.
+
+    /**
+     * Receive every HSI window this instance completes, as raw JSON — whether
+     * the host's [tick] or the runtime's background tick loop closed it.
+     *
+     * Buffered (pull-based) delivery on a runtime ≥ 0.31.1, so no function
+     * pointer crosses the FFI boundary; frames arrive on the next [drainHsi]
+     * or on the bridge's periodic drain. Falls back to a push callback on an
+     * older runtime. A window that also came back from [tick] is delivered
+     * here too, so a host using both deduplicates (by `meta.ids.hsi_id` or
+     * window end). Replaces any listener already set. No-op when disposed.
+     * The listener fires on a background thread.
+     */
+    fun setHsiListener(onHsi: (hsiJson: String) -> Unit) {
+        if (!disposed) bridge.setHsiCallback(onHsi = onHsi)
+    }
+
+    /**
+     * Stop HSI delivery. In buffered mode, frames still pending are delivered
+     * once more before the listener is dropped. Idempotent; [dispose] also
+     * clears it.
+     */
+    fun clearHsiListener() {
+        if (!disposed) bridge.clearHsiCallback()
+    }
+
+    /**
+     * Deliver pending buffered frames to the listener now, oldest first,
+     * instead of waiting for the periodic drain. Cheap when nothing is
+     * pending; no-op without a listener or outside buffered mode.
+     */
+    fun drainHsi() {
+        if (!disposed) bridge.drainHsi()
+    }
+
+    /** Whether HSI reaches the listener by polling rather than by callback. */
+    val isHsiBuffered: Boolean get() = !disposed && bridge.isHsiBuffered
 
     // ── Mobile host surface ──────────────────────────────────────────────
 
@@ -324,6 +374,16 @@ class SynheartInstance private constructor(
 
     /** Drain every completed window as a JSON array. Prefer this to [tick] after a gap. */
     fun tickAll(nowMs: Long): String? = if (disposed) null else bridge.tickAll(nowMs)
+
+    /** One wrist-worn accelerometer sample in g. See [Synheart.pushWristAccel]. */
+    fun pushWristAccel(tsMs: Long, x: Double, y: Double, z: Double) {
+        if (!disposed) bridge.pushWristAccel(tsMs, x, y, z)
+    }
+
+    /** One body-worn accelerometer sample in g with its placement. See [Synheart.pushWornAccel]. */
+    fun pushWornAccel(tsMs: Long, x: Double, y: Double, z: Double, placement: ai.synheart.core.models.AccelPlacement) {
+        if (!disposed) bridge.pushWornAccel(tsMs, x, y, z, placement.code)
+    }
 
     /** Emit every window still held by the lateness budget. */
     fun flushPending(nowMs: Long): String? = if (disposed) null else bridge.flushPending(nowMs)
