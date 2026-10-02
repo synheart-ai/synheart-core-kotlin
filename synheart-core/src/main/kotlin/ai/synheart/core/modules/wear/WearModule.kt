@@ -2,6 +2,7 @@ package ai.synheart.core.modules.wear
 
 import ai.synheart.core.models.CanonicalWearableEvent
 import ai.synheart.core.modules.base.BaseSynheartModule
+import ai.synheart.core.modules.base.ModuleStatus
 import ai.synheart.core.modules.interfaces.CapabilityProvider
 import ai.synheart.core.modules.interfaces.ConsentProvider
 import ai.synheart.core.modules.interfaces.RawWearDataProvider
@@ -32,7 +33,13 @@ class WearModule(
      * this used to be unconditional, which made invented heart rates the only
      * biosignal source on Android and fed them into real SRM baselines.
      */
-    private val allowSynthetic: Boolean = false
+    private val allowSynthetic: Boolean = false,
+    /**
+     * Whether starting the module also starts its sources (see
+     * [ai.synheart.core.config.WearConfig.autoStartPlatformHealth]). When
+     * false they are initialized and read only after [requestCollection].
+     */
+    private val autoStartOnConsent: Boolean = true,
 ) : BaseSynheartModule("wear"), RawWearDataProvider {
 
     // An empty list rather than a mock: a module with no source reports no
@@ -47,6 +54,23 @@ class WearModule(
     private val cache = WearCache()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobSet = mutableSetOf<kotlinx.coroutines.Job>()
+    private val initializedSources = mutableSetOf<WearSourceHandler>()
+    private var collectionRequested = false
+    private var sourcesStarted = false
+
+    private val mayCollect: Boolean get() = autoStartOnConsent || collectionRequested
+
+    /**
+     * Ask for collection explicitly — what
+     * [ai.synheart.core.Synheart.startWearCollection] does. With
+     * [autoStartOnConsent] false this is the only thing that starts the
+     * sources; while the module is not running it takes effect on the next
+     * start.
+     */
+    suspend fun requestCollection() {
+        collectionRequested = true
+        if (status == ModuleStatus.RUNNING) startSources()
+    }
 
     internal var eventProcessor: WearableEventProcessor? = null
         private set
@@ -75,18 +99,28 @@ class WearModule(
         cache.clear()
     }
 
-    override suspend fun onInitialize() {
-        SynheartLogger.log("[WearModule] Initializing wear sources...")
-
+    private suspend fun initializeSources() {
         actualSources.forEach { source ->
-            if (source.isAvailable) {
+            if (source.isAvailable && source !in initializedSources) {
                 try {
                     source.initialize()
+                    initializedSources.add(source)
                     SynheartLogger.log("[WearModule] Initialized ${source.sourceType} source")
                 } catch (e: Exception) {
                     SynheartLogger.log("[WearModule] Failed to initialize ${source.sourceType}: $e")
                 }
             }
+        }
+    }
+
+    override suspend fun onInitialize() {
+        if (autoStartOnConsent) {
+            SynheartLogger.log("[WearModule] Initializing wear sources...")
+            initializeSources()
+        } else {
+            // Initializing synheart-wear touches Health Connect: wait for an
+            // explicit request (autoStartPlatformHealth = false).
+            SynheartLogger.log("[WearModule] Wear sources deferred until collection is requested")
         }
 
         // Initialize vendor sync state from current consent
@@ -100,6 +134,29 @@ class WearModule(
     override suspend fun onStart() {
         SynheartLogger.log("[WearModule] Starting wear data collection...")
 
+        if (mayCollect) startSources()
+
+        // Track vendor sync consent changes
+        val consentJob = consent.observe()
+            .onEach { snapshot ->
+                val vendorSyncNow = snapshot.vendorSync
+                if (vendorSyncNow != _vendorSyncState.value) {
+                    _vendorSyncState.value = vendorSyncNow
+                    SynheartLogger.log(
+                        "[WearModule] Vendor sync ${if (vendorSyncNow) "enabled" else "disabled"}"
+                    )
+                }
+            }
+            .launchIn(scope)
+        jobSet.add(consentJob)
+
+        SynheartLogger.log("[WearModule] Started ${jobSet.size} wear jobs")
+    }
+
+    private suspend fun startSources() {
+        if (sourcesStarted) return
+        sourcesStarted = true
+        initializeSources()
         actualSources.forEach { source ->
             if (source.isAvailable) {
                 val job = source.sampleFlow
@@ -123,21 +180,6 @@ class WearModule(
             }
         }
 
-        // Track vendor sync consent changes
-        val consentJob = consent.observe()
-            .onEach { snapshot ->
-                val vendorSyncNow = snapshot.vendorSync
-                if (vendorSyncNow != _vendorSyncState.value) {
-                    _vendorSyncState.value = vendorSyncNow
-                    SynheartLogger.log(
-                        "[WearModule] Vendor sync ${if (vendorSyncNow) "enabled" else "disabled"}"
-                    )
-                }
-            }
-            .launchIn(scope)
-        jobSet.add(consentJob)
-
-        SynheartLogger.log("[WearModule] Started ${jobSet.size} wear sources")
     }
 
     /**
@@ -204,6 +246,9 @@ class WearModule(
 
         jobSet.forEach { it.cancel() }
         jobSet.clear()
+        sourcesStarted = false
+        // A later start waits for a new request again.
+        collectionRequested = false
     }
 
     override suspend fun onDispose() {

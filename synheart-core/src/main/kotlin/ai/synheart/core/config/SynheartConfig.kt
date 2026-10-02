@@ -76,6 +76,20 @@ data class WearConfig(
     val enableCaching: Boolean = true,
     /** Sample rate in Hz. */
     val sampleRateHz: Double = 1.0,
+    /**
+     * Start the synheart-wear reader (Health Connect, and the BLE adapter
+     * inside synheart-wear) as soon as the wear module starts — on consent
+     * with a running session. On by default.
+     *
+     * Set it to false when the host pushes heart rate itself
+     * ([ai.synheart.core.Synheart.pushWearHr] — a Wear OS watch relay, its own
+     * BLE strap) and uses Health Connect only when the user picks it. The
+     * reader is then neither initialized nor read until
+     * [ai.synheart.core.Synheart.startWearCollection]. Otherwise a host that
+     * re-grants a remembered consent at launch reads Health Connect on every
+     * launch, whatever source the user chose.
+     */
+    val autoStartPlatformHealth: Boolean = true,
 )
 
 /**

@@ -542,6 +542,7 @@ object Synheart {
                 consent = consentModule!!,
                 sources = wearSources,
                 allowSynthetic = resolvedConfig.allowSyntheticBiosignals,
+                autoStartOnConsent = resolvedConfig.wearConfig?.autoStartPlatformHealth ?: true,
             )
             phoneModule = PhoneModule(
                 capabilities = capabilityModule!!,
@@ -3254,7 +3255,12 @@ object Synheart {
     /** Start biosignal collection. No-op when the module is absent. */
     suspend fun startWearCollection() {
         val m = wearModule ?: return
-        m.start()
+        // The module may already be running (a session started it); start()
+        // would throw. Either way, ask for collection explicitly: with
+        // WearConfig.autoStartPlatformHealth = false this is what starts the
+        // synheart-wear reader.
+        if (m.status != ai.synheart.core.modules.base.ModuleStatus.RUNNING) m.start()
+        m.requestCollection()
         wearCollecting = true
     }
 
