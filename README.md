@@ -629,6 +629,21 @@ The Wear Module collects biosignals from Health Connect via synheart-wear-kotlin
 - Sleep stage detection
 - Motion/activity data
 
+**Health Connect only when chosen.** By default the wear module starts this
+reader as soon as it starts — on biosignals consent with a running session. A
+host that pushes heart rate itself (`pushWearHr` — a Wear OS watch relay, its
+own BLE strap) and offers Health Connect as one source among several can keep
+it off until the user picks it:
+
+```kotlin
+wearConfig = WearConfig(autoStartPlatformHealth = false)
+// later, only when the user chooses Health Connect:
+Synheart.startWearCollection()
+```
+
+Without it, a host that re-grants a remembered consent at launch reads Health
+Connect on every launch. (Since 0.3.0.)
+
 ### SensorManager (via synheart-behavior-kotlin)
 
 The Phone Module collects device motion via SensorManager:

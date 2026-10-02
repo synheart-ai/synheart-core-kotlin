@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
 ### Added — per-instance HSI delivery
 - **`SynheartInstance` can now receive every HSI window it completes.**
   `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are the
@@ -48,7 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`BehaviorModule.isNotificationFollowUp`) are no longer pushed to the
   runtime; `behaviorEventStream` still carries them.
 
-## [0.3.0] - 2026-09-24
+### Added — keep the Health Connect reader off until it is wanted
+
+- **`WearConfig.autoStartPlatformHealth`** (default `true`, unchanged
+  behaviour). With `false`, starting the wear module — biosignals consent with
+  a running session — no longer initializes or reads the synheart-wear source
+  (Health Connect, and its BLE adapter) until the host calls
+  `Synheart.startWearCollection()`. For hosts that push heart rate themselves
+  (`pushWearHr` — a watch relay, a BLE strap) and use Health Connect only when
+  the user picks it; without it, a host that re-grants a remembered consent at
+  launch read Health Connect on every launch. Behind it:
+  `WearModule(autoStartOnConsent =)` and `WearModule.requestCollection()`.
+
+### Fixed — `startWearCollection()` during a running session
+
+- It called `start()` unconditionally, which throws once a session has
+  started the module. It now starts the module only when it is not running,
+  then requests collection.
 
 ### Added — mobile host surface of the core-runtime C ABI
 
