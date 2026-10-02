@@ -193,6 +193,12 @@ interface CoreRuntimeNative : Library {
     /** Declare the accelerometer mount. Discriminant per `AccelPlacement.code`. */
     fun synheart_core_set_accel_placement(handle: Pointer?, placement: Int)
 
+    /** One wrist-worn accelerometer sample in g. Kept apart from the device's own motion. */
+    fun synheart_core_push_wrist_accel(handle: Pointer?, ts_ms: Long, x: Double, y: Double, z: Double)
+
+    /** One body-worn accelerometer sample in g, tagged with where it sits (`AccelPlacement.code`). */
+    fun synheart_core_push_worn_accel(handle: Pointer?, ts_ms: Long, x: Double, y: Double, z: Double, placement: Int)
+
     /** Declare the window containing `ts_ms` a rest window. One-shot. */
     fun synheart_core_declare_rest_window(handle: Pointer?, ts_ms: Long)
 

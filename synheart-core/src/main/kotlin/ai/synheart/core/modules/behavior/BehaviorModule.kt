@@ -67,6 +67,13 @@ class BehaviorModule(
     var pushBehaviorEventToRuntime: ((BehaviorEventInput) -> Boolean?)? = null
 
     /**
+     * Observer for every rich event handed to [pushBehaviorEventToRuntime],
+     * called just before it. Lets the facade republish them for a host that
+     * feeds a second runtime; see `Synheart.runtimeBehaviorEvents`.
+     */
+    var onRuntimeBehaviorEvent: ((BehaviorEventInput) -> Unit)? = null
+
+    /**
      * The context-evidence sink — a *second*, independent channel, not an
      * alternative to [pushBehaviorEventToRuntime].
      *
@@ -210,13 +217,18 @@ class BehaviorModule(
                     // `synheart_core_push_behavior_event`, and the two are
                     // mutually exclusive per event: pushing both would count
                     // every interaction twice.
-                    val rich = translateBehaviorEvent(event)
+                    // Arrivals only: a notification's later outcome would reach
+                    // the engine as a second arrival. It is still on the event
+                    // stream above for the host. See [isNotificationFollowUp].
+                    val followUp = isNotificationFollowUp(event)
+                    val rich = if (followUp) null else translateBehaviorEvent(event)
+                    if (rich != null) runCatching { onRuntimeBehaviorEvent?.invoke(rich) }
                     val richStatus = if (rich == null) {
                         null
                     } else {
                         runCatching { pushBehaviorEventToRuntime?.invoke(rich) }.getOrNull()
                     }
-                    if (richStatus == null) {
+                    if (richStatus == null && !followUp) {
                         runtimeCodeFor(event.type)?.let { code ->
                             runCatching {
                                 pushBehaviorToRuntime?.invoke(event.timestamp, code, 1.0)
@@ -268,6 +280,21 @@ class BehaviorModule(
     }
 
     internal companion object {
+        /**
+         * Whether [event] is a later outcome of a notification the host has
+         * already reported, not a new arrival.
+         *
+         * The host reports a notification on arrival ([BehaviorEvent.notificationReceived])
+         * and again with its outcome ([BehaviorEvent.notificationOpened]). The
+         * engine counts every notification event as an arrival and reads the
+         * action as a label on it, so each follow-up was a second arrival: an
+         * opened notification counted twice, inflating the notification rate,
+         * Interruption Pressure and the lab summary. The caller skips the
+         * runtime push for these; they stay on the host-facing event stream.
+         */
+        fun isNotificationFollowUp(event: BehaviorEvent): Boolean =
+            event.type == BehaviorEventType.NOTIFICATION_OPENED
+
         /**
          * Translate a host-recorded [BehaviorEvent] into the engine's rich form.
          *

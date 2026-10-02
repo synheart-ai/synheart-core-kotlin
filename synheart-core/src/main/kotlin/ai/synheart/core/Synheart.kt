@@ -763,6 +763,12 @@ object Synheart {
                     behaviorModule?.pushBehaviorEventToRuntime = { event ->
                         coreRuntime?.pushBehaviorEvent(event.toJson().toString())
                     }
+                    // Republish every rich event the personal runtime receives,
+                    // so a host feeding a second [SynheartInstance] — which has
+                    // no collectors of its own — can forward what it needs.
+                    behaviorModule?.onRuntimeBehaviorEvent = { event ->
+                        runtimeBehaviorEventsFlow.tryEmit(event)
+                    }
                     // The context-evidence channel, additional to the behaviour
                     // channel above rather than an alternative to it. Different
                     // runtime buffer, different consumer: it feeds the
@@ -1911,6 +1917,29 @@ object Synheart {
     /** Push a 3-axis accelerometer sample. */
     fun pushAccel(tsMs: Long, x: Double, y: Double, z: Double) {
         coreRuntime?.pushAccel(tsMs, x, y, z)
+    }
+
+    /**
+     * Push one sample from a wrist-worn accelerometer (a watch), in g with
+     * gravity included, stamped with the sensor's own sample time. Kept apart
+     * from the device's motion; a no-op on a runtime without the symbol.
+     */
+    fun pushWristAccel(tsMs: Long, x: Double, y: Double, z: Double) {
+        coreRuntime?.pushWristAccel(tsMs, x, y, z)
+    }
+
+    /**
+     * Push one sample from a body-worn accelerometer, in g, with the placement
+     * it was worn at. A no-op on a runtime without the symbol.
+     */
+    fun pushWornAccel(
+        tsMs: Long,
+        x: Double,
+        y: Double,
+        z: Double,
+        placement: ai.synheart.core.models.AccelPlacement,
+    ) {
+        coreRuntime?.pushWornAccel(tsMs, x, y, z, placement.code)
     }
 
     /** Push vendor-derived HRV metrics the wearable already computed. */
@@ -3502,6 +3531,28 @@ object Synheart {
             extraBufferCapacity = 64,
             onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
         )
+
+    private val runtimeBehaviorEventsFlow =
+        kotlinx.coroutines.flow.MutableSharedFlow<ai.synheart.core.models.BehaviorEventInput>(
+            replay = 0,
+            extraBufferCapacity = 64,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        )
+
+    /**
+     * Every behavior event in the rich form the personal runtime receives it —
+     * notification `action` and `source_app`, scroll payload, touch payload —
+     * as it is pushed.
+     *
+     * For a host that feeds a second runtime ([SynheartInstance]), which has no
+     * collectors of its own: forward the events it needs with
+     * [SynheartInstance.pushBehaviorEvent]. Unlike [behaviorEventStream] this is
+     * a facade-level flow: it exists before [initialize] and survives the
+     * behavior module being rebuilt, so one collector lasts the process. Events
+     * arrive only while behavior collection runs and its consent is granted.
+     */
+    val runtimeBehaviorEvents: Flow<ai.synheart.core.models.BehaviorEventInput>
+        get() = runtimeBehaviorEventsFlow.asSharedFlow()
 
     private val dataDeletionUpdatesFlow =
         kotlinx.coroutines.flow.MutableSharedFlow<DataDeletionEvent>(

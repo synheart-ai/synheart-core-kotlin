@@ -114,4 +114,15 @@ class BehaviorEventTranslationTest {
         assertEquals("app_switch", json.getString("kind"))
         assertFalse(json.has("data"))
     }
+
+    @Test
+    fun `a notification outcome is a follow-up, its arrival is not`() {
+        assertTrue(
+            BehaviorModule.isNotificationFollowUp(BehaviorEvent(BehaviorEventType.NOTIFICATION_OPENED, ts)),
+        )
+        assertFalse(
+            BehaviorModule.isNotificationFollowUp(BehaviorEvent(BehaviorEventType.NOTIFICATION_RECEIVED, ts)),
+        )
+        assertFalse(BehaviorModule.isNotificationFollowUp(BehaviorEvent(BehaviorEventType.TAP, ts)))
+    }
 }

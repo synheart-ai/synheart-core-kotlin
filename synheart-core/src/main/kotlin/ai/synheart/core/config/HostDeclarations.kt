@@ -158,12 +158,23 @@ data class HostDeclarations(
     val maskProfile: Declared<MaskProfile>? = null,
     /** Android + mobile mask only. `4` is the documented mobile value. */
     val cfiStructuralComponents: Int? = null,
+    /**
+     * Whether a notification producer actually runs on this host, so that a
+     * window with no notifications is evidence of low demand rather than no
+     * evidence (runtime ≥ 0.32.0). Null sends nothing, and the runtime then
+     * resolves it from `platform` — **true on Android and desktop**. A host on
+     * one of those platforms whose listener is not running (access not
+     * granted, not implemented) must declare `false`, or every quiet window
+     * reads as low demand. Older runtimes ignore the key.
+     */
+    val notificationsObservable: Boolean? = null,
 ) {
     val isEmpty: Boolean
         get() = sensing == null &&
             deviceClass == null &&
             maskProfile == null &&
-            cfiStructuralComponents == null
+            cfiStructuralComponents == null &&
+            notificationsObservable == null
 
     /**
      * Keys to merge into the config JSON handed to `synheart_core_new`. Absent
@@ -198,6 +209,7 @@ data class HostDeclarations(
             )
         }
         cfiStructuralComponents?.let { put("cfi_structural_components", it) }
+        notificationsObservable?.let { put("notifications_observable", it) }
     }
 
     companion object {

@@ -97,6 +97,15 @@ class HostDeclarationsTest {
     }
 
     @Test
+    fun `notifications observable is emitted only when declared`() {
+        assertFalse(HostDeclarations().toJson().has("notifications_observable"))
+        assertTrue(HostDeclarations(notificationsObservable = false).toJson().has("notifications_observable"))
+        assertFalse(HostDeclarations(notificationsObservable = false).toJson().getBoolean("notifications_observable"))
+        assertTrue(HostDeclarations(notificationsObservable = true).toJson().getBoolean("notifications_observable"))
+        assertFalse(HostDeclarations(notificationsObservable = false).isEmpty)
+    }
+
+    @Test
     fun `extra heads carry their wire names`() {
         assertEquals("movement_regularity", ExtraHead.MOVEMENT_REGULARITY.wire)
         assertEquals("postural_state", ExtraHead.POSTURAL_STATE.wire)
