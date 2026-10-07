@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
+### Added
+- **`SynheartInstance.createAsync`** — `create` on `Dispatchers.IO`. The native
+  create (store open and migrations, cloud connector, identity restore) blocks
+  for 0.5-1.5 s on a mid-range phone, which froze the UI when called from the
+  main thread. Additive: `create` is unchanged.
+
+### Fixed
+- **`Synheart.initialize` no longer creates the native runtime on the caller's
+  thread.** Hosts call it from `viewModelScope.launch` (the main thread), so
+  the blocking create froze rendering; it now runs on `Dispatchers.IO`.
+- **The wear source polls the health store once per tick instead of twice.**
+  It merged `streamHR` and `streamHRV`, which both poll the same
+  `readMetrics` snapshot (HRV included), so every 1 s tick ran each Health
+  Connect read twice — about ten reads a second. It now uses one stream and
+  drops ticks that carry no reading rather than passing empty samples to the
+  runtime. With `synheart-wear` 0.4.3 the real-time Health Connect reads behind
+  it are also rate-limited to one per 10 s.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added — per-instance HSI delivery

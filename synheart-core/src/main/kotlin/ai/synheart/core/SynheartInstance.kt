@@ -4,6 +4,8 @@ import ai.synheart.core.bridge.CoreRuntimeBridge
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.config.buildRuntimeConfigMap
 import ai.synheart.core.modules.behavior.RuntimeBehaviorEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
@@ -50,6 +52,15 @@ class SynheartInstance private constructor(
          * target a process-global hydrator on the personal facade and a
          * research instance does not want them.
          */
+        /**
+         * [create] on [Dispatchers.IO]. The native create (store open and
+         * migrations, cloud connector, identity restore) blocks for 0.5-1.5 s
+         * on a mid-range phone, which freezes the UI when called from the main
+         * thread. Additive: [create] is unchanged.
+         */
+        suspend fun createAsync(config: SynheartConfig, dataDir: String): SynheartInstance? =
+            withContext(Dispatchers.IO) { create(config, dataDir) }
+
         fun create(config: SynheartConfig, dataDir: String): SynheartInstance? {
             config.validate()
             val bridge = CoreRuntimeBridge.create(

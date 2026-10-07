@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.filter
 
 /**
  * A real biosignal source, bridging `synheart-wear` into [WearModule].
@@ -81,23 +81,25 @@ class SynheartWearSourceHandler(
     }
 
     /**
-     * HR and HRV merged into one sample stream.
+     * One sample stream carrying HR, HRV and RR.
      *
-     * Each upstream emits independently, so a sample generally carries one of
-     * the two rather than both — the runtime handles them as separate signals,
-     * and pairing them here would mean inventing a timestamp for whichever had
-     * not arrived.
+     * `streamHR` and `streamHRV` both poll the same `readMetrics` snapshot,
+     * which already carries HRV, so merging the two ran every health-store
+     * read twice per tick for no extra data. Ticks that carry no reading (the
+     * wear SDK skips health-store reads between its rate-limited real-time
+     * reads) are dropped instead of reaching the runtime as empty samples.
      *
-     * Failures are logged and end that stream rather than propagating: a revoked
-     * Health Connect permission mid-session must not take down the session.
+     * Failures are logged and end the stream rather than propagating: a
+     * revoked Health Connect permission mid-session must not take down the
+     * session.
      */
     override val sampleFlow: Flow<WearSample>
         get() {
             val w = wear ?: return emptyFlow()
-            return merge(
-                w.streamHR(intervalMs).catch { logStreamFailure("HR", it) },
-                w.streamHRV(intervalMs).catch { logStreamFailure("HRV", it) },
-            ).map { it.toWearSample() }
+            return w.streamHR(intervalMs)
+                .catch { logStreamFailure("HR", it) }
+                .map { it.toWearSample() }
+                .filter { it.hr != null || it.hrvRmssd != null || it.rrIntervals != null }
         }
 
     override suspend fun dispose() {

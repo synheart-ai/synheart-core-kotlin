@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Synheart Core SDK - Main Entry Point
@@ -630,12 +631,18 @@ object Synheart {
                 // Single-sourced with the secondary-instance path so the two
                 // cannot drift; see `buildRuntimeConfigMap` for why the
                 // `ingest` / `device_auth` gates matter.
-                coreRuntime = ai.synheart.core.bridge.CoreRuntimeBridge.create(
-                    ai.synheart.core.config.buildRuntimeConfigMap(
-                        resolvedConfig,
-                        dataDir = this.context?.filesDir?.absolutePath,
-                    ).toString()
-                )
+                //
+                // The native create (store open and migrations, cloud
+                // connector, identity restore) blocks for 0.5-1.5 s on a
+                // mid-range phone. Hosts call `initialize` from the main
+                // thread (`viewModelScope.launch`), so run it on IO.
+                val runtimeConfig = ai.synheart.core.config.buildRuntimeConfigMap(
+                    resolvedConfig,
+                    dataDir = this.context?.filesDir?.absolutePath,
+                ).toString()
+                coreRuntime = withContext(Dispatchers.IO) {
+                    ai.synheart.core.bridge.CoreRuntimeBridge.create(runtimeConfig)
+                }
                 if (coreRuntime != null) {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
 
