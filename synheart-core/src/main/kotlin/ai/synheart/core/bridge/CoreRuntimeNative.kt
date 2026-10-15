@@ -36,9 +36,17 @@ interface CoreRuntimeNative : Library {
          * library (libsynheart_core_runtime.so / .dylib / .dll) is not found
          * on the JNA library path.
          */
+        /**
+         * The loader's message when [INSTANCE] is null, for
+         * [SynheartRuntimeException.loadFailure]; null when the library loaded.
+         */
+        var loadFailure: String? = null
+            private set
+
         val INSTANCE: CoreRuntimeNative? = try {
             Native.load("synheart_core_runtime", CoreRuntimeNative::class.java)
         } catch (e: UnsatisfiedLinkError) {
+            loadFailure = e.message ?: e.toString()
             null
         }
     }
@@ -65,6 +73,14 @@ interface CoreRuntimeNative : Library {
     /** Last global error message, or null. Handle-free. Caller frees. */
     fun synheart_core_last_error(): Pointer?
 
+    /**
+     * The calling thread's structured error from its most recent instrumented
+     * call, as JSON, or null when that call succeeded. ABI 2.0 (runtime
+     * 0.38.0); absent on older runtimes, where it throws
+     * [UnsatisfiedLinkError]. Caller frees.
+     */
+    fun synheart_core_last_error_json(): Pointer?
+
     // ------------------------------------------------------------------ //
     // Logging                                                            //
     // ------------------------------------------------------------------ //
@@ -84,9 +100,6 @@ interface CoreRuntimeNative : Library {
      * Drain it with [synheart_core_drain_logs]. Returns 0 on success.
      */
     fun synheart_core_init_logging_buffered(env_filter: String?): Int
-
-    /** Attach or replace the log callback after init. Returns 0 on success. */
-    fun synheart_core_set_log_callback(callback: HostLogCallbackNative?, user_data: Pointer?): Int
 
     /** Drain the buffered log ring as a JSON array of lines. Caller frees. */
     fun synheart_core_drain_logs(): Pointer?

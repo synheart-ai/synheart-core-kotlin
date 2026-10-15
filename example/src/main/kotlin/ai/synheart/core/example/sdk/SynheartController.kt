@@ -422,15 +422,12 @@ class SynheartController : ViewModel() {
 
         // phoneConfig is deliberately NOT declared.
         //
-        // Declaring it starts PhoneModule, whose four collectors are Random()
-        // generators — motion, screen state, app focus, notifications
-        // (`modules/phone/PhoneCollectors.kt`). Cardiac is the only thing this
-        // example is allowed to simulate, and those four are not cardiac. It
-        // also contradicted the sensing roster: the runner declares
-        // screen_state and app_focus unavailable because nothing real observes
-        // them, while the phone module was busy inventing exactly those two.
-        // The data never reached the runtime anyway — PhoneModule holds no
-        // bridge reference — so nothing of value is lost.
+        // PhoneModule's four collectors (motion, screen state, app focus,
+        // notifications) have no platform source and emit nothing, so declaring
+        // it would only start a module that reports absence. Real motion
+        // reaches the runtime through behaviorConfig below (§4.2), and the
+        // runner declares screen_state and app_focus unavailable because
+        // nothing here observes them.
 
         behaviorConfig = BehaviorConfig(
             // §4.2 — without this no accelerometer sample reaches the runtime

@@ -134,7 +134,8 @@ data class BehaviorConfig(
      * Forward raw 50 Hz accelerometer samples into the engine runtime so it
      * derives motion features and classifies posture.
      *
-     * Independent of [enableMotionLite]. Also parity-only for now.
+     * Independent of [enableMotionLite]. Research capture turns it on even
+     * when this is false; see [SynheartConfig.resolvedEmitRawMotionSamples].
      */
     val emitRawMotionSamples: Boolean = false,
 
@@ -337,6 +338,22 @@ data class SynheartConfig(
      */
     val windowMs: Long? = null,
 ) {
+    /**
+     * Whether raw accelerometer samples are forwarded to the runtime.
+     *
+     * The explicit [BehaviorConfig.emitRawMotionSamples] wins when it is on.
+     * Research capture ([SynheartMode.RESEARCH] or [researchBaseline]) turns
+     * it on as well: without it the runtime receives no motion at all, every
+     * window reports zero motion energy and an unknown motion state, the
+     * kinematic heads are never exercised, and no stillness criterion can be
+     * applied to a rest phase. Outside research capture the default stays off
+     * for its battery cost.
+     */
+    val resolvedEmitRawMotionSamples: Boolean
+        get() = behaviorConfig?.emitRawMotionSamples == true ||
+            mode == SynheartMode.RESEARCH ||
+            researchBaseline
+
     /** Validate config and throw on violations. */
     fun validate() {
         if (mode == SynheartMode.RESEARCH && !privacy.allowResearch) {

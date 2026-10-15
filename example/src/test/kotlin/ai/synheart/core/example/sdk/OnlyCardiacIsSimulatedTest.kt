@@ -50,7 +50,7 @@ class OnlyCardiacIsSimulatedTest {
     @Test
     fun `the example declares no phoneConfig`() {
         assertFalse(
-            "PhoneModule fabricates motion, screen state, app focus and notifications. Replace its collectors before enabling it.",
+            "PhoneModule has no platform source for motion, screen state, app focus or notifications. Give it real collectors before enabling it.",
             code(read(controller)).contains("phoneConfig ="),
         )
     }

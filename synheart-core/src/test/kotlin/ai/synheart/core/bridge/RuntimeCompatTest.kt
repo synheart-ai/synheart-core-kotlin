@@ -50,4 +50,67 @@ class RuntimeCompatTest {
         assertEquals(RuntimeCompatStatus.UNKNOWN, RuntimeCompat.check(null).status)
         assertTrue(RuntimeCompat.check(JSONObject()).isAcceptable)
     }
+
+    @Test
+    fun `check refuses a runtime reporting an ABI outside the accepted range`() {
+        for (abi in listOf("0.9", "3.0")) {
+            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", abi))
+            assertEquals(abi, RuntimeCompatStatus.INCOMPATIBLE_ABI, r.status)
+            assertFalse(r.isAcceptable)
+            assertTrue(r.message.contains(RuntimeCompat.INSTALL_COMMAND))
+        }
+    }
+
+    @Test
+    fun `check accepts ABI 1 and 2`() {
+        for (abi in listOf("1.0", "1.1", "2.0", "2.3")) {
+            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", abi))
+            assertTrue(abi, r.isAcceptable)
+            assertEquals(abi, r.abi)
+        }
+    }
+
+    @Test
+    fun `a malformed ABI falls back to the version checks`() {
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", "two"))
+        assertEquals(RuntimeCompatStatus.OK, r.status)
+        assertEquals(null, r.abi)
+    }
+
+    @Test
+    fun `install command pins the written-against release`() {
+        assertEquals(
+            "synheart install runtime --version ${RuntimeCompat.WRITTEN_AGAINST}",
+            RuntimeCompat.INSTALL_COMMAND,
+        )
+    }
+
+    @Test
+    fun `incompatible exception carries the versions and the fix`() {
+        val compat = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", "3.0"))
+        val e = SynheartRuntimeException.incompatible(compat)
+        assertEquals(SynheartRuntimeErrorKind.INCOMPATIBLE, e.kind)
+        assertEquals("0.38.0", e.runtimeVersion)
+        assertEquals("3.0", e.runtimeAbi)
+        assertEquals(RuntimeCompat.INSTALL_COMMAND, e.installCommand)
+        assertEquals(RuntimeCompat.WRITTEN_AGAINST, e.recommendedVersion)
+    }
+
+    @Test
+    fun `loader messages classify into a runtime error kind`() {
+        assertEquals(
+            SynheartRuntimeErrorKind.NOT_INSTALLED,
+            SynheartRuntimeException.classifyLoadFailure(
+                "Unable to load library 'synheart_core_runtime': Native library not found",
+            ),
+        )
+        assertEquals(
+            SynheartRuntimeErrorKind.WRONG_ARCHITECTURE,
+            SynheartRuntimeException.classifyLoadFailure("dlopen failed: \"x.so\" is 32-bit instead of 64-bit"),
+        )
+        assertEquals(
+            SynheartRuntimeErrorKind.LOAD_FAILED,
+            SynheartRuntimeException.classifyLoadFailure("dlopen failed: bad ELF magic"),
+        )
+    }
 }
