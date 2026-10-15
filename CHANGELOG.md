@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Fixed
+
+- **Android secure storage restored from a backup no longer fails
+  forever.** Backup and device-to-device transfer restore the runtime's
+  `synheart_core_secure_store` but never the Keystore master key that sealed
+  it, so on the new install every secure read failed
+  (`AEADBadTagException`) and device registration and storage master key
+  setup kept failing until the app's data was cleared. On that exception
+  only, the store is now discarded and recreated empty; every other failure
+  (Keystore not ready, user not unlocked, OEM faults) still keeps it and
+  retries.
+- **The runtime's `.smk-provisioned-<subject>` markers are cleared with it.**
+  They live in plain app storage, so a restore brings them back too, and the
+  runtime then refuses to mint a replacement storage master key
+  (`ERR_SECURE_STORAGE_UNAVAILABLE`). Once the store is gone the keys they
+  vouch for are gone, so they are removed and the runtime mints a fresh key.
+- Apps should also exclude their data from backup and device transfer
+  (`allowBackup="false"` plus `dataExtractionRules`): nothing sealed by
+  Keystore keys can be read after a restore.
+
 ## [0.4.0] - 2026-10-14
 
 ### Changed
