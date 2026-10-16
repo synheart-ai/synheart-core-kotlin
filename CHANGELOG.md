@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-14
+
+### Changed
+- **Research mode forwards raw phone motion by default.**
+  `SynheartMode.RESEARCH` and `researchBaseline` now turn on the 50 Hz
+  accelerometer forwarder, so the runtime receives measured samples without
+  the host opting in. An explicit `BehaviorConfig.emitRawMotionSamples = true`
+  still enables it in any mode (`SynheartConfig.resolvedEmitRawMotionSamples`).
+- **`PhoneModule`'s collectors no longer emit fabricated data.** Motion, screen
+  state, app switches and notifications came from `Random` timers; with no
+  real platform source they now emit nothing. `MotionCollector`,
+  `ScreenStateTracker`, `AppFocusTracker` and `NotificationTracker` keep their
+  flows; see Removed for the derived getters.
+- **Install hints now recommend runtime 0.38.0** (`synheart install runtime
+  --version 0.38.0`). It is the release these bindings were verified against
+  (`RuntimeCompat.WRITTEN_AGAINST`, was 0.31.1) and the first with
+  `synheart_core_last_error_json`. Runtimes from 0.20.0 up to 0.38.0 still
+  initialise; they log as older than the bindings expect.
+- **BREAKING (behavior): `Synheart.initialize` now throws
+  `SynheartRuntimeException` (`kind = INCOMPATIBLE`) for an incompatible
+  runtime.** An ABI outside 1.0–2.x, a runtime below 0.20.0 that reports no
+  ABI, or a library without `synheart_core_build_info` is refused before
+  `synheart_core_new` runs. The previous gate threw `IllegalStateException`
+  inside a non-fatal catch, so initialisation carried on without HSI.
+  Migration: run the command in `exception.installCommand`, or catch the
+  exception where you call `initialize`. A missing, wrong-architecture or
+  unloadable runtime still does not throw; the reason is on
+  `Synheart.runtimeError`.
+
+### Added
+- **Every runtime failure explains itself.** `Synheart.lastNativeError`
+  returns a `SynheartNativeError` for the most recent runtime call that
+  reported an outcome: `code`, `message`, `retryable`, plus `ownerKind`
+  (`NativeErrorOwner`), `recoveryKind` (`NativeErrorRecovery`),
+  `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId` and `report`.
+  A call that succeeds clears it. Requires a runtime with ABI 2.0
+  (`synheart_core_last_error_json`); on older runtimes it stays null.
+- **`SynheartNativeException`**, the base of `SyncNativeException`, so one
+  `catch` handles every structured runtime failure. `SyncNativeError` is now a
+  typealias of `SynheartNativeError`; existing code compiles unchanged.
+- **`CoreRuntimeBridge.lastCreateError`** says why the runtime handle could
+  not be created (`CONFIGURATION_INVALID`, `INVALID_ARGUMENT`, …).
+- **`Synheart.runtimeError`** says why the runtime is unavailable
+  (`NOT_INSTALLED`, `WRONG_ARCHITECTURE`, `LOAD_FAILED`), with the install
+  command that fixes it.
+- **ABI check.** `RuntimeCompat` reads the runtime's `abi` from `build_info`
+  (0.33.0+) and accepts ABI 1.x and 2.x (`REQUIRED_ABI`, `MAX_ABI_MAJOR`).
+  ABI 2.0 removed only symbols this SDK never calls.
+
+### Removed
+- `MotionCollector.currentMotionLevelValue`, `ScreenStateTracker.isScreenOn`,
+  `AppFocusTracker.switchRate` and `NotificationTracker.recentNotificationCount`.
+  They summarised the fabricated data and have nothing real to report.
+- The unused `synheart_core_set_log_callback` binding, which ABI 2.0 removed.
+
 ## [0.3.1] - 2026-10-07
 
 ### Added
@@ -628,6 +683,9 @@ a Kotlin surface.
 ### Distribution
 - Maven Central: `ai.synheart:synheart-core:0.0.4`
 
+[0.4.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.4.0
+[0.3.1]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.3.1
+[0.3.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.3.0
 [0.2.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.2.0
 [0.1.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.1.0
 [0.0.8]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.0.8

@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -235,7 +235,7 @@ Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.3.1'
+    implementation 'ai.synheart:synheart-core:0.4.0'
 }
 ```
 
@@ -554,7 +554,9 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
-| `runtimeCompatibility` | Version gate result: the loaded runtime against `RuntimeCompat.WRITTEN_AGAINST` (0.31.1) and `MINIMUM` (0.20.0); `initialize` refuses below the minimum |
+| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (1.0 to 2.x) and its version against `WRITTEN_AGAINST` (0.38.0) and `MINIMUM` (0.20.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
+| `runtimeError` | Why the runtime is unavailable (not installed, wrong architecture, failed to load), or null; its `installCommand` is the fix |
+| `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded; needs runtime ABI 2.0 |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
@@ -668,6 +670,7 @@ machine-readable [`code`](#error-codes) alongside its message.
 ```kotlin
 import ai.synheart.core.config.SynheartCoreError
 import ai.synheart.core.config.SyncNativeException
+import ai.synheart.core.bridge.SynheartRuntimeException
 
 try {
     Synheart.initialize(
@@ -687,6 +690,9 @@ try {
         "ERR_RESEARCH_NOT_ALLOWED" -> println("Research mode needs privacy.allowResearch")
         else -> println("${e.code}: ${e.message}")
     }
+} catch (e: SynheartRuntimeException) {
+    // The vendored runtime's ABI or version does not fit this SDK.
+    println("${e.message}\nFix: ${e.installCommand}")
 } catch (e: IllegalStateException) {
     // e.g. no capability token and allowUnsignedCapabilities = false
     println("Not startable: ${e.message}")
@@ -931,7 +937,7 @@ The SDK loads a native runtime (`libsynheart_core_runtime.so`) over JNA. It is
 provision it with the CLI:
 
 ```bash
-synheart install runtime
+synheart install runtime --version 0.38.0
 ```
 
 That writes the binaries to `<your-app-module>/synheart/vendor/runtime/android/jniLibs/<abi>/`.

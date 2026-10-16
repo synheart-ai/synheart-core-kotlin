@@ -1,5 +1,6 @@
 package ai.synheart.core.bridge
 
+import ai.synheart.core.SYNHEART_CORE_VERSION
 import org.json.JSONObject
 
 /**
@@ -16,10 +17,12 @@ import org.json.JSONObject
 object RuntimeCompat {
 
     /**
-     * The runtime release these bindings were written and tested against.
-     * Bump it in the same change that adopts a new symbol or a moved shape.
+     * The newest runtime release these bindings were verified against, and the
+     * release every install hint recommends. Bump it when the bindings adopt a
+     * new symbol or a moved shape, or once they are verified on a newer
+     * release.
      */
-    const val WRITTEN_AGAINST: String = "0.31.1"
+    const val WRITTEN_AGAINST: String = "0.38.0"
 
     /**
      * Oldest runtime the bindings are known to load and behave on. Below this
@@ -28,6 +31,54 @@ object RuntimeCompat {
      * runtime's `SDK-CONTRACT-CHANGES.md`.
      */
     const val MINIMUM: String = "0.20.0"
+
+    /**
+     * The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
+     * any removal, rename or signature change and MINOR on additions only, so a
+     * runtime is compatible when its MAJOR equals [REQUIRED_ABI_MAJOR] and its
+     * MINOR is at least [REQUIRED_ABI_MINOR]. This, not the release version, is
+     * the contract; the version checks only grade runtimes that satisfy it.
+     */
+    const val REQUIRED_ABI: String = "1.0"
+    const val REQUIRED_ABI_MAJOR: Int = 1
+    const val REQUIRED_ABI_MINOR: Int = 0
+
+    /**
+     * Newest ABI major the bindings also accept. ABI 2.0 only removed symbols
+     * these bindings never call, and its one addition
+     * (`synheart_core_last_error_json`) is looked up as optional, so runtimes on
+     * either major load. Raise it only after checking a new major's removals
+     * against the bindings.
+     */
+    const val MAX_ABI_MAJOR: Int = 2
+
+    /** The accepted ABI range, for messages. */
+    val abiRange: String
+        get() = if (MAX_ABI_MAJOR == REQUIRED_ABI_MAJOR) {
+            "$REQUIRED_ABI_MAJOR.x"
+        } else {
+            "$REQUIRED_ABI to $MAX_ABI_MAJOR.x"
+        }
+
+    /** Installs the release the bindings were written against. */
+    const val INSTALL_COMMAND: String = "synheart install runtime --version $WRITTEN_AGAINST"
+
+    private const val FIX = "Install runtime $WRITTEN_AGAINST: $INSTALL_COMMAND"
+
+    /** A parsed `MAJOR.MINOR` ABI version. */
+    data class Abi(val major: Int, val minor: Int)
+
+    /** Whether a runtime reporting [abi] can be used. */
+    fun acceptsAbi(abi: Abi): Boolean {
+        if (abi.major < REQUIRED_ABI_MAJOR || abi.major > MAX_ABI_MAJOR) return false
+        return abi.major > REQUIRED_ABI_MAJOR || abi.minor >= REQUIRED_ABI_MINOR
+    }
+
+    /** Parse `MAJOR.MINOR` (extra components ignored); null if malformed. */
+    fun parseAbi(abi: String): Abi? {
+        val m = Regex("""^(\d+)\.(\d+)""").find(abi.trim()) ?: return null
+        return Abi(m.groupValues[1].toInt(), m.groupValues[2].toInt())
+    }
 
     /**
      * Compare two dotted numeric versions (`0.31.1`). Non-numeric suffixes are
@@ -48,40 +99,58 @@ object RuntimeCompat {
     }
 
     /**
-     * Evaluate the loaded runtime's `build_info` against [MINIMUM] and
-     * [WRITTEN_AGAINST].
+     * Evaluate the loaded runtime's `build_info`: its ABI against
+     * [REQUIRED_ABI] when it reports one (runtime 0.33.0+), otherwise its
+     * version against [MINIMUM]; then against [WRITTEN_AGAINST] for status.
      */
     fun check(buildInfo: JSONObject?): RuntimeCompatResult {
         val version = buildInfo?.optString("core_runtime", "")?.takeIf { it.isNotEmpty() }
-            ?: return RuntimeCompatResult(
+        val rawAbi = buildInfo?.opt("abi") as? String
+        val parsedAbi = rawAbi?.let { parseAbi(it) }
+        val abi = if (parsedAbi == null) null else rawAbi
+        if (parsedAbi != null && !acceptsAbi(parsedAbi)) {
+            return RuntimeCompatResult(
+                version = version,
+                abi = abi,
+                status = RuntimeCompatStatus.INCOMPATIBLE_ABI,
+                message = "Core runtime ${version ?: "(unknown version)"} (ABI $abi) is " +
+                    "incompatible with synheart-core $SYNHEART_CORE_VERSION (needs ABI " +
+                    "$abiRange). $FIX",
+            )
+        }
+        if (version == null) {
+            return RuntimeCompatResult(
                 version = null,
+                abi = abi,
                 status = RuntimeCompatStatus.UNKNOWN,
                 message = "[Synheart] runtime version unknown — build_info carried no " +
                     "core_runtime; bindings assume $WRITTEN_AGAINST. Expect silent " +
                     "divergence if the vendored library is older.",
             )
+        }
         if (compare(version, MINIMUM) < 0) {
             return RuntimeCompatResult(
                 version = version,
+                abi = abi,
                 status = RuntimeCompatStatus.TOO_OLD,
-                message = "[Synheart] runtime $version is below the minimum $MINIMUM these " +
-                    "bindings support — refusing to initialise. Update the vendored " +
-                    "runtime with `synheart install runtime`.",
+                message = "Core runtime $version is incompatible with synheart-core " +
+                    "$SYNHEART_CORE_VERSION (needs runtime $MINIMUM or newer). $FIX",
             )
         }
         if (compare(version, WRITTEN_AGAINST) < 0) {
             return RuntimeCompatResult(
                 version = version,
+                abi = abi,
                 status = RuntimeCompatStatus.OLDER,
                 message = "[Synheart] runtime $version is older than $WRITTEN_AGAINST, which " +
-                    "these bindings were written against. Newer symbols fall back " +
-                    "(buffered HSI, context fan-in, secure-storage marker …) and " +
-                    "behaviour documented for $WRITTEN_AGAINST may not hold. Update " +
-                    "the vendored runtime with `synheart install runtime`.",
+                    "these bindings were verified against. Symbols added since then " +
+                    "fall back, and behaviour documented for $WRITTEN_AGAINST may not " +
+                    "hold. Update the vendored runtime with `synheart install runtime`.",
             )
         }
         return RuntimeCompatResult(
             version = version,
+            abi = abi,
             status = RuntimeCompatStatus.OK,
             message = "[Synheart] runtime $version (bindings: $WRITTEN_AGAINST)",
         )
@@ -95,8 +164,17 @@ enum class RuntimeCompatStatus {
     /** Loads and works, but predates the version the bindings assume. */
     OLDER,
 
-    /** Below [RuntimeCompat.MINIMUM]; initialisation is refused. */
+    /**
+     * Below [RuntimeCompat.MINIMUM] on a runtime that reports no ABI;
+     * initialisation is refused.
+     */
     TOO_OLD,
+
+    /**
+     * The runtime's ABI is outside [RuntimeCompat.abiRange]; initialisation is
+     * refused.
+     */
+    INCOMPATIBLE_ABI,
 
     /** `build_info` did not report a version. */
     UNKNOWN,
@@ -104,8 +182,12 @@ enum class RuntimeCompatStatus {
 
 data class RuntimeCompatResult(
     val version: String?,
+    /** The runtime's ABI (`MAJOR.MINOR`); null for runtimes before 0.33.0. */
+    val abi: String? = null,
     val status: RuntimeCompatStatus,
     val message: String,
 ) {
-    val isAcceptable: Boolean get() = status != RuntimeCompatStatus.TOO_OLD
+    val isAcceptable: Boolean
+        get() = status != RuntimeCompatStatus.TOO_OLD &&
+            status != RuntimeCompatStatus.INCOMPATIBLE_ABI
 }

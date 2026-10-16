@@ -1,6 +1,7 @@
 package ai.synheart.core.bridge
 
 import ai.synheart.core.SynheartLogger
+import ai.synheart.core.config.SynheartNativeError
 import ai.synheart.core.config.unwrapSyncEnvelope
 import com.sun.jna.NativeLibrary
 import com.sun.jna.NativeLong
@@ -66,9 +67,46 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
          * Returns null if the native library is unavailable or initialisation fails.
          */
         fun create(configJson: String): CoreRuntimeBridge? {
+            lastCreateError = null
             val native = CoreRuntimeNative.INSTANCE ?: return null
-            val ptr = native.synheart_core_new(configJson) ?: return null
+            val ptr = native.synheart_core_new(configJson)
+            if (ptr == null) {
+                lastCreateError = readNativeLastError()
+                return null
+            }
             return CoreRuntimeBridge(ptr)
+        }
+
+        /**
+         * Why the most recent [create] returned null: the runtime's structured
+         * error (`CONFIGURATION_INVALID`, `INVALID_ARGUMENT`, …), or null when it
+         * succeeded, the library did not load, or the runtime predates ABI 2.0.
+         */
+        @Volatile
+        var lastCreateError: SynheartNativeError? = null
+            private set
+
+        @Volatile
+        private var lastErrorJsonMissing = false
+
+        /**
+         * Read and free the runtime's structured last error for the calling OS
+         * thread, or null when the last call succeeded or the runtime predates
+         * `synheart_core_last_error_json` (ABI 2.0). Call it on the same thread,
+         * straight after the failing call. Never throws.
+         */
+        fun readNativeLastError(): SynheartNativeError? {
+            if (lastErrorJsonMissing) return null
+            val native = CoreRuntimeNative.INSTANCE ?: return null
+            return try {
+                val json = staticReadAndFree(native.synheart_core_last_error_json()) ?: return null
+                runCatching { SynheartNativeError.fromJson(JSONObject(json)) }
+                    .getOrElse { SynheartNativeError.unknown() }
+            } catch (e: UnsatisfiedLinkError) {
+                // Looked up once: an older runtime will never grow the symbol.
+                lastErrorJsonMissing = true
+                null
+            }
         }
 
         /** Returns true if the native shared library was loaded successfully. */
@@ -102,6 +140,16 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         } catch (e: UnsatisfiedLinkError) {
             null
         }
+
+        /**
+         * [buildInfo] without the missing-symbol fallback: throws
+         * [UnsatisfiedLinkError] when the loaded library lacks
+         * `synheart_core_build_info`, so the init gate can tell "not a Synheart
+         * runtime" apart from "no library".
+         */
+        internal fun buildInfoOrThrow(): JSONObject? =
+            staticReadAndFree(CoreRuntimeNative.INSTANCE?.synheart_core_build_info())
+                ?.let { runCatching { JSONObject(it) }.getOrNull() }
 
         /** The runtime's last global error message, or null. */
         fun lastError(): String? = try {
@@ -322,7 +370,14 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * then free the native allocation. Returns null when [ptr] is null.
      */
     private fun readAndFreeString(ptr: Pointer?): String? {
-        if (ptr == null) return null
+        // A null result also reads the runtime's last error: null is how most
+        // getters report failure, and also how some report "nothing to
+        // return", which the runtime tells apart by leaving no error behind.
+        if (ptr == null) {
+            noteFailure()
+            return null
+        }
+        noteSuccess()
         return try {
             ptr.getString(0, "UTF-8")
         } finally {
@@ -332,6 +387,47 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     private fun requireHandle(): Pointer =
         handle ?: throw IllegalStateException("CoreRuntimeBridge has been closed")
+
+    @Volatile
+    private var _lastError: SynheartNativeError? = null
+
+    /**
+     * The structured error from the most recent runtime call made through this
+     * bridge that reports an outcome (a JSON result or a status code), or null
+     * when that call succeeded. It describes the latest call, not the latest
+     * failure: a call that succeeds clears it, so a value here never belongs to
+     * an earlier, unrelated call. This mirrors the runtime, which clears its own
+     * per-thread slot on entry to every instrumented call.
+     * [SynheartNativeError.op] still names the call.
+     *
+     * Null on runtimes before ABI 2.0, which lack `synheart_core_last_error_json`.
+     */
+    val lastError: SynheartNativeError? get() = _lastError
+
+    /**
+     * Record the runtime's last error after a call reported failure. Must run
+     * on the calling thread before any other native call: the runtime keeps the
+     * error per OS thread.
+     *
+     * Takes only the runtime's fresh error. A failure the runtime did not
+     * describe (an older runtime, or a getter whose null means "nothing to
+     * return") leaves null, never an older error.
+     */
+    private fun noteFailure() {
+        _lastError = readNativeLastError()
+    }
+
+    /** A call through this bridge succeeded: the last error no longer applies. */
+    private fun noteSuccess() {
+        _lastError = null
+    }
+
+    /** A status-code call: `0` is success; anything else reads the last error. */
+    private fun ok(rc: Int): Boolean {
+        val success = rc == 0
+        if (success) noteSuccess() else noteFailure()
+        return success
+    }
 
     /**
      * Run [body], degrading to [fallback] when the loaded runtime does not
@@ -394,7 +490,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Stop the current session. Returns true on success. */
     fun stopSession(): Boolean =
-        lib.synheart_core_stop_session(requireHandle()) == 0
+        ok(lib.synheart_core_stop_session(requireHandle()))
 
     /** Get the current session as JSON, or null if no session is active. */
     fun currentSession(): String? =
@@ -409,7 +505,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * live session. Returns true on success.
      */
     fun closeOrphanSession(sessionId: String): Boolean = soft("close_orphan_session", false) {
-        lib.synheart_core_close_orphan_session(requireHandle(), sessionId) == 0
+        ok(lib.synheart_core_close_orphan_session(requireHandle(), sessionId))
     }
 
     /** Spin the fusion pipeline up before the first sample arrives. */
@@ -500,7 +596,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * string is a closed set and an unrecognised one is dropped silently.
      */
     fun pushBehaviorEvent(eventJson: String): Boolean? = soft("push_behavior_event", null) {
-        lib.synheart_core_push_behavior_event(requireHandle(), eventJson) == 0
+        ok(lib.synheart_core_push_behavior_event(requireHandle(), eventJson))
     }
 
     // ------------------------------------------------------------------ //
@@ -577,7 +673,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * live label codes (`BR` is `BreakRecovery`, not "browsing/reading").
      */
     fun pushContextEvent(eventJson: String): Boolean? = soft("push_context_event", null) {
-        lib.synheart_core_push_context_event(requireHandle(), eventJson) == 0
+        ok(lib.synheart_core_push_context_event(requireHandle(), eventJson))
     }
 
     /**
@@ -671,7 +767,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * cold window. `true` success, `false` rejected, `null` symbol absent.
      */
     fun loadSessionState(json: String): Boolean? = soft("load_session_state", null) {
-        lib.synheart_core_load_session_state(requireHandle(), json) == 0
+        ok(lib.synheart_core_load_session_state(requireHandle(), json))
     }
 
     /**
@@ -736,7 +832,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Persist a canonical vendor event (JSON). Returns true on success. */
     fun ingestVendorEvent(eventJson: String): Boolean = soft("ingest_vendor_event", false) {
-        lib.synheart_core_ingest_vendor_event(requireHandle(), eventJson) == 0
+        ok(lib.synheart_core_ingest_vendor_event(requireHandle(), eventJson))
     }
 
     /** Query stored vendor events. Returns the result array, or null. */
@@ -818,11 +914,11 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Grant a consent type. Returns true on success. */
     fun grantConsent(type: String): Boolean =
-        lib.synheart_core_grant_consent(requireHandle(), type) == 0
+        ok(lib.synheart_core_grant_consent(requireHandle(), type))
 
     /** Revoke a consent type. Returns true on success. */
     fun revokeConsent(type: String): Boolean =
-        lib.synheart_core_revoke_consent(requireHandle(), type) == 0
+        ok(lib.synheart_core_revoke_consent(requireHandle(), type))
 
     /** Check whether a consent type is currently granted. */
     fun hasConsent(type: String): Boolean =
@@ -838,7 +934,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Configure the cloud consent service (base URL + app id). Returns true on success. */
     fun consentConfigureCloud(baseUrl: String, appId: String): Boolean =
-        lib.synheart_core_consent_configure_cloud(requireHandle(), baseUrl, appId) == 0
+        ok(lib.synheart_core_consent_configure_cloud(requireHandle(), baseUrl, appId))
 
     /** Return the editable consent form as JSON, or null. */
     fun consentGetEditableForm(): String? =
@@ -878,7 +974,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Clear the stored consent token + snapshot. Returns true on success. */
     fun consentClearStored(): Boolean =
-        lib.synheart_core_consent_clear_stored(requireHandle()) == 0
+        ok(lib.synheart_core_consent_clear_stored(requireHandle()))
 
     // ------------------------------------------------------------------ //
     // Device auth (crypto + storage callbacks + registration)            //
@@ -1022,7 +1118,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Load and verify a capability token. Returns true on success. */
     fun loadCapabilityToken(tokenJson: String, secret: String): Boolean =
-        lib.synheart_core_load_capability_token(requireHandle(), tokenJson, secret) == 0
+        ok(lib.synheart_core_load_capability_token(requireHandle(), tokenJson, secret))
 
     // ------------------------------------------------------------------ //
     // Query                                                              //
@@ -1055,7 +1151,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Record a metric event (JSON). Returns true on success. */
     fun recordMetric(json: String): Boolean =
-        lib.synheart_core_record_metric(requireHandle(), json) == 0
+        ok(lib.synheart_core_record_metric(requireHandle(), json))
 
     // ------------------------------------------------------------------ //
     // Data management                                                    //
@@ -1063,11 +1159,11 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Delete a local session by ID (creates tombstone). Returns true on success. */
     fun deleteSession(sessionId: String): Boolean =
-        lib.synheart_core_delete_session(requireHandle(), sessionId) == 0
+        ok(lib.synheart_core_delete_session(requireHandle(), sessionId))
 
     /** Wipe all local data (storage, keys, sync state). Returns true on success. */
     fun wipeLocalData(): Boolean =
-        lib.synheart_core_wipe_local_data(requireHandle()) == 0
+        ok(lib.synheart_core_wipe_local_data(requireHandle()))
 
     /**
      * Set the retention period in days. Artifacts older than this are
@@ -1176,7 +1272,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Load an SRM snapshot from JSON. Returns true on success. */
     fun loadSrmSnapshot(json: String): Boolean =
-        lib.synheart_core_load_srm_snapshot(requireHandle(), json) == 0
+        ok(lib.synheart_core_load_srm_snapshot(requireHandle(), json))
 
     /** Get overall SRM status as JSON. */
     fun srmOverallStatus(): String? =
@@ -1220,7 +1316,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     /** Load a longitudinal snapshot. Returns true on success. */
     fun loadLongitudinalSnapshot(json: String): Boolean =
         soft("load_longitudinal_snapshot", false) {
-            lib.synheart_core_load_longitudinal_snapshot(requireHandle(), json) == 0
+            ok(lib.synheart_core_load_longitudinal_snapshot(requireHandle(), json))
         }
 
     /** Hydrate baselines from local storage. Returns the report JSON. */
@@ -1379,7 +1475,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Drop the local HSI history. Returns true on success. */
     fun hsiHistoryClear(): Boolean = soft("hsi_history_clear", false) {
-        lib.synheart_core_hsi_history_clear(requireHandle()) == 0
+        ok(lib.synheart_core_hsi_history_clear(requireHandle()))
     }
 
     /** Read HSI windows back from the cloud for a time range. */
@@ -1451,11 +1547,11 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Request account deletion. Returns true on success. */
     fun requestAccountDeletion(): Boolean =
-        lib.synheart_core_request_account_deletion(requireHandle()) == 0
+        ok(lib.synheart_core_request_account_deletion(requireHandle()))
 
     /** Cancel a pending account deletion request. Returns true on success. */
     fun cancelAccountDeletion(): Boolean =
-        lib.synheart_core_cancel_account_deletion(requireHandle()) == 0
+        ok(lib.synheart_core_cancel_account_deletion(requireHandle()))
 
     // ------------------------------------------------------------------ //
     // HSI / stream callbacks                                              //
@@ -1729,7 +1825,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Start a lab protocol. Returns true on success. */
     fun labStart(protocolJson: String, startedAtMs: Long): Boolean =
-        lib.synheart_core_lab_start(requireHandle(), protocolJson, startedAtMs) == 0
+        ok(lib.synheart_core_lab_start(requireHandle(), protocolJson, startedAtMs))
 
     /** Open a new lab window. Returns the window ID string, or null on failure. */
     fun labOpenWindow(parentId: String?, windowType: String, label: String?, startedAtMs: Long): String? =
@@ -1745,19 +1841,19 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Close a lab window. Returns true on success. */
     fun labCloseWindow(windowId: String, endedAtMs: Long): Boolean =
-        lib.synheart_core_lab_close_window(requireHandle(), windowId, endedAtMs) == 0
+        ok(lib.synheart_core_lab_close_window(requireHandle(), windowId, endedAtMs))
 
     /** Set values on a lab window. Returns true on success. */
     fun labSetWindowValues(windowId: String, valuesJson: String): Boolean =
-        lib.synheart_core_lab_set_window_values(requireHandle(), windowId, valuesJson) == 0
+        ok(lib.synheart_core_lab_set_window_values(requireHandle(), windowId, valuesJson))
 
     /** Merge extra data into the lab protocol. Returns true on success. */
     fun labMergeExtraData(patchJson: String): Boolean =
-        lib.synheart_core_lab_merge_extra_data(requireHandle(), patchJson) == 0
+        ok(lib.synheart_core_lab_merge_extra_data(requireHandle(), patchJson))
 
     /** Set state overrides on a lab window. Returns true on success. */
     fun labSetStateOverrides(windowId: String, overridesJson: String): Boolean =
-        lib.synheart_core_lab_set_state_overrides(requireHandle(), windowId, overridesJson) == 0
+        ok(lib.synheart_core_lab_set_state_overrides(requireHandle(), windowId, overridesJson))
 
     /** Finalize the lab protocol. Returns the result JSON string, or null on failure. */
     fun labFinalize(endedAtMs: Long): String? =
@@ -1795,7 +1891,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
 
     /** Mark the metadata record dirty so it re-uploads. Returns true on success. */
     fun labMarkMetadataDirty(reason: String): Boolean = soft("lab_mark_metadata_dirty", false) {
-        lib.synheart_core_lab_mark_metadata_dirty(requireHandle(), reason) == 0
+        ok(lib.synheart_core_lab_mark_metadata_dirty(requireHandle(), reason))
     }
 
     /** Re-enqueue a finalized lab session for upload. Returns the raw code. */

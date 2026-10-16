@@ -20,9 +20,12 @@ import ai.synheart.core.modules.wear.WearModule
 import ai.synheart.core.modules.phone.PhoneModule
 import ai.synheart.core.modules.behavior.BehaviorModule
 import ai.synheart.core.bridge.CoreRuntimeBridge
+import ai.synheart.core.bridge.CoreRuntimeNative
 import ai.synheart.core.bridge.DeviceAuthCallbacks
 import ai.synheart.core.bridge.RuntimeCompat
 import ai.synheart.core.bridge.RuntimeCompatResult
+import ai.synheart.core.bridge.SynheartRuntimeException
+import ai.synheart.core.config.SynheartNativeError
 import ai.synheart.core.config.SynheartMode
 import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.modules.interfaces.WindowType
@@ -640,23 +643,47 @@ object Synheart {
                     resolvedConfig,
                     dataDir = this.context?.filesDir?.absolutePath,
                 ).toString()
-                coreRuntime = withContext(Dispatchers.IO) {
-                    ai.synheart.core.bridge.CoreRuntimeBridge.create(runtimeConfig)
-                }
-                if (coreRuntime != null) {
-                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
-
-                    // Version gate. The C ABI is additive, so an old vendored
-                    // library links fine and diverges silently; this is where
-                    // it becomes visible.
-                    val compat = RuntimeCompat.check(CoreRuntimeBridge.buildInfo())
+                runtimeError = null
+                // Version gate, run on the handle-free build info BEFORE
+                // synheart_core_new, so an incompatible runtime never gets a
+                // handle (or runs its init) at all. The C ABI is additive, so an
+                // old vendored library links fine and diverges silently; this
+                // is where it becomes visible.
+                if (CoreRuntimeNative.INSTANCE != null) {
+                    val info = try {
+                        CoreRuntimeBridge.buildInfoOrThrow()
+                    } catch (e: UnsatisfiedLinkError) {
+                        // The library loaded but lacks synheart_core_build_info,
+                        // so nothing else it exports can be trusted either.
+                        throw SynheartRuntimeException.unidentified(cause = e.toString())
+                    }
+                    val compat = RuntimeCompat.check(info)
                     runtimeCompatibility = compat
                     SynheartLogger.log(compat.message)
                     if (!compat.isAcceptable) {
-                        coreRuntime?.close()
-                        coreRuntime = null
-                        throw IllegalStateException(compat.message)
+                        throw SynheartRuntimeException.incompatible(compat)
                     }
+                }
+                coreRuntime = withContext(Dispatchers.IO) {
+                    ai.synheart.core.bridge.CoreRuntimeBridge.create(runtimeConfig)
+                }
+                if (coreRuntime == null) {
+                    // Degraded init is intentional (apps and tests run without a
+                    // native library), but the developer needs the reason, not a
+                    // generic warning.
+                    runtimeError = CoreRuntimeNative.loadFailure?.let {
+                        SynheartRuntimeException.loadFailure(
+                            SynheartRuntimeException.classifyLoadFailure(it),
+                            cause = it,
+                        )
+                    }
+                    runtimeError?.let { SynheartLogger.log("[Synheart] ${it.message}") }
+                    CoreRuntimeBridge.lastCreateError?.let {
+                        SynheartLogger.log("[Synheart] runtime create failed: $it")
+                    }
+                }
+                if (coreRuntime != null) {
+                    SynheartLogger.log("[Synheart] Native CoreRuntimeBridge initialized")
 
                     // Capture the canonical subject the runtime resolved (a
                     // device-auth derive may have changed it) so SDK subject
@@ -799,7 +826,7 @@ object Synheart {
                     this.context?.let { ctx ->
                         behaviorModule?.attachAccelerometer(
                             ctx,
-                            enabled = resolvedConfig.behaviorConfig?.emitRawMotionSamples == true,
+                            enabled = resolvedConfig.resolvedEmitRawMotionSamples,
                         )
                     }
 
@@ -820,6 +847,12 @@ object Synheart {
                 } else {
                     SynheartLogger.log("[Synheart] Native CoreRuntimeBridge not available — using Kotlin fallback")
                 }
+            } catch (e: SynheartRuntimeException) {
+                // An incompatible runtime is a build-setup error the app must
+                // see, not a degraded mode to continue in.
+                coreRuntime?.close()
+                coreRuntime = null
+                throw e
             } catch (e: Exception) {
                 SynheartLogger.log("[Synheart] Native CoreRuntimeBridge init failed (non-fatal): $e")
                 coreRuntime = null
@@ -1441,14 +1474,35 @@ object Synheart {
         get() = CoreRuntimeBridge.runtimeVersion()
 
     /**
-     * Result of the runtime version gate run at initialisation: the loaded
-     * runtime's version against [RuntimeCompat.WRITTEN_AGAINST] /
-     * [RuntimeCompat.MINIMUM]. Null before initialisation. Below the minimum
-     * [initialize] throws an [IllegalStateException] carrying the same
+     * Result of the runtime gate run at initialisation: the loaded runtime's
+     * ABI against [RuntimeCompat.abiRange], and its version against
+     * [RuntimeCompat.MINIMUM] / [RuntimeCompat.WRITTEN_AGAINST]. Null before
+     * initialisation. When it is not acceptable, [initialize] throws a
+     * [SynheartRuntimeException] (kind `INCOMPATIBLE`) carrying the same
      * message; between minimum and written-against it logs a warning once.
      */
     var runtimeCompatibility: RuntimeCompatResult? = null
         private set
+
+    /**
+     * Why the native runtime is unavailable after [initialize], or null when it
+     * loaded. Set for a missing, wrong-architecture or unloadable library,
+     * which leave initialisation degraded (no HSI) instead of throwing. Its
+     * [SynheartRuntimeException.installCommand] is the fix.
+     */
+    var runtimeError: SynheartRuntimeException? = null
+        private set
+
+    /**
+     * The structured error from the most recent runtime call that reported an
+     * outcome, or null when that call succeeded: `code`, `message`,
+     * `retryable`, plus `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`,
+     * `argument`, `hint`, `op`, `errorId` and `report`. Read it straight after
+     * the failing call. Requires a runtime with ABI 2.0
+     * (`synheart_core_last_error_json`); on older runtimes it stays null.
+     */
+    val lastNativeError: SynheartNativeError?
+        get() = coreRuntime?.lastError
 
     private fun handleConsentChange(newConsent: ConsentSnapshot) {
         previousConsent = newConsent
