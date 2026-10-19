@@ -137,24 +137,97 @@ internal object DeviceAuthCallbacks {
         synchronized(prefsLock) {
             prefsInstance?.let { return it }
             return try {
-                val masterKey = MasterKey.Builder(ctx)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences.create(
-                    ctx,
-                    "synheart_core_secure_store",
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-                ).also { prefsInstance = it }
+                createPrefs(ctx).also { prefsInstance = it }
             } catch (e: Exception) {
+                if (!isSealedWithAnotherKey(e)) {
+                    // Transient (Keystore not ready, user not authenticated,
+                    // OEM fault): keep the file, the caller retries.
+                    SynheartLogger.log(
+                        "[DeviceAuthCallbacks] secure store unavailable: " +
+                            "${e::class.java.name}: ${e.message}",
+                    )
+                    return null
+                }
+                // The store's keyset was sealed by a master key this install
+                // does not have - typically app data restored from a backup
+                // or a device transfer, since Keystore keys are never backed
+                // up. Every value in it is permanently unreadable, and keeping
+                // it fails every secure read forever. Start an empty store.
                 SynheartLogger.log(
-                    "[DeviceAuthCallbacks] secure store unavailable: " +
-                        "${e::class.java.name}: ${e.message}",
+                    "[DeviceAuthCallbacks] secure store was sealed by another " +
+                        "Keystore key (restored backup?) - discarding it",
                 )
-                null
+                try {
+                    ctx.deleteSharedPreferences(SECURE_PREFS_FILE)
+                    clearSmkProvisionedMarkers(ctx)
+                    createPrefs(ctx).also { prefsInstance = it }
+                } catch (e2: Exception) {
+                    SynheartLogger.log(
+                        "[DeviceAuthCallbacks] secure store re-create failed: " +
+                            "${e2::class.java.name}: ${e2.message}",
+                    )
+                    null
+                }
             }
         }
+    }
+
+    private const val SECURE_PREFS_FILE = "synheart_core_secure_store"
+
+    // Runtime file-name convention (synheart_crypto::smk); keep in sync.
+    private const val SMK_PROVISIONED_MARKER_PREFIX = ".smk-provisioned-"
+
+    private fun createPrefs(ctx: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            ctx,
+            SECURE_PREFS_FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    /**
+     * True only for the definitive "wrong key" failure: the GCM tag check of
+     * the stored keyset failed. Transient Keystore states throw other types,
+     * and must never discard the store - that would orphan everything in it.
+     */
+    private fun isSealedWithAnotherKey(e: Throwable): Boolean {
+        var cause: Throwable? = e
+        var depth = 0
+        while (cause != null && depth < 8) {
+            if (cause is javax.crypto.AEADBadTagException) return true
+            cause = cause.cause
+            depth++
+        }
+        return false
+    }
+
+    /**
+     * Removes the runtime's `.smk-provisioned-<subject>` markers.
+     *
+     * The runtime writes one beside its data the first time it stores a
+     * subject's storage master key in this store, and afterwards refuses to
+     * mint a replacement when the key reads back absent (it assumes a locked
+     * Keystore and waits). Once the store is discarded, every key the markers
+     * vouch for is gone for good, so they would block the subject forever
+     * (ERR_SECURE_STORAGE_UNAVAILABLE). Markers live in plain app storage, so
+     * a restore brings them back with the unreadable store. Searched across
+     * the app's data dir because each runtime instance has its own data dir.
+     */
+    private fun clearSmkProvisionedMarkers(ctx: Context) {
+        val root = ctx.filesDir.parentFile ?: ctx.filesDir
+        var removed = 0
+        root.walkTopDown()
+            .maxDepth(6)
+            .filter { it.isFile && it.name.startsWith(SMK_PROVISIONED_MARKER_PREFIX) }
+            .forEach { if (it.delete()) removed++ }
+        SynheartLogger.log(
+            "[DeviceAuthCallbacks] removed $removed SMK provisioning marker(s)",
+        )
     }
 
     /**
