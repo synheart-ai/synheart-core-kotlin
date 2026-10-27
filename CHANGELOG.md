@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at
 load, and runtime 0.42 is refused by every earlier SDK. Install it with
 `synheart install runtime --version 0.42.1`. Expect one cold start on the
@@ -783,6 +785,8 @@ a Kotlin surface.
 ### Distribution
 - Maven Central: `ai.synheart:synheart-core:0.0.4`
 
+[0.5.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.5.0
+[0.4.1]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.4.1
 [0.4.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.4.0
 [0.3.1]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.3.1
 [0.3.0]: https://github.com/synheart-ai/synheart-core-kotlin/releases/tag/v0.3.0
