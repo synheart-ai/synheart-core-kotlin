@@ -148,11 +148,22 @@ interface CoreRuntimeNative : Library {
     // Sensor push                                                        //
     // ------------------------------------------------------------------ //
 
+    // C ABI 4.0: every sample push carries its provider (null reads as
+    // `default_sensor`) and `utc_offset_min`, the person's offset from UTC in
+    // force at the sample (±840, else the sample is dropped). The personal
+    // baselines file samples under the local day that offset gives.
+
     /**
      * Push an R-R interval sample. `provider` tags the source for the
      * multi-source priority resolver; null falls back to `default_sensor`.
      */
-    fun synheart_core_push_rr(handle: Pointer?, ts_ms: Long, rr_ms: Double, provider: String?)
+    fun synheart_core_push_rr(
+        handle: Pointer?,
+        ts_ms: Long,
+        rr_ms: Double,
+        provider: String?,
+        utc_offset_min: Int,
+    )
 
     /**
      * Push a burst of R-R intervals that arrived in one sensor notification.
@@ -166,13 +177,22 @@ interface CoreRuntimeNative : Library {
         len: NativeLong,
         order: Int,
         provider: String?,
+        utc_offset_min: Int,
     )
 
     /** Push a heart-rate sample. */
-    fun synheart_core_push_hr(handle: Pointer?, ts_ms: Long, bpm: Double)
+    fun synheart_core_push_hr(handle: Pointer?, ts_ms: Long, bpm: Double, provider: String?, utc_offset_min: Int)
 
     /** Push a 3-axis accelerometer sample. */
-    fun synheart_core_push_accel(handle: Pointer?, ts_ms: Long, x: Double, y: Double, z: Double)
+    fun synheart_core_push_accel(
+        handle: Pointer?,
+        ts_ms: Long,
+        x: Double,
+        y: Double,
+        z: Double,
+        provider: String?,
+        utc_offset_min: Int,
+    )
 
     /**
      * Push a behavioral event. `event_type` is the numeric behavior code
@@ -207,10 +227,27 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_set_accel_placement(handle: Pointer?, placement: Int)
 
     /** One wrist-worn accelerometer sample in g. Kept apart from the device's own motion. */
-    fun synheart_core_push_wrist_accel(handle: Pointer?, ts_ms: Long, x: Double, y: Double, z: Double)
+    fun synheart_core_push_wrist_accel(
+        handle: Pointer?,
+        ts_ms: Long,
+        x: Double,
+        y: Double,
+        z: Double,
+        provider: String?,
+        utc_offset_min: Int,
+    )
 
     /** One body-worn accelerometer sample in g, tagged with where it sits (`AccelPlacement.code`). */
-    fun synheart_core_push_worn_accel(handle: Pointer?, ts_ms: Long, x: Double, y: Double, z: Double, placement: Int)
+    fun synheart_core_push_worn_accel(
+        handle: Pointer?,
+        ts_ms: Long,
+        x: Double,
+        y: Double,
+        z: Double,
+        placement: Int,
+        provider: String?,
+        utc_offset_min: Int,
+    )
 
     /** Declare the window containing `ts_ms` a rest window. One-shot. */
     fun synheart_core_declare_rest_window(handle: Pointer?, ts_ms: Long)
@@ -222,11 +259,20 @@ interface CoreRuntimeNative : Library {
     fun synheart_core_flush_pending(handle: Pointer?, now_ms: Long): Pointer?
 
     /**
-     * Advance the daily accumulator. `day_index` is days since epoch in the
-     * host's LOCAL zone and must strictly advance; returns
-     * ERR_DAILY_DAY_NOT_ADVANCING otherwise.
+     * Score the local day the engine closed last and queue it for the next
+     * frame. The engine closes each local day itself (C ABI 4.0 removed
+     * `roll_day`). Caller frees. Null before any day has closed.
      */
-    fun synheart_core_roll_day(handle: Pointer?, day_index: Int): Int
+    fun synheart_core_attach_closed_day_strain_json(handle: Pointer?): Pointer?
+
+    /** Report keyboard and pointer/touch capture running (1) or stopped (0) from `ts_ms`. 0 = accepted. */
+    fun synheart_core_set_input_capture(handle: Pointer?, running: Int, ts_ms: Long): Int
+
+    /** Report a call on (1) or off (0) from `ts_ms`. 0 = accepted. */
+    fun synheart_core_set_call_active(handle: Pointer?, active: Int, ts_ms: Long): Int
+
+    /** Push a batch of typed inputs (the input envelope) as JSON. Returns the batch account; caller frees. */
+    fun synheart_core_push_inputs_json(handle: Pointer?, inputs_json: String?): Pointer?
 
     /** Export per-head session state as JSON. Caller frees. */
     fun synheart_core_export_session_state(handle: Pointer?): Pointer?
@@ -243,7 +289,7 @@ interface CoreRuntimeNative : Library {
     /**
      * Score today's accumulated Strain and queue it onto the next HSI frame.
      * Returns the score JSON, or null when nothing is scorable yet. Call
-     * BEFORE roll_day — rolling clears the values Strain is computed from.
+     * before local midnight; after it, use attach_closed_day_strain_json.
      * Caller frees.
      */
     fun synheart_core_attach_strain_score_json(handle: Pointer?): Pointer?
@@ -543,41 +589,69 @@ interface CoreRuntimeNative : Library {
     /** Get current baselines as JSON. */
     fun synheart_core_baselines_json(handle: Pointer?): Pointer?
 
-    /** Export the SRM snapshot as JSON. */
-    fun synheart_core_export_srm_snapshot(handle: Pointer?): Pointer?
+    /**
+     * Every personal baseline as one opaque base64 snapshot (C ABI 3.0+),
+     * replacing the SRM and longitudinal JSON pairs. Caller frees. Null before
+     * any pipeline has run.
+     */
+    fun synheart_core_export_baseline_snapshot(handle: Pointer?): Pointer?
 
-    /** Load an SRM snapshot from JSON. Returns 0 on success. */
-    fun synheart_core_load_srm_snapshot(handle: Pointer?, json: String?): Int
+    /** Restore a snapshot from [synheart_core_export_baseline_snapshot]. 0 on success, 1 when refused. */
+    fun synheart_core_load_baseline_snapshot(handle: Pointer?, snapshot_b64: String?): Int
 
     /** Get overall SRM status as JSON. */
     fun synheart_core_srm_overall_status(handle: Pointer?): Pointer?
 
     /**
-     * Feed one day of a wearable-derived dimension into the SRM.
-     * `day_index` is days since the Unix epoch; `fidelity` is the
-     * numeric `Fidelity` discriminant.
+     * Write one local date's value of a daily `metric` (a runtime name such as
+     * `cardiac.resting_hr_bpm`) from `provider`. The date is the calendar date
+     * in the person's own time zone; a night belongs to the date the person
+     * woke on. `vendor_summary` is 1 for a provider summary, 0 for a value
+     * computed from raw samples. Returns 0, 1004, 5002 or -1.
      */
     fun synheart_core_srm_push_wearable_daily(
         handle: Pointer?,
-        dimension: String?,
-        day_index: Int,
+        provider: String?,
+        metric: String?,
+        year: Int,
+        month: Int,
+        day: Int,
         value: Double,
-        confidence: Double,
-        fidelity: Int,
-    )
+        vendor_summary: Int,
+    ): Int
 
-    /** Recompute wearable-backed baselines after a bulk push. */
-    fun synheart_core_srm_trigger_wearable_recompute(
-        handle: Pointer?,
-        trigger_type: Int,
-        as_of_day: Int,
-    )
+    /**
+     * Rebuild the wearable reference from the daily values of the local dates
+     * before `year`-`month`-`day`. Returns 0, 1004, 1002 or -1.
+     */
+    fun synheart_core_srm_refresh_wearable_reference(handle: Pointer?, year: Int, month: Int, day: Int): Int
 
-    /** Export the longitudinal (multi-day) snapshot as JSON. Caller frees. */
-    fun synheart_core_export_longitudinal_snapshot(handle: Pointer?): Pointer?
+    /** Declare a local date's day type (0 workday … 5 on-call). Returns 0, 1004 or -1. */
+    fun synheart_core_srm_set_day_type(handle: Pointer?, year: Int, month: Int, day: Int, day_type: Int): Int
 
-    /** Load a longitudinal snapshot. Returns 0 on success. */
-    fun synheart_core_load_longitudinal_snapshot(handle: Pointer?, snapshot_json: String?): Int
+    /** Which windows taught the baselines on a local date, as JSON. Caller frees. */
+    fun synheart_core_baseline_window_digest_json(handle: Pointer?, year: Int, month: Int, day: Int): Pointer?
+
+    /** Personal-baseline events since the last call, as a JSON array. Caller frees. */
+    fun synheart_core_srm_drain_events_json(handle: Pointer?): Pointer?
+
+    /** Forget part of the personal baselines. Returns 0, 1, 1002 or -1. */
+    fun synheart_core_srm_forget_baselines(handle: Pointer?, scope_json: String?): Int
+
+    /** Register an episode direction. Returns its key as JSON, or null. Caller frees. */
+    fun synheart_core_srm_register_direction(handle: Pointer?, direction_json: String?): Pointer?
+
+    /** Start a new rest block at `ts_ms`. Returns 0, 1002 or -1. */
+    fun synheart_core_baseline_begin_rest_block(handle: Pointer?, ts_ms: Long): Int
+
+    /** What the personal baselines know, as JSON. Caller frees. */
+    fun synheart_core_baseline_profile_json(handle: Pointer?): Pointer?
+
+    /** The person's rhythm of active use, as JSON. Caller frees. */
+    fun synheart_core_baseline_rhythm_json(handle: Pointer?): Pointer?
+
+    /** Whether this host feeds the baselines what they need, judged at `now_ms`, as JSON. Caller frees. */
+    fun synheart_core_baseline_requirements_json(handle: Pointer?, now_ms: Long): Pointer?
 
     /** Hydrate baselines from local storage. Returns a JSON report. Caller frees. */
     fun synheart_core_baseline_hydrate_local(handle: Pointer?): Pointer?

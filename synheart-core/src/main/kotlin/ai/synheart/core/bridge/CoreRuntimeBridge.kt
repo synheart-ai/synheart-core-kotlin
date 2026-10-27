@@ -42,6 +42,18 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     val missingSymbols: Set<String> get() = _missingSymbols.toSet()
 
     companion object {
+        /**
+         * The device's offset from UTC, in minutes, in force at [tsMs] (epoch
+         * ms). Every sample push carries it (C ABI 4.0): the personal baselines
+         * file a sample under the local day this offset gives. Taken at the
+         * sample's own time, not now, so samples on either side of a
+         * daylight-saving change land on the right local day. Clamped to the
+         * runtime's ±840, which every real zone satisfies.
+         */
+        @JvmStatic
+        fun utcOffsetMinAt(tsMs: Long): Int =
+            (java.util.TimeZone.getDefault().getOffset(tsMs) / 60_000).coerceIn(-840, 840)
+
         /** Default `env_filter` when [initLogging] is called with a null/empty filter. */
         var defaultLogEnvFilter: String = "info"
 
@@ -537,7 +549,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * for the multi-source priority resolver.
      */
     fun pushRr(tsMs: Long, rrMs: Double, provider: String = "default_sensor") {
-        lib.synheart_core_push_rr(requireHandle(), tsMs, rrMs, provider)
+        lib.synheart_core_push_rr(requireHandle(), tsMs, rrMs, provider, utcOffsetMinAt(tsMs))
     }
 
     /**
@@ -561,17 +573,18 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
             NativeLong(rrMs.size.toLong()),
             order,
             provider,
+            utcOffsetMinAt(anchorTsMs),
         )
     }
 
-    /** Push a heart-rate sample (BPM). */
-    fun pushHr(tsMs: Long, bpm: Double) {
-        lib.synheart_core_push_hr(requireHandle(), tsMs, bpm)
+    /** Push a heart-rate sample (BPM). A null [provider] reads as `default_sensor`. */
+    fun pushHr(tsMs: Long, bpm: Double, provider: String? = null) {
+        lib.synheart_core_push_hr(requireHandle(), tsMs, bpm, provider, utcOffsetMinAt(tsMs))
     }
 
     /** Push a 3-axis accelerometer sample. */
-    fun pushAccel(tsMs: Long, x: Double, y: Double, z: Double) {
-        lib.synheart_core_push_accel(requireHandle(), tsMs, x, y, z)
+    fun pushAccel(tsMs: Long, x: Double, y: Double, z: Double, provider: String? = null) {
+        lib.synheart_core_push_accel(requireHandle(), tsMs, x, y, z, provider, utcOffsetMinAt(tsMs))
     }
 
     /**
@@ -646,7 +659,13 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
             "declareRestWindow" to hasSymbol("synheart_core_declare_rest_window"),
             "tickAll" to hasSymbol("synheart_core_tick_all"),
             "flushPending" to hasSymbol("synheart_core_flush_pending"),
-            "rollDay" to hasSymbol("synheart_core_roll_day"),
+            "attachClosedDayStrain" to hasSymbol("synheart_core_attach_closed_day_strain_json"),
+            "setInputCapture" to hasSymbol("synheart_core_set_input_capture"),
+            "setCallActive" to hasSymbol("synheart_core_set_call_active"),
+            "pushInputsJson" to hasSymbol("synheart_core_push_inputs_json"),
+            "srmRefreshWearableReference" to hasSymbol("synheart_core_srm_refresh_wearable_reference"),
+            "srmSetDayType" to hasSymbol("synheart_core_srm_set_day_type"),
+            "exportBaselineSnapshot" to hasSymbol("synheart_core_export_baseline_snapshot"),
             "exportSessionState" to hasSymbol("synheart_core_export_session_state"),
             "loadSessionState" to hasSymbol("synheart_core_load_session_state"),
             "configId" to hasSymbol("synheart_core_config_id"),
@@ -697,9 +716,10 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * runtime reports wrist motion separately and never mixes the two.
      * [tsMs] is the sensor's sample time, not the arrival time.
      */
-    fun pushWristAccel(tsMs: Long, x: Double, y: Double, z: Double) = soft("push_wrist_accel", Unit) {
-        lib.synheart_core_push_wrist_accel(requireHandle(), tsMs, x, y, z)
-    }
+    fun pushWristAccel(tsMs: Long, x: Double, y: Double, z: Double, provider: String? = null) =
+        soft("push_wrist_accel", Unit) {
+            lib.synheart_core_push_wrist_accel(requireHandle(), tsMs, x, y, z, provider, utcOffsetMinAt(tsMs))
+        }
 
     /**
      * Push one sample from a body-worn accelerometer, in **g**, tagged with its
@@ -707,10 +727,25 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * Unlike [setAccelPlacement], which declares where the *device* sits, the
      * placement here travels with every sample.
      */
-    fun pushWornAccel(tsMs: Long, x: Double, y: Double, z: Double, placementCode: Int) =
-        soft("push_worn_accel", Unit) {
-            lib.synheart_core_push_worn_accel(requireHandle(), tsMs, x, y, z, placementCode)
-        }
+    fun pushWornAccel(
+        tsMs: Long,
+        x: Double,
+        y: Double,
+        z: Double,
+        placementCode: Int,
+        provider: String? = null,
+    ) = soft("push_worn_accel", Unit) {
+        lib.synheart_core_push_worn_accel(
+            requireHandle(),
+            tsMs,
+            x,
+            y,
+            z,
+            placementCode,
+            provider,
+            utcOffsetMinAt(tsMs),
+        )
+    }
 
     /**
      * Declare that the window containing [tsMs] is a rest window.
@@ -748,12 +783,38 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     }
 
     /**
-     * Advance the daily accumulator to [dayIndex] (days since epoch in the
-     * host's **local** zone). Returns the runtime status, or `null` when the
-     * symbol is absent. The index must strictly advance.
+     * Score the local day the engine closed last and queue it onto the next
+     * frame: `{local_date, start_ms, end_ms, strain}`. The engine closes each
+     * local day itself (C ABI 4.0), so call this once a day after local
+     * midnight. `null` before any day has closed, when the closed day has
+     * nothing to score, or when the symbol is absent.
      */
-    fun rollDay(dayIndex: Int): Int? = soft("roll_day", null) {
-        lib.synheart_core_roll_day(requireHandle(), dayIndex)
+    fun attachClosedDayStrainJson(): String? = soft("attach_closed_day_strain_json", null) {
+        readAndFreeString(lib.synheart_core_attach_closed_day_strain_json(requireHandle()))
+    }
+
+    /**
+     * Report whether keyboard and pointer/touch capture is running, from [tsMs]
+     * on. A still window counts as rest — and teaches the resting heart rate
+     * and HRV — only while capture is reported running. A level: it holds
+     * across session stop and start. `true` when accepted.
+     */
+    fun setInputCapture(running: Boolean, tsMs: Long): Boolean = soft("set_input_capture", false) {
+        ok(lib.synheart_core_set_input_capture(requireHandle(), if (running) 1 else 0, tsMs))
+    }
+
+    /** Report whether a call is on, from [tsMs] on. A level, like [setInputCapture]. */
+    fun setCallActive(active: Boolean, tsMs: Long): Boolean = soft("set_call_active", false) {
+        ok(lib.synheart_core_set_call_active(requireHandle(), if (active) 1 else 0, tsMs))
+    }
+
+    /**
+     * Push a batch of typed inputs (the runtime's input envelope) as a JSON
+     * array. Returns the batch's account as JSON, or `null` with no pipeline,
+     * input that is not a JSON array, or the symbol absent.
+     */
+    fun pushInputsJson(inputsJson: String): String? = soft("push_inputs_json", null) {
+        readAndFreeString(lib.synheart_core_push_inputs_json(requireHandle(), inputsJson))
     }
 
     /** Export per-head session state. Persist once per emitted window and on background. */
@@ -790,11 +851,10 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * Returns the score JSON, `null` when the symbol is absent, and also `null`
      * when the day has nothing scorable yet — normal on a fresh install.
      *
-     * **Call this BEFORE [rollDay].** Rolling finalises the day and clears the
-     * very values the Strain computation reads, so a host that rolls first gets
-     * `null` every day and never emits a Strain score. `rollDay` does not do
-     * this for you. Takes no input: the engine accumulated Strain's inputs
-     * itself over the day.
+     * The engine closes each local day itself at the first input of the next,
+     * so call this before local midnight; after it, [attachClosedDayStrainJson]
+     * scores the day that just closed. Takes no input: the engine accumulated
+     * Strain's inputs itself over the day.
      */
     fun attachStrainScoreJson(): String? = soft("attach_strain_score_json", null) {
         readAndFreeString(lib.synheart_core_attach_strain_score_json(requireHandle()))
@@ -1266,58 +1326,144 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun baselinesJson(): String? =
         readAndFreeString(lib.synheart_core_baselines_json(requireHandle()))
 
-    /** Export the SRM snapshot as JSON. */
-    fun exportSrmSnapshot(): String? =
-        readAndFreeString(lib.synheart_core_export_srm_snapshot(requireHandle()))
+    /**
+     * Every personal baseline (per-window references, daily values, consent
+     * lineage, the sleep-score ring) as one opaque base64 snapshot. Store it
+     * as private health data and never parse it. The runtime also seals it to
+     * its own data directory, so a host that keeps that directory needs
+     * neither this nor [loadBaselineSnapshot]. `null` before any pipeline has
+     * run, or when the symbol is absent.
+     */
+    fun exportBaselineSnapshot(): String? = soft("export_baseline_snapshot", null) {
+        readAndFreeString(lib.synheart_core_export_baseline_snapshot(requireHandle()))
+    }
 
-    /** Load an SRM snapshot from JSON. Returns true on success. */
-    fun loadSrmSnapshot(json: String): Boolean =
-        ok(lib.synheart_core_load_srm_snapshot(requireHandle(), json))
+    /**
+     * Restore a snapshot from [exportBaselineSnapshot]. Needs a running
+     * pipeline. `false` when there is none, the text is not base64, or the
+     * engine refused it (damaged, from a newer build, or another subject's).
+     */
+    fun loadBaselineSnapshot(snapshotB64: String): Boolean = soft("load_baseline_snapshot", false) {
+        ok(lib.synheart_core_load_baseline_snapshot(requireHandle(), snapshotB64))
+    }
 
     /** Get overall SRM status as JSON. */
     fun srmOverallStatus(): String? =
         readAndFreeString(lib.synheart_core_srm_overall_status(requireHandle()))
 
     /**
-     * Feed one day of a wearable-derived dimension into the SRM.
+     * Write one local date's value of a daily [metric] into the personal
+     * baselines, from [provider] (`"health_connect"`, `"whoop"`, …).
      *
-     * [dayIndex] is days since the Unix epoch; [fidelity] is the numeric
-     * `Fidelity` discriminant. Call [srmTriggerWearableRecompute] once after a
-     * bulk push rather than after every day.
+     * [metric] is one of the runtime's names (see `DailyMetric`; the unit is
+     * in the name). The date is the calendar date in the person's time zone;
+     * a night belongs to the date the person woke on. [vendorSummary] is true
+     * for a provider's daily summary, false for a value computed from raw
+     * samples. Writing a date again replaces it.
+     *
+     * Returns `0`; `1004` for an unknown metric or a date that does not exist;
+     * `5002` for a value outside the metric's plausible bounds or a stream the
+     * person has not permitted (not stored); `-1` with no running pipeline;
+     * `null` when the symbol is absent.
      */
     fun srmPushWearableDaily(
-        dimension: String,
-        dayIndex: Int,
+        provider: String,
+        metric: String,
+        year: Int,
+        month: Int,
+        day: Int,
         value: Double,
-        confidence: Double,
-        fidelity: Int,
-    ) = soft("srm_push_wearable_daily", Unit) {
-        lib.synheart_core_srm_push_wearable_daily(
+        vendorSummary: Boolean = true,
+    ): Int? = soft("srm_push_wearable_daily", null) {
+        val rc = lib.synheart_core_srm_push_wearable_daily(
             requireHandle(),
-            dimension,
-            dayIndex,
+            provider,
+            metric,
+            year,
+            month,
+            day,
             value,
-            confidence,
-            fidelity,
+            if (vendorSummary) 1 else 0,
         )
+        ok(rc)
+        rc
     }
 
-    /** Recompute wearable-backed baselines after a bulk push. */
-    fun srmTriggerWearableRecompute(triggerType: Int, asOfDay: Int) =
-        soft("srm_trigger_wearable_recompute", Unit) {
-            lib.synheart_core_srm_trigger_wearable_recompute(requireHandle(), triggerType, asOfDay)
+    /**
+     * Rebuild the wearable reference from the daily values of the local dates
+     * **before** [year]-[month]-[day], so a day never sits in its own baseline.
+     * Call once a day after the day's values are pushed, with the date after
+     * the last complete one. Returns `0`, `1004`, `1002` (busy), `-1` (no
+     * pipeline), or `null` when the symbol is absent.
+     */
+    fun srmRefreshWearableReference(year: Int, month: Int, day: Int): Int? =
+        soft("srm_refresh_wearable_reference", null) {
+            val rc = lib.synheart_core_srm_refresh_wearable_reference(requireHandle(), year, month, day)
+            ok(rc)
+            rc
         }
 
-    /** Export the longitudinal (multi-day) snapshot as JSON. */
-    fun exportLongitudinalSnapshot(): String? = soft("export_longitudinal_snapshot", null) {
-        readAndFreeString(lib.synheart_core_export_longitudinal_snapshot(requireHandle()))
+    /**
+     * Declare what kind of day [year]-[month]-[day] is: `0` workday, `1` free
+     * day, `2` leave, `3` sick, `4` travel, `5` on-call. Sick, leave and travel
+     * days teach a separate side reference. Returns `0`, `1004`, `-1`, or
+     * `null` when the symbol is absent.
+     */
+    fun srmSetDayType(year: Int, month: Int, day: Int, dayType: Int): Int? =
+        soft("srm_set_day_type", null) {
+            val rc = lib.synheart_core_srm_set_day_type(requireHandle(), year, month, day, dayType)
+            ok(rc)
+            rc
+        }
+
+    /** Which windows taught the baselines on [year]-[month]-[day], as JSON. */
+    fun baselineWindowDigestJson(year: Int, month: Int, day: Int): String? =
+        soft("baseline_window_digest_json", null) {
+            readAndFreeString(lib.synheart_core_baseline_window_digest_json(requireHandle(), year, month, day))
+        }
+
+    /** Personal-baseline events since the last call, oldest first (JSON array). Device-only. */
+    fun srmDrainEventsJson(): String? = soft("srm_drain_events_json", null) {
+        readAndFreeString(lib.synheart_core_srm_drain_events_json(requireHandle()))
     }
 
-    /** Load a longitudinal snapshot. Returns true on success. */
-    fun loadLongitudinalSnapshot(json: String): Boolean =
-        soft("load_longitudinal_snapshot", false) {
-            ok(lib.synheart_core_load_longitudinal_snapshot(requireHandle(), json))
-        }
+    /**
+     * Forget part of the personal baselines at the person's request, e.g.
+     * `{"scope":"everything"}`. Returns `0`, `1` (bad scope), `1002` (busy),
+     * `-1` (no pipeline), or `null` when the symbol is absent.
+     */
+    fun srmForgetBaselines(scopeJson: String): Int? = soft("srm_forget_baselines", null) {
+        val rc = lib.synheart_core_srm_forget_baselines(requireHandle(), scopeJson)
+        ok(rc)
+        rc
+    }
+
+    /** Register an episode direction; returns its key as JSON, or `null` when refused. */
+    fun srmRegisterDirection(directionJson: String): String? = soft("srm_register_direction", null) {
+        readAndFreeString(lib.synheart_core_srm_register_direction(requireHandle(), directionJson))
+    }
+
+    /** Start a new rest block at [tsMs]. Returns `0`, `1002`, `-1`, or `null` when absent. */
+    fun baselineBeginRestBlock(tsMs: Long): Int? = soft("baseline_begin_rest_block", null) {
+        val rc = lib.synheart_core_baseline_begin_rest_block(requireHandle(), tsMs)
+        ok(rc)
+        rc
+    }
+
+    /** What the personal baselines know, as JSON. Device-only. */
+    fun baselineProfileJson(): String? = soft("baseline_profile_json", null) {
+        readAndFreeString(lib.synheart_core_baseline_profile_json(requireHandle()))
+    }
+
+    /** The person's rhythm of active use, as JSON (the literal `null` before any active minute). */
+    fun baselineRhythmJson(): String? = soft("baseline_rhythm_json", null) {
+        readAndFreeString(lib.synheart_core_baseline_rhythm_json(requireHandle()))
+    }
+
+    /** Whether this host feeds the baselines what they need, judged at [nowMs], as JSON. */
+    fun baselineRequirementsJson(nowMs: Long): String? = soft("baseline_requirements_json", null) {
+        readAndFreeString(lib.synheart_core_baseline_requirements_json(requireHandle(), nowMs))
+    }
 
     /** Hydrate baselines from local storage. Returns the report JSON. */
     fun baselineHydrateLocal(): String? = soft("baseline_hydrate_local", null) {

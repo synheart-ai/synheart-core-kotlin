@@ -22,15 +22,15 @@ object RuntimeCompat {
      * new symbol or a moved shape, or once they are verified on a newer
      * release.
      */
-    const val WRITTEN_AGAINST: String = "0.38.0"
+    const val WRITTEN_AGAINST: String = "0.42.1"
 
     /**
      * Oldest runtime the bindings are known to load and behave on. Below this
      * the SDK refuses to initialise rather than run with entrypoints that no
-     * longer mean what the code assumes. `0.20.0` is the baseline of the
-     * runtime's `SDK-CONTRACT-CHANGES.md`.
+     * longer mean what the code assumes. `0.42.0` is the first release on C
+     * ABI 4.0, which these bindings require.
      */
-    const val MINIMUM: String = "0.20.0"
+    const val MINIMUM: String = "0.42.0"
 
     /**
      * The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
@@ -39,18 +39,20 @@ object RuntimeCompat {
      * MINOR is at least [REQUIRED_ABI_MINOR]. This, not the release version, is
      * the contract; the version checks only grade runtimes that satisfy it.
      */
-    const val REQUIRED_ABI: String = "1.0"
-    const val REQUIRED_ABI_MAJOR: Int = 1
+    const val REQUIRED_ABI: String = "4.0"
+    const val REQUIRED_ABI_MAJOR: Int = 4
     const val REQUIRED_ABI_MINOR: Int = 0
 
     /**
-     * Newest ABI major the bindings also accept. ABI 2.0 only removed symbols
-     * these bindings never call, and its one addition
-     * (`synheart_core_last_error_json`) is looked up as optional, so runtimes on
-     * either major load. Raise it only after checking a new major's removals
+     * Newest ABI major the bindings also accept. Only 4: ABI 4.0 re-signed every
+     * sample push (each now takes `provider` and `utc_offset_min`) and the
+     * personal-baseline day calls (calendar dates instead of day indexes). JNA
+     * does not check a signature, so a binding for the other major would still
+     * link and then pass the wrong arguments — a native crash, not an error.
+     * Raise it only after checking a new major's removals and re-signings
      * against the bindings.
      */
-    const val MAX_ABI_MAJOR: Int = 2
+    const val MAX_ABI_MAJOR: Int = 4
 
     /** The accepted ABI range, for messages. */
     val abiRange: String
