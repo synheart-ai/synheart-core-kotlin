@@ -575,7 +575,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
 | `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.42.1) and `MINIMUM` (0.42.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
 | `runtimeError` | Why the runtime is unavailable (not installed, wrong architecture, failed to load), or null; its `installCommand` is the fix |
-| `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded; needs runtime ABI 2.0 |
+| `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
