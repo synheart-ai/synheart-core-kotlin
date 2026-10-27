@@ -32,15 +32,15 @@ class RuntimeCompatTest {
 
     @Test
     fun `check is OLDER between minimum and written-against, still acceptable`() {
-        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.30.0"))
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.42.0"))
         assertEquals(RuntimeCompatStatus.OLDER, r.status)
         assertTrue(r.isAcceptable)
-        assertTrue(r.message.contains("0.30.0"))
+        assertTrue(r.message.contains("0.42.0"))
     }
 
     @Test
     fun `check refuses TOO_OLD below the minimum`() {
-        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.19.2"))
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.41.0"))
         assertEquals(RuntimeCompatStatus.TOO_OLD, r.status)
         assertFalse(r.isAcceptable)
     }
@@ -53,8 +53,9 @@ class RuntimeCompatTest {
 
     @Test
     fun `check refuses a runtime reporting an ABI outside the accepted range`() {
-        for (abi in listOf("0.9", "3.0")) {
-            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", abi))
+        // 2.x and 3.x are refused too: ABI 4.0 re-signed every sample push.
+        for (abi in listOf("0.9", "2.1", "3.5", "5.0")) {
+            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.42.1").put("abi", abi))
             assertEquals(abi, RuntimeCompatStatus.INCOMPATIBLE_ABI, r.status)
             assertFalse(r.isAcceptable)
             assertTrue(r.message.contains(RuntimeCompat.INSTALL_COMMAND))
@@ -62,9 +63,9 @@ class RuntimeCompatTest {
     }
 
     @Test
-    fun `check accepts ABI 1 and 2`() {
-        for (abi in listOf("1.0", "1.1", "2.0", "2.3")) {
-            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", abi))
+    fun `check accepts ABI 4`() {
+        for (abi in listOf("4.0", "4.3")) {
+            val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.42.1").put("abi", abi))
             assertTrue(abi, r.isAcceptable)
             assertEquals(abi, r.abi)
         }
@@ -72,7 +73,7 @@ class RuntimeCompatTest {
 
     @Test
     fun `a malformed ABI falls back to the version checks`() {
-        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", "two"))
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.42.1").put("abi", "two"))
         assertEquals(RuntimeCompatStatus.OK, r.status)
         assertEquals(null, r.abi)
     }
@@ -87,11 +88,11 @@ class RuntimeCompatTest {
 
     @Test
     fun `incompatible exception carries the versions and the fix`() {
-        val compat = RuntimeCompat.check(JSONObject().put("core_runtime", "0.38.0").put("abi", "3.0"))
+        val compat = RuntimeCompat.check(JSONObject().put("core_runtime", "0.41.0").put("abi", "2.1"))
         val e = SynheartRuntimeException.incompatible(compat)
         assertEquals(SynheartRuntimeErrorKind.INCOMPATIBLE, e.kind)
-        assertEquals("0.38.0", e.runtimeVersion)
-        assertEquals("3.0", e.runtimeAbi)
+        assertEquals("0.41.0", e.runtimeVersion)
+        assertEquals("2.1", e.runtimeAbi)
         assertEquals(RuntimeCompat.INSTALL_COMMAND, e.installCommand)
         assertEquals(RuntimeCompat.WRITTEN_AGAINST, e.recommendedVersion)
     }

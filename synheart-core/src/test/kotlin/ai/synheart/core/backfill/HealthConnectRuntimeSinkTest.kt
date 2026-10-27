@@ -11,6 +11,7 @@
 
 package ai.synheart.core.backfill
 
+import ai.synheart.core.models.DailyMetric
 import ai.synheart.wear.backfill.HealthHistoryReader
 import ai.synheart.wear.backfill.OvernightPhysiologySummary
 import ai.synheart.wear.backfill.SleepNightSummary
@@ -33,19 +34,20 @@ class HealthConnectRuntimeSinkTest {
     private val day = LocalDate.of(2026, 1, 15)
 
     private data class PushCall(
+        val provider: String,
         val dimension: String,
-        val dayIndex: Int,
+        val date: LocalDate,
         val value: Double,
-        val confidence: Double,
-        val fidelity: Int,
+        val vendorSummary: Boolean,
     )
 
-    private class Recorder {
+    private class Recorder(private val rc: Int = 0) {
         val pushes = mutableListOf<PushCall>()
         var recomputeCount = 0
 
-        val pushDaily: PushDailyCallback = { dim, day, v, c, f ->
-            pushes.add(PushCall(dim, day, v, c, f))
+        val pushDaily: PushDailyCallback = { provider, metric, date, v, vendor ->
+            pushes.add(PushCall(provider, metric, date, v, vendor))
+            rc
         }
         val triggerRecompute: TriggerRecomputeCallback = { recomputeCount++ }
     }
@@ -142,21 +144,27 @@ class HealthConnectRuntimeSinkTest {
         assertEquals(1, r.recomputeCount)
 
         val dims = r.pushes.associateBy { it.dimension }
-        assertEquals(setOf("sleep_need", "deep_sleep_min", "rem_sleep_min", "hrv_rmssd", "resting_hr"), dims.keys)
+        assertEquals(
+            setOf(
+                "sleep.duration_s", "sleep.deep_min", "sleep.rem_min",
+                "cardiac.overnight_rmssd_ms", "cardiac.resting_hr_bpm",
+            ),
+            dims.keys,
+        )
+        assertTrue(DailyMetric.ALL.containsAll(dims.keys))
 
-        // sleep_need is in seconds — 420 min * 60.
-        assertEquals(420.0 * 60.0, dims.getValue("sleep_need").value, 0.0001)
-        assertEquals(90.0, dims.getValue("deep_sleep_min").value, 0.0001)
-        assertEquals(110.0, dims.getValue("rem_sleep_min").value, 0.0001)
-        assertEquals(55.0, dims.getValue("hrv_rmssd").value, 0.0001)
-        assertEquals(58.0, dims.getValue("resting_hr").value, 0.0001)
+        // sleep.duration_s is in seconds — 420 min * 60.
+        assertEquals(420.0 * 60.0, dims.getValue("sleep.duration_s").value, 0.0001)
+        assertEquals(90.0, dims.getValue("sleep.deep_min").value, 0.0001)
+        assertEquals(110.0, dims.getValue("sleep.rem_min").value, 0.0001)
+        assertEquals(55.0, dims.getValue("cardiac.overnight_rmssd_ms").value, 0.0001)
+        assertEquals(58.0, dims.getValue("cardiac.resting_hr_bpm").value, 0.0001)
 
-        // All pushes share confidence=0.85, fidelity=1, same day_index.
-        val expectedDayIndex = day.toEpochDay().toInt()
+        // All pushes are Health Connect vendor summaries filed on the wake date.
         for (p in r.pushes) {
-            assertEquals(0.85, p.confidence, 0.0001)
-            assertEquals(1, p.fidelity)
-            assertEquals(expectedDayIndex, p.dayIndex)
+            assertEquals("health_connect", p.provider)
+            assertTrue(p.vendorSummary)
+            assertEquals(day, p.date)
         }
     }
 
@@ -172,10 +180,10 @@ class HealthConnectRuntimeSinkTest {
         val (s, r) = sink(reader)
         val result = s.backfill(daysBack = 30)
 
-        // Only sleep_need pushed.
+        // Only the sleep duration pushed.
         assertEquals(1, result.dimensionsPushed)
         assertEquals(1, result.daysIngested)
-        assertEquals(setOf("sleep_need"), r.pushes.map { it.dimension }.toSet())
+        assertEquals(setOf("sleep.duration_s"), r.pushes.map { it.dimension }.toSet())
     }
 
     @Test
@@ -206,7 +214,7 @@ class HealthConnectRuntimeSinkTest {
         assertEquals(1, result.dimensionsPushed)
         assertEquals(1, result.daysIngested)
         assertEquals(1, r.recomputeCount)
-        assertEquals(setOf("hrv_rmssd"), r.pushes.map { it.dimension }.toSet())
+        assertEquals(setOf("cardiac.overnight_rmssd_ms"), r.pushes.map { it.dimension }.toSet())
     }
 
     @Test
@@ -225,14 +233,28 @@ class HealthConnectRuntimeSinkTest {
         val (s, r) = sink(reader)
         val result = s.backfill(daysBack = 30)
 
-        // d1: sleep_need + deep + rem + hrv + resting = 5
-        // d2: sleep_need = 1
+        // d1: duration + deep + rem + rmssd + resting = 5
+        // d2: duration = 1
         assertEquals(6, result.dimensionsPushed)
         assertEquals(2, result.daysIngested)
         assertEquals(1, r.recomputeCount)
 
-        val byDay = r.pushes.groupBy { it.dayIndex }
-        assertEquals(5, byDay[d1.toEpochDay().toInt()]!!.size)
-        assertEquals(1, byDay[d2.toEpochDay().toInt()]!!.size)
+        val byDay = r.pushes.groupBy { it.date }
+        assertEquals(5, byDay[d1]!!.size)
+        assertEquals(1, byDay[d2]!!.size)
+    }
+
+    @Test
+    fun `values the runtime refuses are not counted and skip the refresh`() = runTest {
+        val reader = FakeReader(
+            sleep = mapOf(day to SleepNightSummary(420.0, 90.0, 110.0)),
+        )
+        val (s, r) = sink(reader, Recorder(rc = 5002))
+        val result = s.backfill(daysBack = 30)
+
+        assertEquals(3, r.pushes.size)
+        assertEquals(0, result.dimensionsPushed)
+        assertEquals(0, result.daysIngested)
+        assertEquals(0, r.recomputeCount)
     }
 }

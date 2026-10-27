@@ -20,10 +20,12 @@ class RuntimeConfigMapDeclarationsTest {
     private fun base() = SynheartConfig(appId = "com.example.app", subjectId = "usr_abc")
 
     @Test
-    fun `a default config declares no host keys`() {
+    fun `a default config declares no host keys but device_class`() {
         val json = buildRuntimeConfigMap(base())
         assertFalse(json.has("sensing"))
-        assertFalse(json.has("device_class"))
+        // Since runtime 0.42 an undeclared class files behaviour baselines
+        // under `unknown`, so the SDK declares "auto" when the host does not.
+        assertEquals("auto", json.getString("device_class"))
         assertFalse(json.has("mask_profile"))
         assertFalse(json.has("cfi_structural_components"))
         assertFalse(json.has("extra_heads"))
@@ -73,6 +75,27 @@ class RuntimeConfigMapDeclarationsTest {
         assertEquals(2, heads.length())
         assertEquals("locomotion_state", heads.getString(0))
         assertEquals("postural_state", heads.getString(1))
+    }
+
+    @Test
+    fun `an explicit device_class is not overridden by the default`() {
+        val json = buildRuntimeConfigMap(
+            base().copy(hostDeclarations = HostDeclarations(deviceClass = Declared.Value(DeviceClass.TABLET))),
+        )
+        assertEquals("tablet", json.getString("device_class"))
+    }
+
+    @Test
+    fun `no behaviour module declares input_observable false`() {
+        // A host that captures no input has input-free windows; left "auto" a
+        // phone would never certify a window as rest.
+        assertFalse(buildRuntimeConfigMap(base()).getBoolean("input_observable"))
+    }
+
+    @Test
+    fun `a behaviour module leaves input_observable to the runtime`() {
+        val json = buildRuntimeConfigMap(base().copy(behaviorConfig = BehaviorConfig()))
+        assertFalse(json.has("input_observable"))
     }
 
     @Test
