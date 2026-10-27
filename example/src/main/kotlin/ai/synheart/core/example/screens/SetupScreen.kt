@@ -310,11 +310,11 @@ fun SetupScreen(c: SynheartController, padding: PaddingValues) {
                     Column {
                         ConsentToggle(
                             title = "Declare host profile",
-                            description = "Sends sensing, device_class, mask_profile and " +
-                                "cfi_structural_components: 4. Declaring device_class folds into " +
-                                "the SRM config_hash and INVALIDATES every persisted baseline — " +
-                                "the person re-warms 30 observations across 3 distinct days. " +
-                                "Declare it once at first launch and keep it stable.",
+                            description = "Sends sensing, mask_profile and " +
+                                "cfi_structural_components: 4 (device_class is sent as auto " +
+                                "either way). Episodic sensing withholds Capacity and Mental " +
+                                "Fatigue; the mobile mask moves Focus and Cognitive Load. " +
+                                "Declare once at first launch and keep it stable.",
                             value = c.host.declareHostProfile,
                             onChanged = { if (!c.isInitialized) c.setDeclareHostProfile(it) },
                         )

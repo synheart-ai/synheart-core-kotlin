@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 /**
  * Synheart Core SDK - Main Entry Point
@@ -817,6 +818,13 @@ object Synheart {
                     behaviorModule?.pushAccelToRuntime = { tsMs, ax, ay, az ->
                         coreRuntime?.pushAccel(tsMs, ax, ay, az)
                     }
+                    // Input capture (runtime 0.42+): on a phone a quiet window
+                    // counts as input-free — and so can be rest that teaches the
+                    // resting heart rate and HRV — only while capture is
+                    // reported running. See [attachInputCaptureReporter].
+                    if (resolvedConfig.behaviorConfig?.reportInputCapture != false) {
+                        attachInputCaptureReporter()
+                    }
                     // The sensor behind that callback. Nothing fed it before:
                     // this module is driven by the host's touch dispatch, not by
                     // the synheart-behavior collectors, so `emitRawMotionSamples`
@@ -1008,6 +1016,65 @@ object Synheart {
         reevaluateAllFeatures()
         moduleManager.stopAll()
         SynheartLogger.log("[Synheart] Session stopped")
+    }
+
+    // ── Input capture ────────────────────────────────────────────────────
+
+    private var inputCaptureGate: ai.synheart.core.modules.behavior.InputCaptureGate? = null
+    private var inputCaptureLifecycle: android.app.Application.ActivityLifecycleCallbacks? = null
+
+    /**
+     * Report input capture running while the behaviour module tracks with
+     * consent and an Activity of this app is started. The interaction this SDK
+     * sees is the host's own, so outside the app nothing is captured and the
+     * runtime must not read the person's quiet windows as input-free.
+     */
+    private fun attachInputCaptureReporter() {
+        val module = behaviorModule ?: return
+        if (inputCaptureGate != null) return
+        val gate = ai.synheart.core.modules.behavior.InputCaptureGate { running ->
+            val accepted = coreRuntime?.setInputCapture(running, System.currentTimeMillis())
+            SynheartLogger.log("[Synheart] input capture ${if (running) "running" else "stopped"} (accepted=$accepted)")
+        }
+        inputCaptureGate = gate
+        module.onInputCaptureChanged = { gate.setTracking(it) }
+
+        val app = context?.applicationContext as? android.app.Application ?: return
+        var started = 0
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: android.app.Activity) {
+                if (started++ == 0) gate.setForeground(true)
+            }
+            override fun onActivityStopped(activity: android.app.Activity) {
+                started = (started - 1).coerceAtLeast(0)
+                if (started == 0) gate.setForeground(false)
+            }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) = Unit
+            override fun onActivityResumed(a: android.app.Activity) = Unit
+            override fun onActivityPaused(a: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(a: android.app.Activity) = Unit
+        }
+        app.registerActivityLifecycleCallbacks(callbacks)
+        inputCaptureLifecycle = callbacks
+        // Initialized from an already-started Activity, the first
+        // onActivityStarted has passed; seed from the process importance.
+        val info = android.app.ActivityManager.RunningAppProcessInfo()
+        android.app.ActivityManager.getMyMemoryState(info)
+        if (info.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE) {
+            started = 1
+            gate.setForeground(true)
+        }
+    }
+
+    private fun detachInputCaptureReporter() {
+        inputCaptureLifecycle?.let { cb ->
+            (context?.applicationContext as? android.app.Application)?.unregisterActivityLifecycleCallbacks(cb)
+        }
+        inputCaptureLifecycle = null
+        behaviorModule?.onInputCaptureChanged = null
+        inputCaptureGate?.reset()
+        inputCaptureGate = null
     }
 
     // ── Foreground-app identity ──────────────────────────────────────────
@@ -1245,10 +1312,9 @@ object Synheart {
             runCatching { JSONObject(it).optString("status") }.getOrNull()
         }
         if (authStatus != "registered" && !clientId.isNullOrEmpty()) {
-            val reg = cr.registerDevice(clientId)?.let { runCatching { JSONObject(it) }.getOrNull() }
-            val deviceId = reg?.optString("device_id")?.takeIf { it.isNotEmpty() }
-            if (reg == null || reg.has("error") || deviceId == null) {
-                SynheartLogger.log("[Synheart] device registration failed: ${reg?.optString("error") ?: "no device_id"}")
+            val outcome = registerDevice(cr, clientId)
+            if (!outcome.ok) {
+                SynheartLogger.log("[Synheart] device registration failed: ${outcome.error ?: "no device_id"}")
                 return false
             }
         }
@@ -1448,19 +1514,24 @@ object Synheart {
         get() = coreRuntime?.baselinesJson()
 
     /**
-     * Export the native runtime SRM snapshot as JSON for cross-session persistence.
+     * Every personal baseline as one opaque base64 snapshot, for a host that
+     * persists outside the runtime's data directory. Store it as private
+     * health data; never parse it. The runtime seals the same snapshot to its
+     * own directory at session end, after every reference refresh and every
+     * 15 minutes while windows close, and restores it at startup, so a host
+     * that keeps that directory needs neither this nor [loadBaselineSnapshot].
      */
-    fun exportRuntimeSRMSnapshot(): String? {
-        return coreRuntime?.exportSrmSnapshot()
-    }
+    fun exportBaselineSnapshot(): String? = coreRuntime?.exportBaselineSnapshot()
 
     /**
-     * Load a native runtime SRM snapshot from JSON.
-     * Returns true on success, false on failure, or `null` if runtime unavailable.
+     * Restore a snapshot from [exportBaselineSnapshot]. `false` when the
+     * runtime refused it (damaged, from a newer build, or another subject's);
+     * the baselines are then left as they were. A snapshot from a runtime
+     * before 0.42 is always refused, and the baselines start cold once.
+     * `null` when the runtime is unavailable.
      */
-    fun loadRuntimeSRMSnapshot(json: String): Boolean? {
-        return coreRuntime?.loadSrmSnapshot(json)
-    }
+    fun loadBaselineSnapshot(snapshotB64: String): Boolean? =
+        coreRuntime?.loadBaselineSnapshot(snapshotB64)
 
     /**
      * The native runtime's semantic version, or null when the shared library
@@ -1597,6 +1668,7 @@ object Synheart {
             // null the modules they reference. Without this, an in-flight
             // callback can null-deref sessionModule/consentModule mid-teardown.
             coreRuntime?.clearHsiCallback()
+            detachInputCaptureReporter()
             coreRuntime?.close()
             coreRuntime = null
             nativeSubjectIdOverride = null
@@ -1972,6 +2044,11 @@ object Synheart {
      */
     private fun ingestSingleEvent(event: org.json.JSONObject) {
         val runtime = coreRuntime ?: return
+        // The offset in force at the sample, not now (runtime 0.42+): a sample
+        // from before a DST change or a flight files under its own local day.
+        if (event.has("ts_ms") && !event.has("utc_offset_min")) {
+            event.put("utc_offset_min", CoreRuntimeBridge.utcOffsetMinAt(event.getLong("ts_ms")))
+        }
         val hsi = runtime.ingestBatch(org.json.JSONArray().put(event).toString(), System.currentTimeMillis())
         if (!hsi.isNullOrEmpty()) deliverHsiWindow(hsi)
     }
@@ -2145,9 +2222,11 @@ object Synheart {
      * Score today's accumulated Strain and attach it to the next HSI frame.
      *
      * Returns the score JSON, or `null` when the symbol is absent **or** the day
-     * has nothing scorable yet. **Call before [rollDay]** — rolling clears the
-     * values Strain is computed from, so a host that rolls first never emits a
-     * Strain score. `rollDay` does not score for you.
+     * has nothing scorable yet. The second case is normal.
+     *
+     * The engine closes each local day itself at the first input of the next,
+     * so call this before the person's local midnight, from a running session.
+     * After midnight, [attachClosedDayStrain] scores the day that just closed.
      */
     fun attachStrainScore(): String? = coreRuntime?.attachStrainScoreJson()
 
@@ -2224,13 +2303,46 @@ object Synheart {
     }
 
     /**
-     * Advance the daily accumulator. [dayIndex] is days since epoch in the
-     * host's **local** zone and must strictly advance.
-     *
-     * Skip it and the engine adopts a provisional UTC day, which is wrong for
-     * most of the world. `null` when the symbol is absent.
+     * Score the local day the engine closed last and attach it to the next
+     * frame: `{local_date, start_ms, end_ms, strain}`. The engine closes each
+     * local day itself at the first input of the next, so call this once a day
+     * after local midnight, once that day's vendor dailies (steps) are pushed
+     * with [srmPushWearableDaily]. `null` before any day has closed or when
+     * the closed day has nothing to score.
      */
-    fun rollDay(dayIndex: Int): Int? = coreRuntime?.rollDay(dayIndex)
+    fun attachClosedDayStrain(): String? = coreRuntime?.attachClosedDayStrainJson()
+
+    /**
+     * Report whether keyboard and pointer/touch capture is running, from
+     * [tsMs] (default now) on. A still window counts as rest — and teaches the
+     * resting heart rate and HRV — only while capture is reported running.
+     *
+     * The SDK reports its own in-app capture automatically
+     * (`BehaviorConfig.reportInputCapture`). Call this yourself only when the
+     * host captures input outside the app (a system keyboard), with that
+     * automatic report turned off. A level: it holds across sessions. `true`
+     * when accepted.
+     */
+    fun setInputCapture(running: Boolean, tsMs: Long = System.currentTimeMillis()): Boolean =
+        coreRuntime?.setInputCapture(running, tsMs) ?: false
+
+    /**
+     * Report whether a call is on, from [tsMs] (default now) on, as the OS
+     * microphone or camera indicator shows it. A level, like
+     * [setInputCapture]. Report the current state again after initialize.
+     */
+    fun setCallActive(active: Boolean, tsMs: Long = System.currentTimeMillis()): Boolean =
+        coreRuntime?.setCallActive(active, tsMs) ?: false
+
+    /**
+     * Push a batch of typed inputs in the runtime's input envelope, a JSON
+     * array of `{at_ms, utc_offset_min, provider, body}`. Returns the batch's
+     * account as JSON (`accepted`, `regressions`, `late`, `invalid`,
+     * `not_stored`, `malformed`, `not_permitted`). Interaction inputs sent
+     * here skip the digital-behaviour axes, which read the behaviour-event
+     * push: send each interaction one way only.
+     */
+    fun pushInputsJson(inputsJson: String): String? = coreRuntime?.pushInputsJson(inputsJson)
 
     /**
      * Export per-head session state — Capacity, Mental Fatigue, Stress, Valence
@@ -2302,49 +2414,106 @@ object Synheart {
     fun personalizationContextJson(): String? = coreRuntime?.personalizationContextJson()
 
     /**
-     * Convert an epoch-millisecond timestamp to the unix-epoch day index the
-     * SRM APIs key on.
+     * Convert an epoch-millisecond timestamp to its UTC epoch-day index.
+     *
+     * No runtime call keys on this since runtime 0.42: daily values take the
+     * person's local date (see [srmPushWearableDaily]).
      */
     fun epochDayFor(timestampMs: Long = System.currentTimeMillis()): Int =
         (timestampMs / 86_400_000L).toInt()
 
     /**
-     * Feed one day of a wearable-derived dimension into the SRM — the path
-     * historical import uses to populate baselines.
+     * Write one night's or day's value of a daily [metric] into the personal
+     * baselines — the path historical import uses. After a batch, call
+     * [srmRefreshWearableReference] so the next window reads the new reference.
      *
-     * Recognized dimensions: `sleep_need`, `sleep_regularity`, `hrv_rmssd`,
-     * `hrv_sdnn`, `resting_hr`, `recovery_score`, `deep_sleep_min`,
-     * `rem_sleep_min` and `daily_strain`. (Not `hrv_rmssd_ms` /
-     * `resting_hr_bpm` — an unrecognised dimension is dropped silently.)
+     * [metric] is one of [DailyMetric] (the unit is in the name, e.g.
+     * [DailyMetric.SLEEP_DURATION_S] in seconds). [provider] names the source
+     * (`"health_connect"`, `"whoop"`). [date] is the person's local date; a
+     * night belongs to the date the person woke on. [vendorSummary] is true
+     * for a provider's daily summary, false for a value computed from raw
+     * samples. Writing a date again replaces it.
      *
-     * [dayIndex] is the unix-epoch day (see [epochDayFor]). [fidelity] is
-     * `0 = raw observation`, `1 = vendor summary`; most vendor backfill pushes
-     * are `1` with a confidence of 0.80–0.90.
-     *
-     * Call [srmTriggerWearableRecompute] once after a bulk push rather than
-     * after every day.
+     * Returns `0`; `1004` for an unknown metric; `5002` for a value outside the
+     * metric's plausible bounds or a stream the person has not permitted (not
+     * stored); `-1` with no running pipeline or no runtime.
      */
     fun srmPushWearableDaily(
-        dimension: String,
-        dayIndex: Int,
+        provider: String,
+        metric: String,
+        date: LocalDate,
         value: Double,
-        confidence: Double = 0.85,
-        fidelity: Int = 1,
-    ) {
-        coreRuntime?.srmPushWearableDaily(dimension, dayIndex, value, confidence, fidelity)
-    }
+        vendorSummary: Boolean = true,
+    ): Int = coreRuntime?.srmPushWearableDaily(
+        provider,
+        metric,
+        date.year,
+        date.monthValue,
+        date.dayOfMonth,
+        value,
+        vendorSummary,
+    ) ?: -1
 
     /**
-     * Recompute SRM baselines and propagate the resulting wearable reference
-     * to the state runtime.
-     *
-     * [triggerType] is `0 = Window` (incremental, recommended),
-     * `1 = AffectedWindow`, `2 = Full` (rebuild everything). [asOfDay]
-     * defaults to today's epoch day.
+     * Rebuild the wearable reference from the daily values of the local dates
+     * before [asOf] (default: today, local), and hand it to the state heads.
+     * Call once a day after [srmPushWearableDaily]. Returns `0`, `1004`,
+     * `1002` (busy), `-1` (no pipeline), or `null` without the call.
      */
-    fun srmTriggerWearableRecompute(triggerType: Int = 0, asOfDay: Int? = null) {
-        coreRuntime?.srmTriggerWearableRecompute(triggerType, asOfDay ?: epochDayFor())
-    }
+    fun srmRefreshWearableReference(asOf: LocalDate = LocalDate.now()): Int? =
+        coreRuntime?.srmRefreshWearableReference(asOf.year, asOf.monthValue, asOf.dayOfMonth)
+
+    /**
+     * Declare what kind of day [date] is, so the personal baselines key
+     * behaviour by day type: `0` workday, `1` free day, `2` leave, `3` sick,
+     * `4` travel, `5` on-call. Sick, leave and travel days teach a separate
+     * side reference, so an illness or a holiday never becomes the person's
+     * normal. Returns `0`, `1004`, `-1`, or `null`.
+     */
+    fun srmSetDayType(date: LocalDate, dayType: Int): Int? =
+        coreRuntime?.srmSetDayType(date.year, date.monthValue, date.dayOfMonth, dayType)
+
+    /**
+     * Forget part of the personal baselines at the person's request, e.g.
+     * `{"scope":"everything"}` or `{"scope":"daily_values","from":"2026-10-01","to":"2026-10-07"}`.
+     * The runtime re-seals what remains; snapshots the host exported earlier
+     * are the host's to delete. Returns `0`, `1` (bad scope), `1002` (busy),
+     * `-1` (no pipeline), or `null` without the call.
+     */
+    fun forgetBaselines(scopeJson: String): Int? = coreRuntime?.srmForgetBaselines(scopeJson)
+
+    /** Personal-baseline events since the last call, oldest first, as a JSON array. Device-only. */
+    fun drainBaselineEventsJson(): String? = coreRuntime?.srmDrainEventsJson()
+
+    /**
+     * Whether this host feeds the personal baselines what they need, judged at
+     * [nowMs]. Act on every requirement whose `status` is `unmet`. Meant for a
+     * developer screen, not for users.
+     */
+    fun baselineRequirementsJson(nowMs: Long = System.currentTimeMillis()): String? =
+        coreRuntime?.baselineRequirementsJson(nowMs)
+
+    /** What the personal baselines know, as JSON. Device-only. */
+    fun baselineProfileJson(): String? = coreRuntime?.baselineProfileJson()
+
+    /** The person's rhythm of active use, as JSON (the literal `null` before any active minute). */
+    fun baselineRhythmJson(): String? = coreRuntime?.baselineRhythmJson()
+
+    /** Which windows taught the personal baselines on the local [date], as JSON. */
+    fun baselineWindowDigestJson(date: LocalDate): String? =
+        coreRuntime?.baselineWindowDigestJson(date.year, date.monthValue, date.dayOfMonth)
+
+    /**
+     * Register an episode direction (a weighted combination of one family's
+     * metrics). Directions persist with the baselines; register them at every
+     * start. Returns the direction's key as JSON, or `null` when refused.
+     */
+    fun registerBaselineDirection(directionJson: String): String? =
+        coreRuntime?.srmRegisterDirection(directionJson)
+
+    /** Start a new rest block at [tsMs] (default now). Returns `0`, `1002`, `-1`, or `null`. */
+    fun beginBaselineRestBlock(tsMs: Long = System.currentTimeMillis()): Int? =
+        coreRuntime?.baselineBeginRestBlock(tsMs)
 
     // ══════════════════════════════════════════════════════════════════ //
     // Scores — sleep, recovery, readiness                                 //
@@ -2422,12 +2591,6 @@ object Synheart {
         coreRuntime?.wearableReferenceJson()
             ?.let { runCatching { WearableReferenceView.fromJsonString(it) }.getOrNull() }
 
-    /** Export the longitudinal (multi-day) snapshot as JSON, for backup or transfer. */
-    fun longitudinalSnapshotJson(): String? = coreRuntime?.exportLongitudinalSnapshot()
-
-    /** Restore a longitudinal snapshot produced by [longitudinalSnapshotJson]. */
-    fun loadLongitudinalSnapshot(json: String): Boolean =
-        coreRuntime?.loadLongitudinalSnapshot(json) ?: false
 
     // ══════════════════════════════════════════════════════════════════ //
     // Cross-device sync                                                   //
@@ -2652,6 +2815,10 @@ object Synheart {
      * device-auth-gated runtime-side; empty when cloud is not
      * configured/consented, the range is empty, or the vendored runtime
      * predates this capability.
+     *
+     * Since runtime 0.42.1 a read that times out is an error, not an empty
+     * archive: after an empty result check [runtimeBridge]'s `lastError`
+     * before telling the person they have no history.
      *
      * The underlying FFI call performs the network round-trip synchronously
      * (native `block_on`), so drive it from a background dispatcher.
@@ -2931,11 +3098,78 @@ object Synheart {
             return true
         }
         val clientId = subjectId ?: return false
-        val reg = runCatching { cr.registerDevice(clientId) }.getOrNull()
-            ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val ok = reg?.optString("device_id")?.isNotEmpty() == true
+        val ok = registerDevice(cr, clientId).ok
         if (ok) deviceAuthUsedCoreRuntime = true
         return ok
+    }
+
+    private data class RegisterOutcome(val ok: Boolean, val error: String? = null)
+
+    /**
+     * Set when registration last failed with `STORAGE_UNAVAILABLE`, so the
+     * next attempt first tries to restore the stored identity.
+     */
+    @Volatile
+    private var identityStoreWasUnavailable = false
+
+    /**
+     * `sdk_register_device`, handling `STORAGE_UNAVAILABLE` (runtime 0.42.1+).
+     *
+     * That code means the Keystore did not answer, so the runtime cannot tell
+     * whether an identity is already stored. Registering anyway would mint a
+     * second device for the same install. The remedy is to wait, install the
+     * crypto callbacks again (which restores a stored identity), and register
+     * only if the device is still unregistered — twice, after 1 s and 3 s.
+     * When the store stays unavailable the failure is returned, and the next
+     * call starts with the restore.
+     */
+    private suspend fun registerDevice(cr: CoreRuntimeBridge, clientId: String): RegisterOutcome {
+        if (identityStoreWasUnavailable) {
+            identityStoreWasUnavailable = false
+            if (cr.setSdkCryptoCallbacks() == 0 && restoredRegistration(cr)) return RegisterOutcome(true)
+        }
+        val waitsMs = longArrayOf(1_000, 3_000)
+        var attempt = 0
+        while (true) {
+            val raw = runCatching { cr.registerDevice(clientId) }.getOrNull()
+            val reg = raw?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (reg != null && !reg.has("error") && reg.optString("device_id").isNotEmpty()) {
+                return RegisterOutcome(true)
+            }
+            val code = registrationErrorCode(reg) ?: cr.lastError?.code
+            if (code != "STORAGE_UNAVAILABLE") {
+                return RegisterOutcome(false, code ?: reg?.opt("error")?.toString())
+            }
+            if (attempt >= waitsMs.size) {
+                identityStoreWasUnavailable = true
+                return RegisterOutcome(false, code)
+            }
+            SynheartLogger.log(
+                "[Synheart] Credential store unavailable during registration; " +
+                    "retrying after ${waitsMs[attempt] / 1000}s.",
+            )
+            kotlinx.coroutines.delay(waitsMs[attempt])
+            attempt++
+            if (cr.setSdkCryptoCallbacks() == 0 && restoredRegistration(cr)) return RegisterOutcome(true)
+        }
+    }
+
+    /** The `error.code` of a registration envelope, if it carries one. */
+    private fun registrationErrorCode(reg: JSONObject?): String? {
+        val error = reg?.opt("error") ?: return null
+        return when (error) {
+            is JSONObject -> error.optString("code").takeIf { it.isNotEmpty() }
+            else -> error.toString().takeIf { it.isNotEmpty() }
+        }
+    }
+
+    /** Whether reinstalling the crypto callbacks restored a registration for this subject. */
+    private fun restoredRegistration(cr: CoreRuntimeBridge): Boolean {
+        val status = cr.deviceAuthStatus()?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return false
+        val registered = status.optString("status") == "registered" || status.optBoolean("registered", false)
+        if (!registered) return false
+        val stored = status.optString("subject_id").takeIf { it.isNotEmpty() } ?: return true
+        return subjectId == null || stored == subjectId
     }
 
     /**
@@ -2945,9 +3179,7 @@ object Synheart {
     suspend fun reregisterDeviceAuth(): Boolean {
         val cr = coreRuntime ?: return false
         val clientId = subjectId ?: return false
-        val reg = runCatching { cr.registerDevice(clientId) }.getOrNull()
-            ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val ok = reg?.optString("device_id")?.isNotEmpty() == true
+        val ok = registerDevice(cr, clientId).ok
         if (ok) deviceAuthUsedCoreRuntime = true
         return ok
     }

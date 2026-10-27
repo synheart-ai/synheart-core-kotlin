@@ -125,7 +125,7 @@ dependencies {
     // call silently reports "unsupported".
     implementation 'com.google.android.gms:play-services-wearable:18.2.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
-    implementation 'ai.synheart:synheart-auth:0.1.0'
+    implementation 'ai.synheart:synheart-auth:0.1.5'
 
     // Syni on-device agent SDK.
     implementation 'ai.synheart:syni:0.0.3'

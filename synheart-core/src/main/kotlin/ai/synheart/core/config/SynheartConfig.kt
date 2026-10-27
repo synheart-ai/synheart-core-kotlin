@@ -167,6 +167,20 @@ data class BehaviorConfig(
      * granted through Settings).
      */
     val foregroundAppSource: ai.synheart.core.modules.behavior.ForegroundAppSource? = null,
+
+    /**
+     * Report to the runtime when input capture is running, which is what lets
+     * a still window count as rest and teach the resting heart rate and HRV.
+     *
+     * On by default: the SDK reports capture running while the behaviour
+     * module tracks with consent **and** an Activity of the app is started,
+     * because the interaction it sees is in-app only — reporting it running in
+     * the background would certify windows as input-free while the person
+     * types elsewhere. Turn it off when the host captures input outside the
+     * app (an input method, say) and reports it itself with
+     * `Synheart.setInputCapture`.
+     */
+    val reportInputCapture: Boolean = true,
 )
 
 /** Privacy sub-configuration. */
@@ -274,11 +288,10 @@ data class SynheartConfig(
      * Host declarations that change engine output — `sensing`, `device_class`,
      * `mask_profile`, `cfi_structural_components`.
      *
-     * Defaults to declaring nothing, so the runtime reproduces pre-0.16.0
-     * behaviour exactly. Declaring any of them is a deliberate act with
-     * consequences documented on [HostDeclarations] — most sharply, declaring
-     * `device_class` invalidates every persisted SRM baseline and costs the
-     * person a 30-observation re-warm across 3 days.
+     * Defaults to declaring nothing except `device_class`, which is sent as
+     * `"auto"` when left null: since runtime 0.42 an undeclared class files
+     * behaviour baselines under `unknown`. Declaring any of the others is a
+     * deliberate act with consequences documented on [HostDeclarations].
      */
     val hostDeclarations: HostDeclarations = HostDeclarations(),
 

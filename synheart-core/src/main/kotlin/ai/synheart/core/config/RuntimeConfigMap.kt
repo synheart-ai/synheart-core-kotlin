@@ -127,5 +127,15 @@ fun buildRuntimeConfigMap(config: SynheartConfig, dataDir: String? = null): JSON
         // null field.
         val declarations = config.hostDeclarations.toJson()
         for (key in declarations.keys()) put(key, declarations.get(key))
+        // `device_class` alone defaults to "auto" (resolved from `platform`):
+        // since runtime 0.42 an undeclared class files behaviour baselines under
+        // `unknown`, apart from the device's real class. Declaring it no longer
+        // resets anything else — one baseline snapshot holds every class.
+        if (config.hostDeclarations.deviceClass == null) put("device_class", HostDeclarations.AUTO)
+        // A host with no behaviour module captures no input, so its still windows
+        // can be rest. Left undeclared ("auto"), a phone's quiet window counts as
+        // input-free only while capture is reported running — never, here — and
+        // the resting heart rate and HRV would never learn.
+        if (config.behaviorConfig == null) put("input_observable", false)
     }
 }

@@ -74,6 +74,21 @@ class BehaviorModule(
     var onRuntimeBehaviorEvent: ((BehaviorEventInput) -> Unit)? = null
 
     /**
+     * Told `true` while the module tracks with behaviour consent and `false`
+     * when it stops or consent is revoked, so the facade can report input
+     * capture to the runtime. Fires only on change.
+     */
+    var onInputCaptureChanged: ((running: Boolean) -> Unit)? = null
+    private var captureRunning = false
+    private var consentJob: kotlinx.coroutines.Job? = null
+
+    private fun setCaptureRunning(running: Boolean) {
+        if (captureRunning == running) return
+        captureRunning = running
+        runCatching { onInputCaptureChanged?.invoke(running) }
+    }
+
+    /**
      * The context-evidence sink — a *second*, independent channel, not an
      * alternative to [pushBehaviorEventToRuntime].
      *
@@ -259,11 +274,20 @@ class BehaviorModule(
             }
         }
 
+        // Events are dropped while behaviour consent is off, so capture runs
+        // only while it is on.
+        consentJob = consent.observe()
+            .onEach { setCaptureRunning(it.behavior) }
+            .launchIn(scope)
+
         SynheartLogger.log("[BehaviorModule] Behavior tracking started")
     }
 
     override suspend fun onStop() {
         SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
+        consentJob?.cancel()
+        consentJob = null
+        setCaptureRunning(false)
         eventJob?.cancel()
         eventJob = null
         cleanupJob?.cancel()

@@ -252,16 +252,6 @@ class SynheartController : ViewModel() {
      */
     val host = MobileHostRunner(viewModelScope)
 
-    /**
-     * The `device_class` this host stores its SRM snapshot under.
-     *
-     * Separate from the declaration itself: the runtime resolves `"auto"` to a
-     * class through its own tables and rejects a cross-class SRM load with
-     * `ERR_SRM_CONFIG_MISMATCH` — so the host needs a stable file key even
-     * while it declares `"auto"`, and a phone and a tablet must not share one.
-     */
-    val hostDeviceClass: String = "phone"
-
     /** Turn the §2 host declarations on or off. Only meaningful before [initialize]. */
     fun setDeclareHostProfile(value: Boolean) {
         if (isInitialized) return
@@ -439,9 +429,9 @@ class SynheartController : ViewModel() {
             emitRawMotionSamples = true,
         ),
 
-        // §2 — the four declarations that change engine output. Off unless the
-        // Setup screen turns them on, because declaring device_class invalidates
-        // every persisted SRM baseline.
+        // §2 — the declarations that change engine output. Off unless the
+        // Setup screen turns them on; the SDK declares device_class "auto"
+        // regardless.
         hostDeclarations = host.buildHostDeclarations(),
 
         // §2.4 — the kinematic heads are opt-in and withhold until a placement
@@ -562,7 +552,7 @@ class SynheartController : ViewModel() {
                 // window 1 writes each head's state slot, so a later restore is
                 // overwritten by a cold window. Doing it here rather than in
                 // startSession() makes that ordering unconditional.
-                host.restore(requireContext(), subjectId.orEmpty(), hostDeviceClass)
+                host.restore(requireContext(), subjectId.orEmpty())
 
                 refreshConsent()
                 refreshWearPermissions()

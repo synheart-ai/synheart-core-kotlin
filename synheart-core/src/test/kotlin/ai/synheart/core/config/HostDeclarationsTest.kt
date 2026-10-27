@@ -10,10 +10,10 @@ import org.junit.Test
  *
  * The property that matters most is the one that is easy to lose in a
  * refactor: **an undeclared field emits no key at all.** Undeclared and
- * declared-as-default are different states to the runtime — declaring
- * `device_class` folds into the SRM `config_hash` and invalidates every
- * persisted baseline — so a serializer that "helpfully" filled in a default
- * would reset every host's baselines on its next launch.
+ * declared-as-default are different states to the runtime, so a serializer
+ * that "helpfully" filled in a default would change engine output for every
+ * host on its next launch. (`device_class` is the one default the SDK sends,
+ * and it does so in the config map, not here.)
  */
 class HostDeclarationsTest {
 

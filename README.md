@@ -84,7 +84,7 @@ These ship in the same artifact and are wired through the runtime, but only beco
 | **Baselines** | Reactive snapshot of the user's wearable-baseline state — `Flow<BaselinesSnapshot>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night recent-scores ring. | `Baselines.shared` |
 | **Breathing** | 4-pillar breathing-compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge)` |
 | **Syni** | Consent-gated facade around the [`ai.synheart.syni`](https://github.com/synheart-ai/syni-kotlin) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `ConsentType.SYNI` check. | `SyniModule(context, consent)` |
-| **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep_need` / `deep_sleep_min` / `rem_sleep_min` / `hrv_rmssd` / `resting_hr` per wake-day. | `HealthConnectRuntimeSink(reader, bridge)` |
+| **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `health_connect`. | `HealthConnectRuntimeSink(reader, bridge)` |
 | **Scoring models** | Typed input + result classes for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.kt` |
 | **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with the sibling platform SDKs. | `modules/cloud/UploadModels.kt` |
 
@@ -482,8 +482,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | `setFocusKind(k)` / `currentFocusKind()` | `FocusKind` cognitive-load grading |
 | `pushWorkoutEvent(...)` / `currentWorkoutKind()` | Completed workout windows |
 | `personalizationContextJson()` | Full context incl. the explanation trace |
-| `srmPushWearableDaily(...)` / `srmTriggerWearableRecompute(...)` | Historical import into baselines |
-| `epochDayFor(tsMs)` | Timestamp → the epoch-day index the SRM keys on |
+| `srmPushWearableDaily(provider, metric, date, value)` / `srmRefreshWearableReference(asOf)` | Daily values into the personal baselines (a `DailyMetric` name, the local date), then rebuild the reference |
 
 ### Scores and baselines
 
@@ -494,8 +493,28 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | `computeReadinessScore(input)` | Recovery + load + fatigue + history |
 | `wearableReference()` | What "normal" currently means for this user |
 | `baselineSnapshots` | Typed per-kind snapshot facade (`BaselineSnapshots`) |
-| `longitudinalSnapshotJson()` / `loadLongitudinalSnapshot(json)` | Multi-day snapshot transfer |
+| `exportBaselineSnapshot()` / `loadBaselineSnapshot(b64)` | The personal baselines as one opaque snapshot, for a host that persists outside the runtime's data directory |
+| `attachStrainScore()` / `attachClosedDayStrain()` | Strain for today (before local midnight) / for the day the engine closed last |
 | `baselineExportOffline(pass)` / `baselineImportOffline(pass, blob)` | Encrypted offline transfer |
+
+#### Personal baselines on runtime 0.42+
+
+- **The runtime persists them.** It seals every personal baseline to its own
+  data directory and restores it at startup, so a host that keeps that
+  directory needs no snapshot calls. `exportBaselineSnapshot()` /
+  `loadBaselineSnapshot()` are for a host that persists elsewhere; the text is
+  opaque base64, to be stored as private health data.
+- **Daily values carry a date and a source.** Push them with
+  `srmPushWearableDaily(provider, metric, date, value)`, using a `DailyMetric`
+  name (the unit is in the name) and the local date the person woke on. Call
+  `srmRefreshWearableReference()` once after a batch.
+- **The engine closes days itself.** There is no `rollDay`. Attach Strain
+  before local midnight with `attachStrainScore()`, or after it with
+  `attachClosedDayStrain()`.
+- **Rest needs known input.** A still window teaches the resting heart rate
+  and HRV only when its input is known: the SDK reports its in-app capture
+  automatically, and a host that captures input elsewhere (an input method)
+  reports it with `setInputCapture()`.
 
 ### Cloud, sync and history
 
@@ -554,9 +573,9 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
-| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (1.0 to 2.x) and its version against `WRITTEN_AGAINST` (0.38.0) and `MINIMUM` (0.20.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
+| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.42.1) and `MINIMUM` (0.42.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
 | `runtimeError` | Why the runtime is unavailable (not installed, wrong architecture, failed to load), or null; its `installCommand` is the fix |
-| `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded; needs runtime ABI 2.0 |
+| `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
 | `runtimeDiagnostics()` | Runtime state, annotated with `missingSymbols` |
 | `initRuntimeLogging(filter, onLine)` | Install the runtime's `tracing` subscriber |
@@ -937,7 +956,7 @@ The SDK loads a native runtime (`libsynheart_core_runtime.so`) over JNA. It is
 provision it with the CLI:
 
 ```bash
-synheart install runtime --version 0.38.0
+synheart install runtime --version 0.42.1
 ```
 
 That writes the binaries to `<your-app-module>/synheart/vendor/runtime/android/jniLibs/<abi>/`.

@@ -13,14 +13,15 @@
 //                                               ↓
 //                                          aggregate per local wake-day
 //                                               ↓
-//                                          CoreRuntimeBridge.ingestBatch(
-//                                            type="wearable_daily_values")
+//                                          CoreRuntimeBridge
+//                                            .srmPushWearableDaily(...)
 //
 // Core stays Health-Connect-agnostic. All Health Connect SDK calls,
 // permission gating, and availability checks live in wear. Core only
-// knows: "given these typed daily summaries, push them into the runtime
-// SRM as five dimensions: sleep_need, deep_sleep_min, rem_sleep_min,
-// resting_hr, hrv_rmssd."
+// knows: "given these typed daily summaries, push them into the runtime's
+// personal baselines as five daily metrics: sleep.duration_s,
+// sleep.deep_min, sleep.rem_min, cardiac.overnight_rmssd_ms,
+// cardiac.resting_hr_bpm."
 //
 // Android retention is per-record-type and outside our control. As of
 // 2026: heart rate ~30 days, sleep sessions 1–2 years, steps/activity
@@ -29,14 +30,14 @@
 
 package ai.synheart.core.backfill
 
+import ai.synheart.core.SynheartLogger
 import ai.synheart.core.bridge.CoreRuntimeBridge
+import ai.synheart.core.models.DailyMetric
 import ai.synheart.wear.backfill.HealthHistoryReader
 import ai.synheart.wear.backfill.OvernightPhysiologySummary
 import ai.synheart.wear.backfill.SleepNightSummary
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import org.json.JSONArray
-import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -58,25 +59,32 @@ data class HealthConnectBackfillResult(
     val durationMs: Long,
 )
 
-/** Push-daily callback — matches the runtime's `wearable_daily_values` dimension entry. Injectable for tests. */
+/**
+ * Push-daily callback — the shape of `srm_push_wearable_daily`: one value of
+ * one [DailyMetric] for one local date. Returns the runtime's code (`0`
+ * stored, `1004` refused, `5002` out of bounds or not permitted, `-1` no
+ * pipeline). Injectable for tests.
+ */
 typealias PushDailyCallback = (
-    dimension: String,
-    dayIndex: Int,
+    provider: String,
+    metric: String,
+    date: LocalDate,
     value: Double,
-    confidence: Double,
-    fidelity: Int,
-) -> Unit
+    vendorSummary: Boolean,
+) -> Int
 
+/** Rebuild the wearable reference once the backfill has stored its values. */
 typealias TriggerRecomputeCallback = () -> Unit
 
 /**
  * High-level "bring your Health Connect history" call. Pulls
  * sleep + overnight HR/HRV from [reader] across `daysBack` days,
- * aggregates per local wake-day, and replays into the runtime SRM
- * via the `wearable_daily_values` batch path on [CoreRuntimeBridge].
+ * aggregates per local wake-day, and pushes each value into the runtime's
+ * personal baselines with `srm_push_wearable_daily` under the provider
+ * `health_connect`, then rebuilds the wearable reference as of today.
  *
- * Confidence values (`0.85`) match the Apple Health XML import so the
- * two backfill paths produce comparable SRM weights.
+ * Health Connect's nightly figures are platform summaries, so every value is
+ * pushed as a vendor summary.
  *
  * ```kotlin
  * val sink = HealthConnectRuntimeSink(
@@ -124,36 +132,39 @@ class HealthConnectRuntimeSink(
         var daysIngested = 0
         val days = (sleep.keys + overnight.keys).toSortedSet()
         for (day in days) {
-            val dayIndex = day.toEpochDay().toInt()
             var dayDidPush = false
+            // `day` is the local wake date the reader bucketed the night
+            // under, which is the date the runtime files it against.
+            fun push(metric: String, value: Double): Boolean {
+                val rc = pushDaily(PROVIDER, metric, day, value, true)
+                if (rc != 0) {
+                    SynheartLogger.log("[HealthConnectRuntimeSink] $metric on $day not stored (rc=$rc)")
+                    return false
+                }
+                dimensionsPushed++
+                return true
+            }
 
             sleep[day]?.let { night ->
                 if (night.totalAsleepMinutes > 0) {
-                    pushDaily("sleep_need", dayIndex, night.totalAsleepMinutes * 60.0, 0.85, 1)
-                    dimensionsPushed++; dayDidPush = true
+                    if (push(DailyMetric.SLEEP_DURATION_S, night.totalAsleepMinutes * 60.0)) {
+                        dayDidPush = true
+                    }
 
                     // Stage pushes are nested under the totalAsleep > 0 gate
                     // (as the sibling SDKs do). A night with stages but zero asleep
                     // minutes is treated as no usable sleep data.
-                    night.deepMinutes?.takeIf { it > 0 }?.let {
-                        pushDaily("deep_sleep_min", dayIndex, it, 0.85, 1)
-                        dimensionsPushed++
-                    }
-                    night.remMinutes?.takeIf { it > 0 }?.let {
-                        pushDaily("rem_sleep_min", dayIndex, it, 0.85, 1)
-                        dimensionsPushed++
-                    }
+                    night.deepMinutes?.takeIf { it > 0 }?.let { push(DailyMetric.SLEEP_DEEP_MIN, it) }
+                    night.remMinutes?.takeIf { it > 0 }?.let { push(DailyMetric.SLEEP_REM_MIN, it) }
                 }
             }
 
             overnight[day]?.let { o ->
                 o.hrvRmssdMs?.takeIf { it > 0 }?.let {
-                    pushDaily("hrv_rmssd", dayIndex, it, 0.85, 1)
-                    dimensionsPushed++; dayDidPush = true
+                    if (push(DailyMetric.OVERNIGHT_RMSSD_MS, it)) dayDidPush = true
                 }
                 o.restingHrBpm?.takeIf { it > 0 }?.let {
-                    pushDaily("resting_hr", dayIndex, it, 0.85, 1)
-                    dimensionsPushed++; dayDidPush = true
+                    if (push(DailyMetric.RESTING_HR_BPM, it)) dayDidPush = true
                 }
             }
 
@@ -183,39 +194,32 @@ class HealthConnectRuntimeSink(
         )
 
     companion object {
-        /**
-         * Default push routes through the runtime's `wearable_daily_values`
-         * ingest batch. Each call enqueues a single-dimension batch — same
-         * per-(day, dimension) granularity as `srmPushWearableDaily`.
-         */
+        /** The provider name every Health Connect value is stored under. */
+        const val PROVIDER = "health_connect"
+
+        /** Default push: `srm_push_wearable_daily` on [bridge]; `-1` without one. */
         fun defaultPushDaily(bridge: CoreRuntimeBridge?): PushDailyCallback =
-            { dimension, dayIndex, value, confidence, fidelity ->
-                if (bridge != null) {
-                    val nowMs = System.currentTimeMillis()
-                    val dim = JSONObject().apply {
-                        put("dimension", dimension)
-                        put("day_index", dayIndex)
-                        put("value", value)
-                        put("confidence", confidence)
-                        put("fidelity", fidelity)
-                    }
-                    val batch = JSONObject().apply {
-                        put("type", "wearable_daily_values")
-                        put("dimensions", JSONArray().put(dim))
-                        put("recompute_from", 0)
-                        put("recompute_to", (nowMs / 86_400_000).toInt())
-                    }
-                    bridge.ingestBatch(batch.toString(), nowMs)
-                }
+            { provider, metric, date, value, vendorSummary ->
+                bridge?.srmPushWearableDaily(
+                    provider = provider,
+                    metric = metric,
+                    year = date.year,
+                    month = date.monthValue,
+                    day = date.dayOfMonth,
+                    value = value,
+                    vendorSummary = vendorSummary,
+                ) ?: -1
             }
 
         /**
-         * The runtime recomputes inline on each `wearable_daily_values`
-         * ingest (see `recompute_from/to` in [defaultPushDaily]), so the
-         * default trigger is a no-op. Kept as a hook for API parity with
-         * the sibling SDKs and for tests wanting an end-of-backfill signal.
+         * Default trigger: rebuild the wearable reference as of today. The
+         * runtime builds it from the dates before the one given, so every
+         * backfilled night is in and no day is in its own baseline.
          */
-        fun defaultTriggerRecompute(@Suppress("UNUSED_PARAMETER") bridge: CoreRuntimeBridge?): TriggerRecomputeCallback =
-            { /* runtime recomputes inline via ingestBatch */ }
+        fun defaultTriggerRecompute(bridge: CoreRuntimeBridge?): TriggerRecomputeCallback =
+            {
+                val today = LocalDate.now()
+                bridge?.srmRefreshWearableReference(today.year, today.monthValue, today.dayOfMonth)
+            }
     }
 }
