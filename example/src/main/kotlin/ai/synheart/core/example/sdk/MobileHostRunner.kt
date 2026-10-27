@@ -10,6 +10,7 @@ import ai.synheart.core.example.SensingForegroundService
 import ai.synheart.core.models.AccelPlacement
 import ai.synheart.core.models.BehaviorEventInput
 import ai.synheart.core.models.ContextEventInput
+import ai.synheart.core.models.DailyMetric
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +25,6 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.ZoneOffset
 
 /**
  * The host-side half of the mobile integration: everything the guide says a
@@ -45,11 +45,12 @@ import java.time.ZoneOffset
  * * **§6.4 — drain before the tick that closes the window.** Retroactive
  *   buffers (the typing aggregator) are flushed *first*, then the tick runs.
  * * **§6.5 — declare rest.** Evaluated once per window, one-shot per window.
- * * **§7 — three snapshots.** Session state once per emitted window and on
- *   background; SRM at session end; longitudinal after every recompute.
- *   Session state is loaded *before the first tick*.
- * * **§8 — the daily loop.** `roll_day` at session start and at local
- *   midnight, wearable dailies into the SRM, recompute, persist.
+ * * **§7 — session state.** Exported once per emitted window and on
+ *   background, loaded *before the first tick*. The personal baselines are
+ *   the runtime's to seal (0.42+).
+ * * **§8 — the daily loop.** The engine closes each local day itself; this
+ *   attaches the closed day's Strain once per date, and pushes wearable
+ *   dailies under the local date before refreshing the reference.
  *
  * It also owns the simulated cardiac stream — the only simulated source in the
  * example, and the only signal available on a bare phone with no strap.
@@ -73,11 +74,11 @@ class MobileHostRunner(private val scope: CoroutineScope) {
      * Whether to declare a sensing profile, device class, mask profile and CFI
      * denominator at all.
      *
-     * Off by default, and that default is not timidity: declaring
-     * `device_class` folds into the SRM `config_hash` and **invalidates every
-     * persisted baseline**. Undeclared reproduces pre-0.16.0 behaviour exactly.
-     * A first-launch decision to be made once and kept stable, which is why it
-     * is a toggle on the Setup screen rather than something flipped at will.
+     * Off by default: the sensing and mask declarations change engine output
+     * for a host already in the field. `device_class` is sent as `"auto"`
+     * either way — the SDK declares it when the host does not. A first-launch
+     * decision to be made once and kept stable, which is why it is a toggle on
+     * the Setup screen rather than something flipped at will.
      */
     var declareHostProfile: Boolean by mutableStateOf(false)
 
@@ -138,7 +139,6 @@ class MobileHostRunner(private val scope: CoroutineScope) {
     private var behaviorJob: Job? = null
 
     private var store: HostSnapshotStore? = null
-    private var deviceClassKey = "phone"
 
     val rest = RestWindowDetector()
     val typing = TypingMicroWindowAggregator()
@@ -199,8 +199,7 @@ class MobileHostRunner(private val scope: CoroutineScope) {
      * against the wrong history. Calling this from `initialize()` rather than
      * `startSession()` is what makes that ordering unconditional.
      */
-    fun restore(context: Context, subjectId: String, deviceClass: String) {
-        deviceClassKey = deviceClass
+    fun restore(context: Context, subjectId: String) {
         val s = HostSnapshotStore(context, subjectId)
         store = s
 
@@ -209,17 +208,8 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         configIdChanged = configId != null && stored != null && stored != configId
         configId?.let { s.writeConfigId(it) }
 
-        // SRM and longitudinal first: both need a Pipeline, which the SDK
-        // materialises on demand.
-        s.readSrm(deviceClass)?.let { srm ->
-            // A rejection is ERR_SRM_CONFIG_MISMATCH — the baseline partition
-            // working, not a bug. Nothing to handle beyond noting it.
-            if (Synheart.loadRuntimeSRMSnapshot(srm) != true) {
-                lastError = "SRM snapshot rejected (config mismatch). Baselines start cold — " +
-                    "expected after changing device_class or the sensing declaration."
-            }
-        }
-        s.readLongitudinal()?.let { Synheart.loadLongitudinalSnapshot(it) }
+        // The personal baselines need nothing here: the runtime restored its
+        // own sealed snapshot when it started.
         s.readSessionState()?.let { json ->
             if (Synheart.loadSessionState(json) == null) {
                 // Not an error — the vendored runtime predates the symbol. The
@@ -248,9 +238,10 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         // the withholding attributable rather than merely absent.
         Synheart.setAccelPlacement(placement)
 
-        // §8.1 — roll the day at session start, in the host's LOCAL zone.
-        rollDayIfNeeded()
-        scheduleMidnightRoll()
+        // §8 — attach the closed day's Strain, if a day closed since the last
+        // attach, and again just after each local midnight.
+        attachClosedDayStrainIfNeeded()
+        scheduleAfterMidnight()
 
         // Interaction feeds the rest detector's quiet clock.
         behaviorJob = scope.launch {
@@ -295,7 +286,7 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         // Same §6.4 ordering as every tick: the host's own buffer first.
         flushTypingWindow(force = true)
         countDrained(Synheart.flushPending(System.currentTimeMillis()))
-        persistAll(sessionEnd = true)
+        persistAll()
     }
 
     /** App went to background. Flush and persist. */
@@ -304,7 +295,7 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         if (!isRunning) return
         flushTypingWindow(force = true)
         countDrained(Synheart.flushPending(System.currentTimeMillis()))
-        persistAll(sessionEnd = false)
+        persistAll()
     }
 
     fun onForegrounded() {
@@ -540,85 +531,72 @@ class MobileHostRunner(private val scope: CoroutineScope) {
     // ── The daily loop (§8) ───────────────────────────────────────────────
 
     /**
-     * `roll_day` for today, if today has not been rolled yet. The index must
-     * strictly advance, so the last one is persisted and checked rather than
-     * rolled blindly at every launch.
+     * Attach the closed day's Strain, once per date.
+     *
+     * The engine closes each local day itself at the first input of the next
+     * (runtime 0.42+), so there is no day to roll. It keeps the closed day
+     * until the next one closes, across a restart too, so the date it reports
+     * is the cursor: a date already attached is not sent again.
      */
-    private fun rollDayIfNeeded() {
-        // Days since epoch in the host's LOCAL zone — the whole point of the
-        // call; the engine's provisional fallback is UTC.
-        val dayIndex = LocalDate.now(ZoneId.systemDefault()).toEpochDay().toInt()
-        val last = store?.readLastDayIndex()
-        if (last != null && dayIndex <= last) return
-
-        // §8.4 — score BEFORE rolling. roll_day validates the index and folds
-        // the day into the longitudinal baselines, and that fold clears the
-        // very values Strain is computed from. Roll first and the attach
-        // returns null every day: the load reaches the baselines, but no Strain
-        // score is ever emitted. Null on a fresh install's first roll is normal.
-        if (Synheart.attachStrainScore() != null) strainScoresAttached++
-
-        val status = Synheart.rollDay(dayIndex)
-        if (status == null) {
-            lastError = "roll_day is absent from this runtime; the daily accumulator runs on a " +
-                "provisional UTC day."
-            return
-        }
-        store?.writeLastDayIndex(dayIndex)
+    private fun attachClosedDayStrainIfNeeded() {
+        val json = Synheart.attachClosedDayStrain() ?: return
+        val date = runCatching { JSONObject(json).optString("local_date") }.getOrNull()
+            ?.takeIf { it.isNotEmpty() } ?: return
+        if (store?.readLastStrainDate() == date) return
+        store?.writeLastStrainDate(date)
+        strainScoresAttached++
     }
 
     /**
-     * Re-roll at the next local midnight. A coroutine only covers the case
-     * where the app is alive across midnight; a real host needs WorkManager,
-     * which this example deliberately does not pull in. That is the gap §8
-     * names as unbuilt.
+     * Run the closed-day attach a few minutes after the next local midnight.
+     *
+     * The engine closes the day at the first input after midnight, so the
+     * attach waits a little past it. A coroutine only covers an app alive
+     * across midnight; a real host needs WorkManager, which this example
+     * deliberately does not pull in, so a phone asleep at midnight attaches at
+     * the next session start instead.
      */
-    private fun scheduleMidnightRoll() {
+    private fun scheduleAfterMidnight() {
         midnightJob?.cancel()
         midnightJob = scope.launch {
             while (isActive) {
                 val now = LocalDateTime.now()
-                val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
-                val waitMs = java.time.Duration.between(now, nextMidnight).toMillis()
+                val next = now.toLocalDate().plusDays(1).atTime(0, 5)
+                val waitMs = java.time.Duration.between(now, next).toMillis()
                 delay(waitMs.coerceAtLeast(1_000))
-                rollDayIfNeeded()
+                attachClosedDayStrainIfNeeded()
             }
         }
     }
 
     /**
-     * Push one day of wearable summaries into the SRM, recompute, persist.
+     * Push today's wearable summaries into the personal baselines, then
+     * refresh the wearable reference.
      *
      * The **only** baseline path for a phone with no live wearable session.
      * Values come from the simulator rather than Health Connect, because this
      * example holds no health permission — a real host reads them from the
-     * platform store and sends `fidelity = 1` for a provider summary. Both
-     * dimensions are heart-derived, which keeps this inside the cardiac-only
-     * rule. Nothing is padded to zero: a vendor reporting no deep-sleep figure
-     * means the value is absent.
+     * platform store and files each night under the local date the person woke
+     * on. Both metrics are heart-derived, which keeps this inside the
+     * cardiac-only rule. Nothing is padded to zero: a vendor reporting no
+     * deep-sleep figure means the value is absent.
      */
     fun pushSimulatedDailyBaselines() {
         val source = cardiac
-        // The UTC epoch day, NOT the local index roll_day takes — deliberately.
-        // epochDayFor is UTC so a wearable's daily rollups keep a stable day
-        // boundary as the person travels; roll_day is local because the daily
-        // accumulator tracks the person's day.
-        val dayIndex = Synheart.epochDayFor()
+        val today = LocalDate.now(ZoneId.systemDefault())
 
-        val restingHr = source?.restingBpm ?: 58.0
-        Synheart.srmPushWearableDaily("resting_hr", dayIndex, restingHr, confidence = 0.85, fidelity = 1)
-        dailyPushes++
-
-        source?.rmssdMs?.let { rmssd ->
-            Synheart.srmPushWearableDaily("hrv_rmssd", dayIndex, rmssd, confidence = 0.85, fidelity = 1)
-            dailyPushes++
+        fun push(metric: String, value: Double) {
+            val rc = Synheart.srmPushWearableDaily(SIM_PROVIDER, metric, today, value)
+            if (rc == 0) dailyPushes++ else lastError = "srm_push_wearable_daily($metric) returned $rc"
         }
 
-        Synheart.srmTriggerWearableRecompute(triggerType = 0, asOfDay = dayIndex)
+        push(DailyMetric.RESTING_HR_BPM, source?.restingBpm ?: 58.0)
+        source?.rmssdMs?.let { push(DailyMetric.OVERNIGHT_RMSSD_MS, it) }
 
-        // §7 — persist the longitudinal snapshot after every recompute. It
-        // carries today's partial daily accumulator.
-        Synheart.longitudinalSnapshotJson()?.let { store?.writeLongitudinal(it) }
+        // One refresh after the batch. The reference is built from the dates
+        // before today, so today's windows are never judged against today's own
+        // values; what was pushed here counts from tomorrow on.
+        Synheart.srmRefreshWearableReference()
     }
 
     // ── Persistence (§7) ──────────────────────────────────────────────────
@@ -632,19 +610,12 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         sessionStateSaves++
     }
 
-    private fun persistAll(sessionEnd: Boolean) {
-        val s = store ?: return
-        persistSessionState()
-        Synheart.longitudinalSnapshotJson()?.let { s.writeLongitudinal(it) }
-        if (sessionEnd) {
-            // SRM at session end. Without it the baselines report Warming
-            // forever across launches.
-            Synheart.exportRuntimeSRMSnapshot()?.let { s.writeSrm(deviceClassKey, it) }
-        }
-    }
+    // The personal baselines are the runtime's to seal (0.42+); session state
+    // is the one snapshot left to the host.
+    private fun persistAll() = persistSessionState()
 
     val storedSnapshotSizes: Map<String, Int>
-        get() = store?.storedSizes(deviceClassKey) ?: emptyMap()
+        get() = store?.storedSizes() ?: emptyMap()
 
     fun clearSnapshots() {
         store?.clear()
@@ -687,7 +658,3 @@ class MobileHostRunner(private val scope: CoroutineScope) {
         )
     }
 }
-
-/** UTC offset helper kept local so the runner has no dependency on the screens. */
-@Suppress("unused")
-private val UTC: ZoneOffset = ZoneOffset.UTC

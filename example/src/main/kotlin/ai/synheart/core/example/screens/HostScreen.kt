@@ -461,7 +461,7 @@ private fun ContextCard(c: SynheartController) {
     }
 }
 
-/** §7 / §9.5 — the three snapshots and the comparability key. */
+/** §7 / §9.5 — the host's snapshot and the comparability key. */
 @Composable
 private fun SnapshotsCard(c: SynheartController) {
     val host = c.host
@@ -469,9 +469,9 @@ private fun SnapshotsCard(c: SynheartController) {
 
     SectionCard(
         title = "Persisted snapshots",
-        subtitle = "Three, not one. The runtime's own SQLite covers session state only; " +
-            "everything the engine accumulates about the person lives in snapshots the host " +
-            "exports and re-loads.",
+        subtitle = "One for the host. The runtime seals the personal baselines to its own " +
+            "data directory and restores them at startup; session state is the snapshot left " +
+            "to the host.",
         trailing = {
             StatusPill(
                 "${host.sessionStateSaves} state saves",
@@ -483,7 +483,7 @@ private fun SnapshotsCard(c: SynheartController) {
             for ((k, v) in sizes) KeyValueRow(k, if (v == 0) "not stored" else "$v bytes")
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             KeyValueRow("config_id", host.configId ?: "unavailable")
-            KeyValueRow("device_class key", c.hostDeviceClass)
+            KeyValueRow("device_class", "auto (declared by the SDK)")
             if (host.configIdChanged) {
                 Spacer(Modifier.height(8.dp))
                 ErrorBanner(
@@ -498,12 +498,13 @@ private fun SnapshotsCard(c: SynheartController) {
                 "session state carries Capacity, Mental Fatigue, Stress, Valence and the " +
                     "context engine, and is loaded at initialize() — before the first tick, " +
                     "because window 1 writes each head's state slot and a later restore is " +
-                    "overwritten by a cold window.\n\nSRM carries the personal baseline and is " +
-                    "exported at session end; without it the baselines report Warming forever. " +
-                    "Keyed per device_class: a cross-class load is rejected with " +
-                    "ERR_SRM_CONFIG_MISMATCH, which is the baseline partition working.\n\n" +
-                    "longitudinal carries the wearable reference, the 7-night sleep ring and " +
-                    "today's partial daily accumulator, and is written after every recompute.",
+                    "overwritten by a cold window.\n\nThe personal baselines (every per-window " +
+                    "reference, the daily values, the 7-night sleep ring) are one snapshot the " +
+                    "runtime seals itself, at session end, after every reference refresh and " +
+                    "every 15 minutes while windows close. One snapshot holds every device " +
+                    "class. A host that persists elsewhere uses exportBaselineSnapshot and " +
+                    "loadBaselineSnapshot; this one keeps the runtime's directory and needs " +
+                    "neither.",
             )
         }
     }
@@ -513,20 +514,19 @@ private fun SnapshotsCard(c: SynheartController) {
 @Composable
 private fun DailyLoopCard(c: SynheartController) {
     val host = c.host
-    val supported = host.abiSupport["rollDay"] == true
+    val supported = host.abiSupport["attachClosedDayStrain"] == true
 
     SectionCard(
         title = "Daily loop",
         subtitle = "Recovery, Readiness, Strain and Sleep are DAILY scores with no live " +
             "per-window head. Desktop implements none of this, so there is no reference to copy.",
         trailing = {
-            StatusPill("${host.dailyPushes} dimensions", if (host.dailyPushes > 0) PillTone.GOOD else PillTone.NEUTRAL)
+            StatusPill("${host.dailyPushes} daily values", if (host.dailyPushes > 0) PillTone.GOOD else PillTone.NEUTRAL)
         },
     ) {
         Column {
-            KeyValueRow("roll_day", if (supported) "bound" else "absent")
-            KeyValueRow("strain attach", if (host.abiSupport["attachStrainScore"] == true) "bound" else "absent")
-            KeyValueRow("strain scores attached", "${host.strainScoresAttached}")
+            KeyValueRow("closed-day strain", if (supported) "bound" else "absent")
+            KeyValueRow("strain days attached", "${host.strainScoresAttached}")
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = { host.pushSimulatedDailyBaselines() },
@@ -543,13 +543,11 @@ private fun DailyLoopCard(c: SynheartController) {
                     "wearable session. It was bound and never called.\n\nThe values here come " +
                     "from the simulator rather than Health Connect, because this example holds " +
                     "no health permission — a real host reads them from the platform store and " +
-                    "sends fidelity: 1 for a provider summary. Both dimensions are heart-derived. " +
-                    "Nothing is padded to zero.\n\nStrain is scored BEFORE roll_day (§8.4): rolling " +
-                    "clears the values it is computed from, so a host that rolls first never emits " +
-                    "a Strain score while the load still reaches the baselines. Null on a fresh " +
-                    "install's first roll is normal.\n\nroll_day runs at session start and at LOCAL " +
-                    "midnight; skip it and the engine adopts a provisional UTC day. The index " +
-                    "must strictly advance, so the last one is persisted and checked.",
+                    "files each night under the local date the person woke on. Both metrics are " +
+                    "heart-derived. Nothing is padded to zero.\n\nThe engine closes each local " +
+                    "day itself at the first input of the next, so there is no day to roll. The " +
+                    "closed day's Strain is attached once per date, at session start and just " +
+                    "after local midnight.",
             )
         }
     }
