@@ -590,8 +590,14 @@ class MobileHostRunner(private val scope: CoroutineScope) {
             if (rc == 0) dailyPushes++ else lastError = "srm_push_wearable_daily($metric) returned $rc"
         }
 
-        push(DailyMetric.RESTING_HR_BPM, source?.restingBpm ?: 58.0)
-        source?.rmssdMs?.let { push(DailyMetric.OVERNIGHT_RMSSD_MS, it) }
+        // No simulator attached means no value: a default here would land in
+        // the person's real resting-HR baseline as if it were measured.
+        if (source == null) {
+            lastError = "No simulated cardiac source attached; no daily values to push"
+            return
+        }
+        push(DailyMetric.RESTING_HR_BPM, source.restingBpm)
+        source.rmssdMs?.let { push(DailyMetric.OVERNIGHT_RMSSD_MS, it) }
 
         // One refresh after the batch. The reference is built from the dates
         // before today, so today's windows are never judged against today's own
