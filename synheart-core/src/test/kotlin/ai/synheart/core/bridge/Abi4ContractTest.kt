@@ -36,7 +36,7 @@ class Abi4ContractTest {
     }
 
     @Test
-    fun `DailyMetric names exactly the twelve metrics runtime 0_42 accepts`() {
+    fun `DailyMetric names exactly the fifteen metrics C ABI 4_2 accepts`() {
         // The runtime refuses any other name with 1004, including the names
         // these replaced, so this set is the contract.
         assertEquals(
@@ -44,6 +44,8 @@ class Abi4ContractTest {
                 "sleep.duration_s",
                 "sleep.midpoint_h",
                 "cardiac.overnight_rmssd_ms",
+                "cardiac.rest_rmssd_ms",
+                "cardiac.overnight_hr_bpm",
                 "cardiac.overnight_sdnn_ms",
                 "cardiac.resting_hr_bpm",
                 "vendor.recovery_frac",
@@ -51,6 +53,7 @@ class Abi4ContractTest {
                 "sleep.rem_min",
                 "vendor.strain_frac",
                 "motion.steps_count",
+                "motion.active_min",
                 "cardiac.hrr_load_au",
                 "cardiac.overnight_hr_sd_bpm",
             ),

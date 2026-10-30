@@ -644,6 +644,21 @@ interface CoreRuntimeNative : Library {
     /** Start a new rest block at `ts_ms`. Returns 0, 1002 or -1. */
     fun synheart_core_baseline_begin_rest_block(handle: Pointer?, ts_ms: Long): Int
 
+    /**
+     * The Recovery Score's `baselines` object as JSON (`hrv_rmssd_ms`,
+     * `hrv_confidence`, `resting_hr_bpm`, `rhr_confidence`), or null until
+     * overnight RMSSD and resting HR both have a reference (C ABI 4.2).
+     * Caller frees.
+     */
+    fun synheart_core_daily_baseline_refs_json(handle: Pointer?): Pointer?
+
+    /**
+     * The Sleep Score's `baselines` object as JSON (`midpoint_h`,
+     * `overnight_hr_bpm`, `deep_min`, `rem_min`, each `{value, confidence}`
+     * or null), or null without a pipeline (C ABI 4.2). Caller frees.
+     */
+    fun synheart_core_daily_sleep_baselines_json(handle: Pointer?): Pointer?
+
     /** What the personal baselines know, as JSON. Caller frees. */
     fun synheart_core_baseline_profile_json(handle: Pointer?): Pointer?
 

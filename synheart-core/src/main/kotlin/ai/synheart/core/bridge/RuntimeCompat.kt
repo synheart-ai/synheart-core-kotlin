@@ -22,15 +22,15 @@ object RuntimeCompat {
      * new symbol or a moved shape, or once they are verified on a newer
      * release.
      */
-    const val WRITTEN_AGAINST: String = "0.42.1"
+    const val WRITTEN_AGAINST: String = "0.45.0"
 
     /**
      * Oldest runtime the bindings are known to load and behave on. Below this
      * the SDK refuses to initialise rather than run with entrypoints that no
-     * longer mean what the code assumes. `0.42.0` is the first release on C
-     * ABI 4.0, which these bindings require.
+     * longer mean what the code assumes. `0.45.0` is the first release on C
+     * ABI 4.2, which these bindings require.
      */
-    const val MINIMUM: String = "0.42.0"
+    const val MINIMUM: String = "0.45.0"
 
     /**
      * The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
@@ -38,10 +38,14 @@ object RuntimeCompat {
      * runtime is compatible when its MAJOR equals [REQUIRED_ABI_MAJOR] and its
      * MINOR is at least [REQUIRED_ABI_MINOR]. This, not the release version, is
      * the contract; the version checks only grade runtimes that satisfy it.
+     *
+     * 4.2 because the daily score inputs changed shape with it
+     * (`baseline_maturity`, the Sleep Score's `baselines`): neither shape
+     * parses on the other runtime, so there is no fallback to an older one.
      */
-    const val REQUIRED_ABI: String = "4.0"
+    const val REQUIRED_ABI: String = "4.2"
     const val REQUIRED_ABI_MAJOR: Int = 4
-    const val REQUIRED_ABI_MINOR: Int = 0
+    const val REQUIRED_ABI_MINOR: Int = 2
 
     /**
      * Newest ABI major the bindings also accept. Only 4: ABI 4.0 re-signed every

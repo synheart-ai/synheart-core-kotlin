@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
+Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
+load. Install it with `synheart install runtime --version 0.45.0`. The daily
+score inputs changed shape with ABI 4.2 and neither shape parses on the other
+runtime, so there is no fallback.
+
+### Migrating
+
+- **`ReadinessScoreInput` is the runtime's current shape.** It takes
+  `recoveryScore` and `sleepScore` (both required), an optional
+  `OvernightAlignment` (`hrSleepBpm`, `hrBaseBpm`, `rmssdSleepMs`,
+  `rmssdBaseMs`), `recoveryColdStart`, `sleepColdStart` and
+  `baselineMaturity` (`0..1`): the lower of the two confidences in
+  `Synheart.dailyBaselineRefs()` (`BaselineRefs.maturity`), or `0` when it
+  returns null. `AcuteWorkloadContext`, `FatigueContext`, `HistoryContext`,
+  `recoveryConfidence` and `ReadinessScoreInput.fromRecovery` are removed;
+  the runtime no longer reads them.
+- **`ReadinessScoreResult`** gains `sleepAnchor` and `toJson()`.
+  `ReadinessComponents` is `recovery`, `sleep`, `baselineAlignment`,
+  `hrAlignment`, `hrvAlignment`. `ReadinessFactor` is the runtime's current
+  set (`POOR_SLEEP`, `GOOD_SLEEP`, `HRV_BELOW_BASELINE`, `BASELINE_IMMATURE`,
+  `SCORES_ONLY` and the rest). `ReadinessBand` reads the runtime's
+  band names (`low`, `reduced`, `normal`, `high`) and `fromWire` now takes the
+  score, falling back to the band the score falls in.
+- **`SleepScoreInput` gains `tonightMidpointH` and `baselines`.** Pass the
+  night's local sleep midpoint (null when the source gives no start and end
+  time) and `Synheart.dailySleepBaselines()`; without the baselines the score
+  stays in its cold-start mode. Only the two newest `priorsNewestFirst` nights
+  are read now, for sleep debt.
+- **`RecoveryScoreInput.baselines`**: take them from
+  `Synheart.dailyBaselineRefs()` rather than building them from
+  `wearableReference()`.
+
+### Added
+
+- `Synheart.dailyBaselineRefs()` and `Synheart.dailySleepBaselines()`: the
+  daily scores' personal baselines, read after
+  `srmRefreshWearableReference()`. `SleepBaselines`, `DailyRef`,
+  `BaselineRefs.fromJson` and `BaselineRefs.maturity`. Both are listed in
+  `mobileHostAbiSupport`.
+- `DailyMetric.OVERNIGHT_HR_BPM` (`cardiac.overnight_hr_bpm`, the Sleep
+  Score's heart-rate baseline), `DailyMetric.ACTIVE_MIN` (`motion.active_min`,
+  pushed once the day is over) and `DailyMetric.REST_RMSSD_MS`
+  (`cardiac.rest_rmssd_ms`, written by the engine; do not push it).
+
+### Changed
+
+- `HealthConnectRuntimeSink` pushes each night's asleep mean HR as both
+  `cardiac.overnight_hr_bpm` and `cardiac.resting_hr_bpm`, so the Sleep Score
+  and Recovery and Readiness all have a heart-rate baseline.
+  `daysIngested` counts a day when any of its values was accepted; it counted
+  only days whose sleep duration or overnight figures were.
+
 ## [0.5.0] - 2026-10-27
 
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at

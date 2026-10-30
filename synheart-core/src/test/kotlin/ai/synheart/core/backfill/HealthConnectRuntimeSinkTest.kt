@@ -41,13 +41,15 @@ class HealthConnectRuntimeSinkTest {
         val vendorSummary: Boolean,
     )
 
-    private class Recorder(private val rc: Int = 0) {
+    private class Recorder(private val rcFor: (metric: String) -> Int = { 0 }) {
+        constructor(rc: Int) : this({ rc })
+
         val pushes = mutableListOf<PushCall>()
         var recomputeCount = 0
 
         val pushDaily: PushDailyCallback = { provider, metric, date, v, vendor ->
             pushes.add(PushCall(provider, metric, date, v, vendor))
-            rc
+            rcFor(metric)
         }
         val triggerRecompute: TriggerRecomputeCallback = { recomputeCount++ }
     }
@@ -124,7 +126,7 @@ class HealthConnectRuntimeSinkTest {
     // ── Push semantics ────────────────────────────────────────────────
 
     @Test
-    fun `full sleep plus overnight day pushes all 5 dimensions`() = runTest {
+    fun `full sleep plus overnight day pushes all 6 dimensions`() = runTest {
         val reader = FakeReader(
             sleep = mapOf(day to SleepNightSummary(
                 totalAsleepMinutes = 420.0,
@@ -139,7 +141,7 @@ class HealthConnectRuntimeSinkTest {
         val (s, r) = sink(reader)
         val result = s.backfill(daysBack = 30)
 
-        assertEquals(5, result.dimensionsPushed)
+        assertEquals(6, result.dimensionsPushed)
         assertEquals(1, result.daysIngested)
         assertEquals(1, r.recomputeCount)
 
@@ -147,7 +149,8 @@ class HealthConnectRuntimeSinkTest {
         assertEquals(
             setOf(
                 "sleep.duration_s", "sleep.deep_min", "sleep.rem_min",
-                "cardiac.overnight_rmssd_ms", "cardiac.resting_hr_bpm",
+                "cardiac.overnight_rmssd_ms", "cardiac.overnight_hr_bpm",
+                "cardiac.resting_hr_bpm",
             ),
             dims.keys,
         )
@@ -158,6 +161,8 @@ class HealthConnectRuntimeSinkTest {
         assertEquals(90.0, dims.getValue("sleep.deep_min").value, 0.0001)
         assertEquals(110.0, dims.getValue("sleep.rem_min").value, 0.0001)
         assertEquals(55.0, dims.getValue("cardiac.overnight_rmssd_ms").value, 0.0001)
+        // The one overnight HR figure feeds both heart-rate baselines.
+        assertEquals(58.0, dims.getValue("cardiac.overnight_hr_bpm").value, 0.0001)
         assertEquals(58.0, dims.getValue("cardiac.resting_hr_bpm").value, 0.0001)
 
         // All pushes are Health Connect vendor summaries filed on the wake date.
@@ -233,15 +238,28 @@ class HealthConnectRuntimeSinkTest {
         val (s, r) = sink(reader)
         val result = s.backfill(daysBack = 30)
 
-        // d1: duration + deep + rem + rmssd + resting = 5
+        // d1: duration + deep + rem + rmssd + overnight HR + resting = 6
         // d2: duration = 1
-        assertEquals(6, result.dimensionsPushed)
+        assertEquals(7, result.dimensionsPushed)
         assertEquals(2, result.daysIngested)
         assertEquals(1, r.recomputeCount)
 
         val byDay = r.pushes.groupBy { it.date }
-        assertEquals(5, byDay[d1]!!.size)
+        assertEquals(6, byDay[d1]!!.size)
         assertEquals(1, byDay[d2]!!.size)
+    }
+
+    @Test
+    fun `a day counts when any value is accepted`() = runTest {
+        val reader = FakeReader(
+            sleep = mapOf(day to SleepNightSummary(420.0, 90.0, null)),
+        )
+        // The duration is refused, the deep minutes accepted.
+        val (s, _) = sink(reader, Recorder { if (it == DailyMetric.SLEEP_DURATION_S) 5002 else 0 })
+        val result = s.backfill(daysBack = 30)
+
+        assertEquals(1, result.dimensionsPushed)
+        assertEquals(1, result.daysIngested)
     }
 
     @Test

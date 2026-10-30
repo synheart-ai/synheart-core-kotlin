@@ -142,43 +142,141 @@ class ScoringModelsTest {
     // ── ReadinessScore ──────────────────────────────────────────────
 
     @Test
-    fun `ReadinessBand fromWire falls back to REST on unknown`() {
-        assertEquals(ReadinessBand.PUSH, ReadinessBand.fromWire("push"))
-        assertEquals(ReadinessBand.REST, ReadinessBand.fromWire("garbage"))
+    fun `ReadinessBand reads the engine's names and falls back to the score`() {
+        assertEquals(ReadinessBand.REST, ReadinessBand.fromWire("low", 90))
+        assertEquals(ReadinessBand.LIGHT, ReadinessBand.fromWire("reduced", 90))
+        assertEquals(ReadinessBand.PUSH, ReadinessBand.fromWire("high", 10))
+        // Missing or unknown: the band the score falls in, never a default.
+        assertEquals(ReadinessBand.REST, ReadinessBand.fromWire(null, 39))
+        assertEquals(ReadinessBand.LIGHT, ReadinessBand.fromWire("garbage", 40))
+        assertEquals(ReadinessBand.NORMAL, ReadinessBand.fromWire(null, 79))
+        assertEquals(ReadinessBand.PUSH, ReadinessBand.fromWire(null, 80))
         assertEquals("Light", ReadinessBand.LIGHT.label)
     }
 
     @Test
-    fun `ReadinessScoreInput fromRecovery builds minimal input`() {
-        val input = ReadinessScoreInput.fromRecovery(72)
-        val json = input.toJson()
+    fun `ReadinessScoreInput writes the engine's input shape`() {
+        val json = ReadinessScoreInput(
+            recoveryScore = 72,
+            sleepScore = 68,
+            alignment = OvernightAlignment(58.0, 55.0, 42.0, 45.0),
+            sleepColdStart = true,
+            baselineMaturity = 0.6,
+        ).toJson()
         assertEquals(72, json.getInt("recovery_score"))
-        assertEquals(JSONObject.NULL, json.opt("acute_workload"))
-        assertEquals(JSONObject.NULL, json.opt("fatigue"))
+        assertEquals(68, json.getInt("sleep_score"))
+        assertEquals(58.0, json.getJSONObject("alignment").getDouble("hr_sleep_bpm"), 0.0)
+        assertEquals(45.0, json.getJSONObject("alignment").getDouble("rmssd_base_ms"), 0.0)
+        assertFalse(json.getBoolean("recovery_cold_start"))
+        assertTrue(json.getBoolean("sleep_cold_start"))
+        assertEquals(0.6, json.getDouble("baseline_maturity"), 0.0)
+        assertFalse(json.has("baseline_days"))
+    }
+
+    @Test
+    fun `ReadinessScoreInput clamps scores and maturity`() {
+        val json = ReadinessScoreInput(
+            recoveryScore = 140,
+            sleepScore = -5,
+            baselineMaturity = Double.NaN,
+        ).toJson()
+        assertEquals(100, json.getInt("recovery_score"))
+        assertEquals(0, json.getInt("sleep_score"))
+        assertEquals(JSONObject.NULL, json.get("alignment"))
+        assertEquals(0.0, json.getDouble("baseline_maturity"), 0.0)
+        assertEquals(
+            1.0,
+            ReadinessScoreInput(1, 1, baselineMaturity = 3.0).toJson().getDouble("baseline_maturity"),
+            0.0,
+        )
     }
 
     @Test
     fun `ReadinessScoreResult round-trips`() {
         val s = """
             {
-              "score": 78, "band": "normal", "recovery_anchor": 70,
+              "score": 74, "band": "normal", "recovery_anchor": 72, "sleep_anchor": 68,
               "confidence": 0.85,
-              "components": {"recovery": 70.0, "acute_load": 1.0, "fatigue": -3.0},
-              "explanation": ["acute_load_optimal"],
-              "model_id": "readiness_v1",
-              "model_version": "1.0.0",
-              "pipeline_version": "p1"
+              "components": {"recovery": 72.0, "sleep": 68.0, "baseline_alignment": 82.67,
+                             "hr_alignment": null, "hrv_alignment": 90.0},
+              "explanation": ["hrv_below_baseline", "garbage_factor", "scores_only"],
+              "model_id": "readiness_score",
+              "model_version": "3.0.0",
+              "pipeline_version": "readiness_score/3.0.0"
             }
         """.trimIndent()
         val r = ReadinessScoreResult.fromJsonString(s)
-        assertEquals(78, r.score)
+        assertEquals(74, r.score)
         assertEquals(ReadinessBand.NORMAL, r.band)
-        assertEquals(70, r.recoveryAnchor)
-        assertEquals(0.85, r.confidence, 0.0001)
-        assertEquals(70.0, r.components.recovery, 0.0001)
-        assertEquals(1.0, r.components.acuteLoad)
-        assertNull(r.components.history)
-        assertEquals(listOf(ReadinessFactor.ACUTE_LOAD_OPTIMAL), r.explanation)
-        assertEquals("readiness_v1", r.modelId)
+        assertEquals(72, r.recoveryAnchor)
+        assertEquals(68, r.sleepAnchor)
+        assertEquals(68.0, r.components.sleep, 0.0001)
+        assertEquals(82.67, r.components.baselineAlignment!!, 0.0001)
+        assertNull(r.components.hrAlignment)
+        assertEquals(
+            listOf(ReadinessFactor.HRV_BELOW_BASELINE, ReadinessFactor.SCORES_ONLY),
+            r.explanation,
+        )
+        assertEquals("3.0.0", r.modelVersion)
+        // And back: toJson is the engine's shape.
+        assertEquals(r, ReadinessScoreResult.fromJson(r.toJson()))
+    }
+
+    // ── Daily baselines (C ABI 4.2) ─────────────────────────────────
+
+    @Test
+    fun `BaselineRefs fromJson needs all four numbers`() {
+        val full = JSONObject("""
+            {"hrv_rmssd_ms": 48.0, "hrv_confidence": 0.7, "resting_hr_bpm": 56.0, "rhr_confidence": 0.4}
+        """.trimIndent())
+        val refs = BaselineRefs.fromJson(full)!!
+        assertEquals(48.0, refs.hrvRmssdMs, 0.0)
+        assertEquals(0.4, refs.maturity, 0.0)
+        for (key in listOf("hrv_rmssd_ms", "hrv_confidence", "resting_hr_bpm", "rhr_confidence")) {
+            assertNull(key, BaselineRefs.fromJson(JSONObject(full.toString()).apply { remove(key) }))
+            assertNull(key, BaselineRefs.fromJson(JSONObject(full.toString()).put(key, JSONObject.NULL)))
+        }
+    }
+
+    @Test
+    fun `BaselineRefs maturity is the lower confidence, clamped`() {
+        assertEquals(0.3, BaselineRefs(1.0, 0.3, 1.0, 0.9).maturity, 0.0)
+        assertEquals(1.0, BaselineRefs(1.0, 1.4, 1.0, 2.0).maturity, 0.0)
+        assertEquals(0.0, BaselineRefs(1.0, -0.2, 1.0, 0.5).maturity, 0.0)
+        assertEquals(0.0, BaselineRefs(1.0, Double.NaN, 1.0, 0.5).maturity, 0.0)
+    }
+
+    @Test
+    fun `SleepBaselines keeps each reference independent`() {
+        val b = SleepBaselines.fromJson(JSONObject("""
+            {"midpoint_h": {"value": 0.0, "confidence": 0.5},
+             "overnight_hr_bpm": null,
+             "deep_min": {"value": 70.0},
+             "rem_min": {"value": 95.0, "confidence": 0.8}}
+        """.trimIndent()))
+        // 0.0 is midnight: a value, not missing.
+        assertEquals(DailyRef(0.0, 0.5), b.midpointH)
+        assertNull(b.overnightHrBpm)
+        assertNull(b.deepMin)
+        assertEquals(DailyRef(95.0, 0.8), b.remMin)
+        assertEquals(SleepBaselines(), SleepBaselines.fromJson(JSONObject()))
+    }
+
+    @Test
+    fun `SleepScoreInput writes the midpoint and the baselines`() {
+        val night = NightRaw(20261030, NightInput.VendorScore(80))
+        val bare = SleepScoreInput(tonight = night).toJson()
+        assertEquals(JSONObject.NULL, bare.get("tonight_midpoint_h"))
+        assertFalse(bare.has("baselines"))
+
+        val full = SleepScoreInput(
+            tonight = night,
+            tonightMidpointH = 3.25,
+            baselines = SleepBaselines(midpointH = DailyRef(3.0, 0.6)),
+        ).toJson()
+        assertEquals(3.25, full.getDouble("tonight_midpoint_h"), 0.0)
+        val baselines = full.getJSONObject("baselines")
+        assertEquals(3.0, baselines.getJSONObject("midpoint_h").getDouble("value"), 0.0)
+        assertEquals(JSONObject.NULL, baselines.get("rem_min"))
     }
 }
