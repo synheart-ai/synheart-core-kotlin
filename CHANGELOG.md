@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-30
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.6.0 does.
+
 ### Migrating
 
 - **The sync calls that reach the server are `suspend`.** `syncNow`,
