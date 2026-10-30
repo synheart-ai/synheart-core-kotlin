@@ -97,7 +97,7 @@ src/main/kotlin/ai/synheart/core/example/
     SetupScreen.kt                config + initialize
     ConsentScreen.kt              runtime editable-form consent flow
     SessionScreen.kt              start/stop, live HSI, signal sources
-    DiagnosticsScreen.kt          runtime version, native symbol audit
+    DiagnosticsScreen.kt          runtime version, native symbol audit, daily scores
   ui/Ui.kt                        shared building blocks
   SimpleExample.kt                minimal standalone snippet
 ```
@@ -138,6 +138,17 @@ The UI is Jetpack Compose; the four tabs mirror the lifecycle order.
   symbols failed to resolve. The list only names symbols something already
   tried to use, so an empty list means "nothing has failed yet", not "the
   runtime exports everything". The screen says so.
+- **Daily scores and their baselines** (runtime 0.45+) — the Runtime tab's
+  Daily scores card scores a night the person reports, the way a host runs its
+  nightly loop: read `dailySleepBaselines()`, score the night with them and its
+  midpoint, then push the night's values with `srmPushWearableDaily` and
+  refresh the reference. A self-reported night has a start and an end, so it
+  pushes its duration and midpoint and nothing else. The values only count
+  while a session runs. `dailyBaselineRefs()` stays withheld here: it needs
+  overnight RMSSD and resting HR, which a self-report never gives. Readiness is
+  computed from that Sleep Score and a Recovery Score entered on screen, since
+  Recovery needs overnight HRV this example has no source for; nothing is
+  stored.
 
 ## See also
 

@@ -14,7 +14,20 @@ import ai.synheart.core.config.SynheartFeature
 import ai.synheart.core.config.SynheartMode
 import ai.synheart.core.config.WearConfig
 import ai.synheart.core.example.BuildConfig
+import ai.synheart.core.models.AggregatedTotals
+import ai.synheart.core.models.BaselineRefs
+import ai.synheart.core.models.DailyMetric
+import ai.synheart.core.models.DailyRef
 import ai.synheart.core.models.HSIState
+import ai.synheart.core.models.NightInput
+import ai.synheart.core.models.NightRaw
+import ai.synheart.core.models.ReadinessScoreInput
+import ai.synheart.core.models.ReadinessScoreResult
+import ai.synheart.core.models.SleepBaselines
+import ai.synheart.core.models.SleepQuestionnaireAnswers
+import ai.synheart.core.models.SleepScoreInput
+import ai.synheart.core.models.SleepScoreMode
+import ai.synheart.core.models.SleepScoreResult
 import ai.synheart.core.models.SessionHandle
 import ai.synheart.session.SessionConfig
 import ai.synheart.session.SessionErrorEvent
@@ -36,6 +49,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * The one place in this example that talks to the Synheart SDK.
@@ -1183,6 +1198,144 @@ class SynheartController : ViewModel() {
     /** HSI windows buffered during the session, capped by the SDK. */
     val sessionWindows: List<String> get() = Synheart.getSessionHsiWindows()
 
+    // ── Daily scores ───────────────────────────────────────────────────────
+
+    /** The last night scored with [logSelfReportedSleep], or null. */
+    var lastSleepScore: SleepScoreResult? by mutableStateOf(null)
+
+    /** The last Readiness computed with [computeReadiness], or null. */
+    var lastReadiness: ReadinessScoreResult? by mutableStateOf(null)
+
+    /**
+     * How the last night's daily values fared: `accepted/attempted`. The
+     * runtime refuses daily values while no session is running (no pipeline),
+     * so start one on the Session tab first for them to count.
+     */
+    var lastNightPushes: String? by mutableStateOf(null)
+
+    /**
+     * The Sleep Score's personal baselines (C ABI 4.2), as of the last
+     * reference refresh. A reference is null until enough nights hold one.
+     */
+    var sleepBaselines: SleepBaselines? by mutableStateOf(null)
+
+    /**
+     * The Recovery and Readiness baselines (C ABI 4.2): null until overnight
+     * RMSSD and resting HR both have a reference, which a self-reported night
+     * never supplies.
+     */
+    var baselineRefs: BaselineRefs? by mutableStateOf(null)
+
+    /** Re-read both baseline objects from the runtime. */
+    fun refreshDailyBaselines() {
+        sleepBaselines = Synheart.dailySleepBaselines()
+        baselineRefs = Synheart.dailyBaselineRefs()
+    }
+
+    /**
+     * Score a night the person reports (bedtime and wake time), the way a host
+     * runs its nightly loop on runtime 0.45+:
+     *
+     *   1. read the Sleep baselines — the last refresh built them from the
+     *      dates before today, so tonight is never in its own baseline;
+     *   2. score the night with them and its midpoint;
+     *   3. push the night's daily values, then refresh the reference so
+     *      tomorrow's night is scored against them.
+     *
+     * A self-report has a start and an end, so it has a midpoint. It has no
+     * stages and no heart rate, so nothing else is pushed: never padded.
+     */
+    fun logSelfReportedSleep(bedtime: Instant, wakeTime: Instant): SleepScoreResult? {
+        val zone = ZoneId.systemDefault()
+        val answers = SleepQuestionnaireAnswers(bedtime = bedtime, wakeTime = wakeTime)
+        val wakeDay = wakeTime.atZone(zone).toLocalDate()
+        val midpointH = midpointHoursLocal(bedtime, wakeTime, zone)
+
+        val baselines = Synheart.dailySleepBaselines()
+        val night = NightRaw(
+            // Days since the epoch, the runtime's calendar-date key.
+            wakeCalendarDate = wakeDay.toEpochDay().toInt(),
+            detail = NightInput.Aggregated(
+                sessionStartMs = bedtime.toEpochMilli(),
+                sessionEndMs = wakeTime.toEpochMilli(),
+                totals = AggregatedTotals(
+                    totalSleepMinutes = answers.totalSleepMinutes,
+                    awakeMinutes = answers.awakeMinutes,
+                    awakenings = answers.awakenings,
+                    timeInBedMinutes = answers.timeInBedMinutes,
+                ),
+            ),
+        )
+        val result = Synheart.computeSleepScore(
+            SleepScoreInput(tonight = night, tonightMidpointH = midpointH, baselines = baselines),
+        )
+        lastSleepScore = result
+
+        var attempted = 0
+        var accepted = 0
+        fun push(metric: String, value: Double) {
+            attempted++
+            if (Synheart.srmPushWearableDaily(SELF_REPORT_PROVIDER, metric, wakeDay, value) == 0) accepted++
+        }
+        if (answers.totalSleepMinutes > 0) push(DailyMetric.SLEEP_DURATION_S, answers.totalSleepMinutes * 60.0)
+        // 0.0 is midnight, a value.
+        push(DailyMetric.SLEEP_MIDPOINT_H, midpointH)
+        if (accepted > 0) Synheart.srmRefreshWearableReference()
+        lastNightPushes = "$accepted/$attempted"
+        refreshDailyBaselines()
+
+        SynheartLogger.log(
+            "[example] sleep score ${result?.score} mode=${result?.mode?.wire} " +
+                "pipeline=${result?.pipelineVersion} midpoint=${"%.2f".format(midpointH)} " +
+                "pushed=$lastNightPushes baselines=${sleepBaselines?.toJson()}",
+        )
+        return result
+    }
+
+    /**
+     * Compute today's Readiness from the last Sleep Score and a Recovery
+     * Score. Recovery needs overnight HRV, which this example has no source
+     * for, so the value is entered on screen: a check that the runtime takes
+     * the input, not a reading. Nothing is attached or stored.
+     */
+    fun computeReadiness(recoveryScore: Int): ReadinessScoreResult? {
+        val sleep = lastSleepScore ?: return null
+        val sleepScore = sleep.score ?: return null
+        val refs = Synheart.dailyBaselineRefs()
+        val result = Synheart.computeReadinessScore(
+            ReadinessScoreInput(
+                recoveryScore = recoveryScore,
+                sleepScore = sleepScore,
+                // No overnight HR/HRV here, so no alignment: scores only.
+                alignment = null,
+                sleepColdStart = sleep.mode == SleepScoreMode.COLD_START,
+                baselineMaturity = refs?.maturity ?: 0.0,
+            ),
+        )
+        lastReadiness = result
+        SynheartLogger.log(
+            "[example] readiness ${result?.score} band=${result?.band?.wire} " +
+                "model=${result?.modelVersion} explanation=${result?.explanation?.map { it.wire }}",
+        )
+        return result
+    }
+
+    /** One baseline as `value @ confidence`, or `—` while it is withheld. */
+    fun describeRef(r: DailyRef?): String =
+        if (r == null) "—" else "%.1f @ %.2f".format(r.value, r.confidence)
+
+    /** The Recovery and Readiness baselines in one line, or why they are absent. */
+    val baselineRefsSummary: String
+        get() = baselineRefs?.let {
+            "hrv %.1f, rhr %.1f, maturity %.2f".format(it.hrvRmssdMs, it.restingHrBpm, it.maturity)
+        } ?: "— (needs RMSSD + resting HR)"
+
+    /** Local-time midpoint of a night in hours since midnight, `[0, 24)`. */
+    private fun midpointHoursLocal(from: Instant, to: Instant, zone: ZoneId): Double {
+        val mid = Instant.ofEpochMilli((from.toEpochMilli() + to.toEpochMilli()) / 2).atZone(zone)
+        return mid.hour + mid.minute / 60.0 + mid.second / 3600.0
+    }
+
     // ── Device attestation ─────────────────────────────────────────────────
     //
     // Registration is triggered by CLOUD-UPLOAD CONSENT, not by initialize().
@@ -1457,3 +1610,9 @@ private const val ATTESTATION_POLL_MS = 1_500L
 /** Ticks before giving up — a device that cannot attest never becomes registered. */
 private const val ATTESTATION_POLL_LIMIT = 20
 
+
+/**
+ * Provider the self-reported nights are stored under, kept apart from any
+ * wearable's values in the personal baselines.
+ */
+private const val SELF_REPORT_PROVIDER = "self_report"
