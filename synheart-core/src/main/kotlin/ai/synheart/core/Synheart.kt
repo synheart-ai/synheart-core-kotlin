@@ -1614,6 +1614,7 @@ object Synheart {
                 }
             }
             SynheartFeature.CLOUD -> { }
+            SynheartFeature.SYNSYNC -> { }
             SynheartFeature.SYNI -> { }
         }
     }
@@ -1645,7 +1646,8 @@ object Synheart {
             SynheartFeature.WEAR -> cap.capability(Module.WEAR) != CapabilityLevel.NONE
             SynheartFeature.BEHAVIOR -> cap.capability(Module.BEHAVIOR) != CapabilityLevel.NONE
             SynheartFeature.PHONE_CONTEXT -> cap.capability(Module.PHONE) != CapabilityLevel.NONE
-            SynheartFeature.CLOUD -> cap.capability(Module.CLOUD) != CapabilityLevel.NONE
+            SynheartFeature.CLOUD,
+            SynheartFeature.SYNSYNC -> cap.capability(Module.CLOUD) != CapabilityLevel.NONE
             SynheartFeature.SYNI -> true // no capability gate for syni yet
         }
     }
@@ -2619,7 +2621,9 @@ object Synheart {
     //                                                                     //
     // Every call below throws SyncNativeException when the runtime returns //
     // a failure envelope, so the reason survives instead of collapsing to  //
-    // a bare null. Check readiness first with checkSyncReadiness.          //
+    // a bare null. Check readiness first with checkSyncReadiness. Calls    //
+    // that reach the server suspend and run on Dispatchers.IO, so they are //
+    // safe to start from the main thread.                                  //
     // ══════════════════════════════════════════════════════════════════ //
 
     /** Enable or disable background sync. */
@@ -2635,25 +2639,52 @@ object Synheart {
      *   successful no-op sync.
      * @throws SyncNativeException when the runtime reports a failure envelope.
      */
-    fun syncNow(): ai.synheart.core.sync.SyncResult {
+    suspend fun syncNow(): ai.synheart.core.sync.SyncResult {
         val runtime = coreRuntime
             ?: throw IllegalStateException("The native sync runtime is unavailable.")
-        return ai.synheart.core.sync.SyncResult.fromRuntimeResponse(runtime.syncNow())
+        return ai.synheart.core.sync.SyncResult.fromRuntimeResponse(onIo { runtime.syncNow() })
     }
 
     /** Raw sync-cycle response, for hosts that want the full payload. */
-    fun syncNowRaw(): JSONObject? = coreRuntime?.syncNow()
+    suspend fun syncNowRaw(): JSONObject? = onIo { coreRuntime?.syncNow() }
 
     /** Create a new sync space owned by this device. */
-    fun syncCreateSpace(deviceName: String? = null): JSONObject? =
-        coreRuntime?.syncCreateSpace(deviceName)
+    suspend fun syncCreateSpace(deviceName: String? = null): JSONObject? =
+        onIo { coreRuntime?.syncCreateSpace(deviceName) }
 
     /** Mint a short-lived pairing token for another device to join with. */
-    fun syncGeneratePairing(): JSONObject? = coreRuntime?.syncGeneratePairing()
+    suspend fun syncGeneratePairing(): JSONObject? = onIo { coreRuntime?.syncGeneratePairing() }
+
+    /**
+     * Whether a pairing token from [syncGeneratePairing] was redeemed. Poll it
+     * every 2–3 seconds while the code is on screen and stop when the state is
+     * terminal or the code has expired; never infer pairing from the device
+     * list instead. `EXPIRED` is a normal result, not an error, and `UNKNOWN`
+     * means keep waiting.
+     *
+     * @return null without a runtime, or when the runtime predates the call.
+     * @throws SyncNativeException when the runtime reports a failure envelope
+     *   (an unknown token, or one for another space, is `PAIRING_INVALID`).
+     */
+    suspend fun syncPairingStatus(token: String): ai.synheart.core.sync.SyncPairingStatus? =
+        onIo { coreRuntime?.syncPairingStatus(token) }
+            ?.let { ai.synheart.core.sync.SyncPairingStatus.fromJson(it) }
 
     /** Join an existing space using a pairing token. */
-    fun syncJoinSpace(pairingToken: String, deviceName: String? = null): JSONObject? =
-        coreRuntime?.syncJoinSpace(pairingToken, deviceName)
+    suspend fun syncJoinSpace(pairingToken: String, deviceName: String? = null): JSONObject? =
+        onIo { coreRuntime?.syncJoinSpace(pairingToken, deviceName) }
+
+    /**
+     * Local Device Sync state, no network: whether the engine is built, the
+     * space, pending artifacts, the last success, and whether the space key is
+     * unlocked. Null without a runtime. For a device count, use
+     * [syncListDevices]; the runtime no longer reports one here.
+     *
+     * @throws SyncNativeException when the runtime reports a failure envelope
+     *   (e.g. `STORAGE_UNAVAILABLE` in a build without local storage).
+     */
+    fun syncStatus(): ai.synheart.core.sync.SyncStatus? =
+        coreRuntime?.syncStatus()?.let { ai.synheart.core.sync.SyncStatus.fromJson(it) }
 
     /** Raw sync-engine status snapshot. */
     fun syncStatusSnapshot(): JSONObject? = coreRuntime?.syncStatus()
@@ -2662,20 +2693,24 @@ object Synheart {
     fun syncReadinessSnapshot(): JSONObject? = coreRuntime?.syncReadiness()
 
     /** Recover space access from a recovery key. */
-    fun syncRecoverSpace(recoveryKey: String, spaceId: String): JSONObject? =
-        coreRuntime?.syncRecoverSpace(recoveryKey, spaceId)
+    suspend fun syncRecoverSpace(recoveryKey: String, spaceId: String): JSONObject? =
+        onIo { coreRuntime?.syncRecoverSpace(recoveryKey, spaceId) }
 
     /** Leave the current space; it stays alive for the other devices. */
-    fun syncLeaveSpace(): JSONObject? = coreRuntime?.syncLeaveSpace()
+    suspend fun syncLeaveSpace(): JSONObject? = onIo { coreRuntime?.syncLeaveSpace() }
 
     /** List devices in the current space. */
-    fun syncListDevices(): JSONObject? = coreRuntime?.syncListDevices()
+    suspend fun syncListDevices(): JSONObject? = onIo { coreRuntime?.syncListDevices() }
 
     /** Revoke another device's membership. */
-    fun syncRevokeDevice(deviceId: String): JSONObject? = coreRuntime?.syncRevokeDevice(deviceId)
+    suspend fun syncRevokeDevice(deviceId: String): JSONObject? =
+        onIo { coreRuntime?.syncRevokeDevice(deviceId) }
 
     /** Delete the space for everyone. Owner only. */
-    fun syncDeleteSpace(): JSONObject? = coreRuntime?.syncDeleteSpace()
+    suspend fun syncDeleteSpace(): JSONObject? = onIo { coreRuntime?.syncDeleteSpace() }
+
+    /** Run a blocking sync call off the caller's thread: it waits on the network. */
+    private suspend fun <T> onIo(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
     /**
      * Forget local space state without touching the server. A recovery hatch:
@@ -2696,9 +2731,11 @@ object Synheart {
         val snapshot = runCatching { syncReadinessSnapshot() }.getOrNull()
         return ai.synheart.core.sync.SyncReadiness.evaluate(
             operation = operation,
-            activated = isActivated(SynheartFeature.CLOUD),
+            // SYNSYNC is the sync feature; CLOUD still counts for hosts that
+            // activated only that before SYNSYNC existed.
+            activated = isActivated(SynheartFeature.SYNSYNC) || isActivated(SynheartFeature.CLOUD),
             cloudConsentGranted = consentEffectiveStateTyped()?.cloudUpload ?: false,
-            capabilityAllowed = isCapabilityAllowed(SynheartFeature.CLOUD),
+            capabilityAllowed = isCapabilityAllowed(SynheartFeature.SYNSYNC),
             nativeSnapshot = snapshot,
         )
     }
@@ -2708,12 +2745,14 @@ object Synheart {
      * and falling back to the configured value before the runtime loads.
      */
     fun getSyncStatus(): ai.synheart.core.sync.SyncStatus {
-        val nativeEnabled = runCatching { syncStatusSnapshot() }.getOrNull()
-            ?.takeIf { it.has("enabled") }
-            ?.optBoolean("enabled")
-        return ai.synheart.core.sync.SyncStatus(
-            enabled = nativeEnabled ?: (synheartConfig?.sync?.enabled ?: false),
-        )
+        val snapshot = runCatching { syncStatusSnapshot() }.getOrNull()
+        val status = snapshot?.let { ai.synheart.core.sync.SyncStatus.fromJson(it) }
+            ?: ai.synheart.core.sync.SyncStatus(enabled = false)
+        return if (snapshot?.has("enabled") == true) {
+            status
+        } else {
+            status.copy(enabled = synheartConfig?.sync?.enabled ?: false)
+        }
     }
 
     /**

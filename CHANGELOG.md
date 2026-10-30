@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Migrating
+
+- **The sync calls that reach the server are `suspend`.** `syncNow`,
+  `syncNowRaw`, `syncCreateSpace`, `syncGeneratePairing`, `syncJoinSpace`,
+  `syncRecoverSpace`, `syncLeaveSpace`, `syncListDevices`, `syncRevokeDevice`
+  and `syncDeleteSpace` run on `Dispatchers.IO`. They blocked the calling
+  thread on network I/O, so a call from the main thread could freeze the app
+  into an ANR. Call them from a coroutine. The local calls (`syncStatus`,
+  `syncStatusSnapshot`, `checkSyncReadiness`, `syncClearLocalSpace`,
+  `setSyncEnabled`) are unchanged.
+
+### Added
+
+- `Synheart.syncPairingStatus(token)`: whether a pairing code from
+  `syncGeneratePairing()` was redeemed, as a `SyncPairingStatus` (`state`
+  `WAITING` / `JOINED` / `EXPIRED` / `UNKNOWN`, the joined device, `joinedAt`,
+  `expiresAt`). Poll it every 2–3 seconds while the code is shown and stop on
+  a terminal state or past `expiresAt`; never infer pairing from the device
+  list. An unknown token throws `SyncNativeException` (`PAIRING_INVALID`).
+- `Synheart.syncStatus()`: the runtime's local sync state as a typed
+  `SyncStatus`. `SyncStatus` gains `syncSpaceId`, `pendingCount`,
+  `lastSuccessMs`, `srkReady`, `accountOwned` and `hasActiveSpace`; a field
+  the runtime did not send is `null`, not zero. For a device count use
+  `syncListDevices()`. `getSyncStatus()` fills the same fields.
+- `SynheartFeature.SYNSYNC`, the cross-device sync feature, gated on
+  cloud-upload consent like the sibling platform SDKs. Hosts activate it with
+  `Synheart.activate(SynheartFeature.SYNSYNC)`; `CLOUD` still satisfies
+  `checkSyncReadiness` so existing hosts keep working. A `when` over
+  `SynheartFeature` needs the new case.
+
 ## [0.6.0] - 2026-10-30
 
 Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at

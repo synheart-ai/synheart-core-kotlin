@@ -533,16 +533,21 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | `uploadQueueLength` / `lastIngestSuccessAtMs` | Queue depth (diagnostic) / last success |
 | `listHsiHistory(...)` / `hsiHistoryCount()` / `clearHsiHistory()` | On-device HSI mirror |
 | `fetchCloudHsiWindows(fromMs, toMs)` | The cloud archive (>30 days, cross-device) |
-| `syncNow()` | One sync cycle → `SyncResult` |
+| `syncNow()` | One sync cycle → `SyncResult` (`suspend`) |
 | `checkSyncReadiness(op)` | Why an operation can or cannot run |
 | `syncCreateSpace()` / `syncJoinSpace(...)` / `syncGeneratePairing()` | Space bootstrap |
+| `syncPairingStatus(token)` | Whether a pairing code was redeemed → `SyncPairingStatus`; poll every 2–3 s while it is shown |
+| `syncStatus()` | Local sync state → `SyncStatus` (space, pending, last success, key ready), no network |
 | `syncListDevices()` / `syncRevokeDevice(id)` / `syncLeaveSpace()` / `syncDeleteSpace()` | Membership |
 | `syncClearLocalSpace()` | Local escape hatch — stays available after revocation |
 
 > Every `sync*` call throws `SyncNativeException` when the runtime returns a
 > failure envelope, so the reason survives instead of collapsing to a bare null.
 > Branch on `reason` (`unsupported`, `misconfigured`, `policy`, …), not just
-> `retryable`.
+> `retryable`. Calls that reach the server are `suspend` and run on
+> `Dispatchers.IO`; call them from a coroutine, never block a thread on them.
+> Activate `SynheartFeature.SYNSYNC` to sync (`CLOUD` still satisfies the
+> readiness check).
 
 ### Realtime event stream
 
@@ -767,18 +772,20 @@ Sync calls throw `SyncNativeException` when the runtime returns a failure
 envelope, so the reason survives instead of collapsing to a bare null:
 
 ```kotlin
-try {
-    Synheart.syncNow()
-} catch (e: SyncNativeException) {
-    when {
-        // No attestation material and never will be on this hardware —
-        // degrade to local-only and stop asking, including across relaunches.
-        e.isUnsupported -> disableCloudPermanently()
-        // Setup is wrong (Play Console, project number, callbacks). A human
-        // has to fix it; retrying cannot.
-        e.isMisconfigured -> reportToDeveloper(e)
-        e.retryable -> scheduleRetry(e.retryAfterMs)
-        else -> showError(e.message)
+scope.launch {
+    try {
+        Synheart.syncNow()
+    } catch (e: SyncNativeException) {
+        when {
+            // No attestation material and never will be on this hardware —
+            // degrade to local-only and stop asking, including across relaunches.
+            e.isUnsupported -> disableCloudPermanently()
+            // Setup is wrong (Play Console, project number, callbacks). A human
+            // has to fix it; retrying cannot.
+            e.isMisconfigured -> reportToDeveloper(e)
+            e.retryable -> scheduleRetry(e.retryAfterMs)
+            else -> showError(e.message)
+        }
     }
 }
 ```

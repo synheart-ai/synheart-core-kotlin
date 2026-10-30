@@ -547,6 +547,12 @@ interface CoreRuntimeNative : Library {
     /** Mint a short-lived pairing token for another device. Caller frees. */
     fun synheart_core_sync_generate_pairing(handle: Pointer?): Pointer?
 
+    /**
+     * The server's verdict on a pairing token this device minted, as the
+     * `{ok, data | error}` envelope. Caller frees.
+     */
+    fun synheart_core_sync_pairing_status(handle: Pointer?, token: String?): Pointer?
+
     /** Join an existing space with a pairing token. Caller frees. */
     fun synheart_core_sync_join_space(
         handle: Pointer?,

@@ -21,6 +21,15 @@ enum class SynheartFeature(val requiredConsent: String) {
     /** Cloud upload connector */
     CLOUD("cloudUpload"),
 
+    /**
+     * Cross-device baseline-snapshot sync: a baseline computed on one device
+     * reaches the person's other devices. Gates on `cloudUpload` consent, the
+     * same tier as [CLOUD]. Not activated from config; a host that syncs calls
+     * `Synheart.activate(SynheartFeature.SYNSYNC)`. [CLOUD] still satisfies
+     * the sync readiness check for hosts that activated only that.
+     */
+    SYNSYNC("cloudUpload"),
+
     /** Syni hooks integration */
     SYNI("syni")
 }
