@@ -63,7 +63,7 @@ most common cause of "consent is on but nothing uploads".
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.5.0'
+    implementation 'ai.synheart:synheart-core:0.6.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
 
@@ -86,7 +86,7 @@ State is computed in a native runtime loaded over JNA. It is **not** bundled in
 the published AAR:
 
 ```bash
-synheart install runtime --version 0.42.1
+synheart install runtime --version 0.45.0
 ```
 
 That writes the binaries to

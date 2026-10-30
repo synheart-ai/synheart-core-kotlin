@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
 load. Install it with `synheart install runtime --version 0.45.0`. The daily
 score inputs changed shape with ABI 4.2 and neither shape parses on the other
