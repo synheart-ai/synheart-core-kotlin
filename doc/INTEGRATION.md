@@ -370,14 +370,17 @@ from. `packageName` is what Play Integrity verifies against. Passing the
 ### 7.3 Reading a failure
 
 ```kotlin
-try {
-    Synheart.syncNow()
-} catch (e: SyncNativeException) {
-    when {
-        e.isUnsupported   -> degradeToLocalOnlyPermanently()
-        e.isMisconfigured -> reportToDeveloper(e)
-        e.retryable       -> scheduleRetry(e.retryAfterMs)
-        else              -> showError(e.message)
+// Sync calls that reach the server suspend and run on Dispatchers.IO.
+scope.launch {
+    try {
+        Synheart.syncNow()
+    } catch (e: SyncNativeException) {
+        when {
+            e.isUnsupported   -> degradeToLocalOnlyPermanently()
+            e.isMisconfigured -> reportToDeveloper(e)
+            e.retryable       -> scheduleRetry(e.retryAfterMs)
+            else              -> showError(e.message)
+        }
     }
 }
 ```

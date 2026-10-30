@@ -1263,6 +1263,18 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         syncEnvelope(readAndFreeString(lib.synheart_core_sync_generate_pairing(requireHandle())))
     }
 
+    /**
+     * The server's verdict on a pairing token this device minted with
+     * [syncGeneratePairing]: `{status, sync_space_id, joined_device,
+     * joined_at, expires_at}`. Network call. Null when the runtime predates it.
+     *
+     * @throws SyncNativeException when the runtime reports a failure envelope
+     *   (an unknown token is `PAIRING_INVALID`).
+     */
+    fun syncPairingStatus(token: String): JSONObject? = soft("sync_pairing_status", null) {
+        syncEnvelope(readAndFreeString(lib.synheart_core_sync_pairing_status(requireHandle(), token)))
+    }
+
     /** Join an existing space with a pairing token. */
     fun syncJoinSpace(pairingToken: String, deviceName: String? = null): JSONObject? =
         soft("sync_join_space", null) {
