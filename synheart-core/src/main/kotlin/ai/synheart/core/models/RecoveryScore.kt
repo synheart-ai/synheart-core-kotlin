@@ -119,7 +119,7 @@ data class OvernightPhysiology(
 }
 
 /**
- * Stage-3 personal baselines pulled from the longitudinal SRM. Pass
+ * Stage-3 personal baselines, from `Synheart.dailyBaselineRefs`. Pass
  * `null` (on `RecoveryScoreInput.baselines`) if the user doesn't have
  * stable references yet — the engine will dispatch to Stage 1 or 2.
  */
@@ -129,11 +129,32 @@ data class BaselineRefs(
     val restingHrBpm: Double,
     val rhrConfidence: Double,
 ) {
+    /**
+     * Maturity of the overnight HR/HRV baselines, `0..1`: the lower of the two
+     * confidences. Readiness reads it as its `baselineMaturity`.
+     */
+    val maturity: Double
+        get() {
+            val m = minOf(hrvConfidence, rhrConfidence)
+            return if (m.isFinite()) m.coerceIn(0.0, 1.0) else 0.0
+        }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("hrv_rmssd_ms", hrvRmssdMs)
         put("hrv_confidence", hrvConfidence)
         put("resting_hr_bpm", restingHrBpm)
         put("rhr_confidence", rhrConfidence)
+    }
+
+    companion object {
+        /** Null unless [json] carries all four fields as numbers. */
+        fun fromJson(json: JSONObject): BaselineRefs? {
+            val hrv = optDouble(json, "hrv_rmssd_ms") ?: return null
+            val hrvConf = optDouble(json, "hrv_confidence") ?: return null
+            val rhr = optDouble(json, "resting_hr_bpm") ?: return null
+            val rhrConf = optDouble(json, "rhr_confidence") ?: return null
+            return BaselineRefs(hrv, hrvConf, rhr, rhrConf)
+        }
     }
 }
 

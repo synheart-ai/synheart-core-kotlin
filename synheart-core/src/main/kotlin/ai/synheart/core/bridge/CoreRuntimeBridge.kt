@@ -666,6 +666,8 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
             "srmRefreshWearableReference" to hasSymbol("synheart_core_srm_refresh_wearable_reference"),
             "srmSetDayType" to hasSymbol("synheart_core_srm_set_day_type"),
             "exportBaselineSnapshot" to hasSymbol("synheart_core_export_baseline_snapshot"),
+            "dailyBaselineRefsJson" to hasSymbol("synheart_core_daily_baseline_refs_json"),
+            "dailySleepBaselinesJson" to hasSymbol("synheart_core_daily_sleep_baselines_json"),
             "exportSessionState" to hasSymbol("synheart_core_export_session_state"),
             "loadSessionState" to hasSymbol("synheart_core_load_session_state"),
             "configId" to hasSymbol("synheart_core_config_id"),
@@ -1448,6 +1450,23 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         val rc = lib.synheart_core_baseline_begin_rest_block(requireHandle(), tsMs)
         ok(rc)
         rc
+    }
+
+    /**
+     * The Recovery Score's `baselines` object as JSON, or null until overnight
+     * RMSSD and resting HR both have a reference, or when the runtime predates
+     * C ABI 4.2. Read it after [srmRefreshWearableReference].
+     */
+    fun dailyBaselineRefsJson(): String? = soft("daily_baseline_refs_json", null) {
+        readAndFreeString(lib.synheart_core_daily_baseline_refs_json(requireHandle()))
+    }
+
+    /**
+     * The Sleep Score's `baselines` object as JSON, or null without a pipeline
+     * or before C ABI 4.2. Read it after [srmRefreshWearableReference].
+     */
+    fun dailySleepBaselinesJson(): String? = soft("daily_sleep_baselines_json", null) {
+        readAndFreeString(lib.synheart_core_daily_sleep_baselines_json(requireHandle()))
     }
 
     /** What the personal baselines know, as JSON. Device-only. */

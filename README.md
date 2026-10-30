@@ -490,8 +490,9 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 |--------|-------------|
 | `computeSleepScore(input)` / `attachSleepScore(result)` | Batch sleep scorer |
 | `computeRecoveryScore(input)` / `attachRecoveryScoreToday(score)` | Daily recovery |
-| `computeReadinessScore(input)` | Recovery + load + fatigue + history |
+| `computeReadinessScore(input)` | Recovery + Sleep + overnight HR/HRV against the baselines |
 | `wearableReference()` | What "normal" currently means for this user |
+| `dailyBaselineRefs()` / `dailySleepBaselines()` | The daily scores' personal baselines (runtime 0.45+), read after `srmRefreshWearableReference()` |
 | `baselineSnapshots` | Typed per-kind snapshot facade (`BaselineSnapshots`) |
 | `exportBaselineSnapshot()` / `loadBaselineSnapshot(b64)` | The personal baselines as one opaque snapshot, for a host that persists outside the runtime's data directory |
 | `attachStrainScore()` / `attachClosedDayStrain()` | Strain for today (before local midnight) / for the day the engine closed last |
@@ -508,6 +509,13 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
   `srmPushWearableDaily(provider, metric, date, value)`, using a `DailyMetric`
   name (the unit is in the name) and the local date the person woke on. Call
   `srmRefreshWearableReference()` once after a batch.
+- **The daily scores read the baselines from the runtime** (0.45+). After the
+  refresh, pass `dailySleepBaselines()` and the night's sleep midpoint on the
+  Sleep input, `dailyBaselineRefs()` on the Recovery input, and its
+  `maturity` as the Readiness input's `baselineMaturity`. Push one overnight
+  heart-rate figure as both `cardiac.overnight_hr_bpm` and
+  `cardiac.resting_hr_bpm` unless the source has its own resting HR, and push
+  `sleep.midpoint_h` only for a night with a start and end time.
 - **The engine closes days itself.** There is no `rollDay`. Attach Strain
   before local midnight with `attachStrainScore()`, or after it with
   `attachClosedDayStrain()`.
@@ -573,7 +581,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
-| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.42.1) and `MINIMUM` (0.42.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
+| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.45.0) and `MINIMUM` (0.45.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
 | `runtimeError` | Why the runtime is unavailable (not installed, wrong architecture, failed to load), or null; its `installCommand` is the fix |
 | `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
@@ -956,7 +964,7 @@ The SDK loads a native runtime (`libsynheart_core_runtime.so`) over JNA. It is
 provision it with the CLI:
 
 ```bash
-synheart install runtime --version 0.42.1
+synheart install runtime --version 0.45.0
 ```
 
 That writes the binaries to `<your-app-module>/synheart/vendor/runtime/android/jniLibs/<abi>/`.

@@ -2493,6 +2493,28 @@ object Synheart {
     fun baselineRequirementsJson(nowMs: Long = System.currentTimeMillis()): String? =
         coreRuntime?.baselineRequirementsJson(nowMs)
 
+    /**
+     * The Recovery Score's personal baselines: overnight RMSSD and resting HR
+     * with the runtime's confidence in each. Read it after
+     * [srmRefreshWearableReference]. Null until both have a reference; pass
+     * null on [RecoveryScoreInput.baselines] then. Its [BaselineRefs.maturity]
+     * is the Readiness input's `baselineMaturity`.
+     */
+    fun dailyBaselineRefs(): BaselineRefs? =
+        coreRuntime?.dailyBaselineRefsJson()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { BaselineRefs.fromJson(JSONObject(it)) }.getOrNull() }
+
+    /**
+     * The Sleep Score's personal baselines (midpoint, overnight HR, deep and
+     * REM minutes). Read it after [srmRefreshWearableReference] and pass it on
+     * [SleepScoreInput.baselines]; without it the score stays in cold start.
+     */
+    fun dailySleepBaselines(): SleepBaselines? =
+        coreRuntime?.dailySleepBaselinesJson()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { SleepBaselines.fromJson(JSONObject(it)) }.getOrNull() }
+
     /** What the personal baselines know, as JSON. Device-only. */
     fun baselineProfileJson(): String? = coreRuntime?.baselineProfileJson()
 

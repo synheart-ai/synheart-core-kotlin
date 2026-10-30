@@ -19,9 +19,9 @@
 // Core stays Health-Connect-agnostic. All Health Connect SDK calls,
 // permission gating, and availability checks live in wear. Core only
 // knows: "given these typed daily summaries, push them into the runtime's
-// personal baselines as five daily metrics: sleep.duration_s,
+// personal baselines as six daily metrics: sleep.duration_s,
 // sleep.deep_min, sleep.rem_min, cardiac.overnight_rmssd_ms,
-// cardiac.resting_hr_bpm."
+// cardiac.overnight_hr_bpm, cardiac.resting_hr_bpm."
 //
 // Android retention is per-record-type and outside our control. As of
 // 2026: heart rate ~30 days, sleep sessions 1–2 years, steps/activity
@@ -134,22 +134,22 @@ class HealthConnectRuntimeSink(
         for (day in days) {
             var dayDidPush = false
             // `day` is the local wake date the reader bucketed the night
-            // under, which is the date the runtime files it against.
-            fun push(metric: String, value: Double): Boolean {
+            // under, which is the date the runtime files it against. Counts
+            // only what the runtime accepted: a refused value (no running
+            // session, out of bounds) is not ingested.
+            fun push(metric: String, value: Double) {
                 val rc = pushDaily(PROVIDER, metric, day, value, true)
                 if (rc != 0) {
                     SynheartLogger.log("[HealthConnectRuntimeSink] $metric on $day not stored (rc=$rc)")
-                    return false
+                    return
                 }
                 dimensionsPushed++
-                return true
+                dayDidPush = true
             }
 
             sleep[day]?.let { night ->
                 if (night.totalAsleepMinutes > 0) {
-                    if (push(DailyMetric.SLEEP_DURATION_S, night.totalAsleepMinutes * 60.0)) {
-                        dayDidPush = true
-                    }
+                    push(DailyMetric.SLEEP_DURATION_S, night.totalAsleepMinutes * 60.0)
 
                     // Stage pushes are nested under the totalAsleep > 0 gate
                     // (as the sibling SDKs do). A night with stages but zero asleep
@@ -160,11 +160,15 @@ class HealthConnectRuntimeSink(
             }
 
             overnight[day]?.let { o ->
-                o.hrvRmssdMs?.takeIf { it > 0 }?.let {
-                    if (push(DailyMetric.OVERNIGHT_RMSSD_MS, it)) dayDidPush = true
-                }
+                o.hrvRmssdMs?.takeIf { it > 0 }?.let { push(DailyMetric.OVERNIGHT_RMSSD_MS, it) }
+                // The reader's figure is the mean HR inside the night's sleep
+                // sessions, the night's only heart rate. It feeds both
+                // baselines: the Sleep Score's overnight HR, and the resting HR
+                // Recovery and Readiness read (the runtime's rule for a source
+                // with one overnight figure).
                 o.restingHrBpm?.takeIf { it > 0 }?.let {
-                    if (push(DailyMetric.RESTING_HR_BPM, it)) dayDidPush = true
+                    push(DailyMetric.OVERNIGHT_HR_BPM, it)
+                    push(DailyMetric.RESTING_HR_BPM, it)
                 }
             }
 

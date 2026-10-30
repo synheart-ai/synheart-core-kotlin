@@ -158,15 +158,89 @@ data class NightRaw(
     }
 }
 
+/**
+ * One of the personal baselines' daily references: its value and the
+ * runtime's confidence in it, `0..1`.
+ */
+data class DailyRef(
+    val value: Double,
+    val confidence: Double,
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("value", value)
+        put("confidence", confidence)
+    }
+
+    companion object {
+        /** Null unless [json] is an object with numeric `value` and `confidence`. */
+        fun fromJson(json: Any?): DailyRef? {
+            if (json !is JSONObject) return null
+            val v = optDouble(json, "value") ?: return null
+            val c = optDouble(json, "confidence") ?: return null
+            return DailyRef(v, c)
+        }
+    }
+}
+
+/**
+ * The personal baselines the Sleep Score reads, from
+ * `Synheart.dailySleepBaselines`. A reference is null until the baselines
+ * hold enough nights for it; which ones exist sets the score's mode.
+ */
+data class SleepBaselines(
+    /** Typical sleep midpoint, local hour of day `0..24` (`sleep.midpoint_h`). */
+    val midpointH: DailyRef? = null,
+    /** Typical whole-night mean heart rate, bpm (`cardiac.overnight_hr_bpm`). */
+    val overnightHrBpm: DailyRef? = null,
+    /** Typical nightly deep-sleep minutes (`sleep.deep_min`). */
+    val deepMin: DailyRef? = null,
+    /** Typical nightly REM minutes (`sleep.rem_min`). */
+    val remMin: DailyRef? = null,
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("midpoint_h", midpointH?.toJson() ?: JSONObject.NULL)
+        put("overnight_hr_bpm", overnightHrBpm?.toJson() ?: JSONObject.NULL)
+        put("deep_min", deepMin?.toJson() ?: JSONObject.NULL)
+        put("rem_min", remMin?.toJson() ?: JSONObject.NULL)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): SleepBaselines = SleepBaselines(
+            midpointH = DailyRef.fromJson(json.opt("midpoint_h")),
+            overnightHrBpm = DailyRef.fromJson(json.opt("overnight_hr_bpm")),
+            deepMin = DailyRef.fromJson(json.opt("deep_min")),
+            remMin = DailyRef.fromJson(json.opt("rem_min")),
+        )
+    }
+}
+
 /** Full input to the scorer. */
 data class SleepScoreInput(
     val tonight: NightRaw,
+    /**
+     * Prior nights, newest first. Only the two newest are read, for the
+     * sleep-debt chain; the personal baselines come from [baselines].
+     */
     val priorsNewestFirst: List<NightRaw> = emptyList(),
+    /**
+     * Tonight's sleep midpoint, local hour of day `0..24`: the value pushed as
+     * `sleep.midpoint_h`. Null when the night has no start and end time, which
+     * leaves consistency out of the score; never derive it from totals.
+     */
+    val tonightMidpointH: Double? = null,
+    /**
+     * The personal baselines as of tonight, from
+     * `Synheart.dailySleepBaselines`. Without them the score stays in its
+     * cold-start mode.
+     */
+    val baselines: SleepBaselines? = null,
     val pipelineVersion: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("tonight", tonight.toJson())
         put("priors_newest_first", JSONArray(priorsNewestFirst.map { it.toJson() }))
+        put("tonight_midpoint_h", tonightMidpointH ?: JSONObject.NULL)
+        if (baselines != null) put("baselines", baselines.toJson())
         put("pipeline_version", pipelineVersion)
     }
 
