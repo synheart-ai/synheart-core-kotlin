@@ -417,9 +417,10 @@ class SynheartController : ViewModel() {
         deviceId = deviceId.orEmpty(),
         mode = SynheartMode.PERSONAL,
 
-        // Development only. In production the capability lattice is driven by a
-        // verified consent token; running unsigned means "allow everything".
-        allowUnsignedCapabilities = true,
+        // Development only, and only when local-only. With device auth the SDK
+        // loads the defaults itself until the runtime's verified consent token
+        // takes over; running unsigned means "allow everything".
+        allowUnsignedCapabilities = !attestationConfigured,
 
         // Declaring a module config both activates the feature and tells the SDK
         // which collectors to wire. Omit one and that module never starts.

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Synheart.initialize()` no longer throws when `deviceAuthConfig` is set
+  without a capability token. It loads the default capabilities, as it does
+  on the other platforms, until the runtime's consent token takes over;
+  `allowUnsignedCapabilities` is no longer needed alongside device auth.
 - `SynheartAuth.shared` is initialised with the app context before it is
   configured, so it uses Keystore keys and on-disk registration state instead
   of in-memory defaults, and no longer logs the insecure-defaults warning on

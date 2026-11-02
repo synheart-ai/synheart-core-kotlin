@@ -32,8 +32,9 @@ SynheartConfig(
   deviceId = <persisted>,
   mode = SynheartMode.PERSONAL,
 
-  // Development only. Production gates capabilities on a verified consent token.
-  allowUnsignedCapabilities = true,
+  // Development only, and only when local-only: with deviceAuthConfig the SDK
+  // loads the default capabilities itself until the verified consent token.
+  allowUnsignedCapabilities = !attestationConfigured,
 
   // Declaring a module config activates that feature; omitting one leaves that
   // module inert. Read back what ended up active with Synheart.isActivated(...).
@@ -332,8 +333,9 @@ session.
 - Never commit credentials. Put them in `env/synheart.credentials.json`, which
   is gitignored. Only `env/synheart.credentials.example.json` — placeholders —
   is checked in.
-- `allowUnsignedCapabilities = true` is development-only. It disables the
-  capability lattice; production drives it from a verified consent token.
+- `allowUnsignedCapabilities = true` is development-only, and the example sets
+  it only when attestation is off. It disables the capability lattice;
+  production drives it from a verified consent token.
 - The Runtime tab's **Wipe local data** clears the runtime SQLite store, the SRM
   snapshot, and cached consent records for the current subject.
 
