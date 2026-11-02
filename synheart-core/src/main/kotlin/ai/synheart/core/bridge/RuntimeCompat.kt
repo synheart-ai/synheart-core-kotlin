@@ -22,7 +22,7 @@ object RuntimeCompat {
      * new symbol or a moved shape, or once they are verified on a newer
      * release.
      */
-    const val WRITTEN_AGAINST: String = "0.45.0"
+    const val WRITTEN_AGAINST: String = "0.46.0"
 
     /**
      * Oldest runtime the bindings are known to load and behave on. Below this
