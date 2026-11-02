@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `SynheartAuth.shared` is initialised with the app context before it is
+  configured, so it uses Keystore keys and on-disk registration state instead
+  of in-memory defaults, and no longer logs the insecure-defaults warning on
+  every launch.
+
 ## [0.7.0] - 2026-10-30
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.6.0 does.

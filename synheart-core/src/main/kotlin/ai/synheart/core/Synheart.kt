@@ -628,6 +628,11 @@ object Synheart {
             if (resolvedConfig.appId.isNotEmpty() && this.context != null &&
                 authBaseUrl.isNotEmpty()
             ) {
+                // Keystore keys and on-disk registration state first: without
+                // it the shared instance falls back to in-memory defaults and a
+                // host signing through it loses its identity on every restart.
+                // The runtime's own device key is separate (DeviceAuthCrypto).
+                ai.synheart.auth.SynheartAuth.initialize(this.context!!)
                 ai.synheart.auth.SynheartAuth.shared.configure(authBaseUrl)
             }
 
