@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-02
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.0 does.
+
 ### Fixed
 
 - `Synheart.initialize()` no longer throws when `deviceAuthConfig` is set
