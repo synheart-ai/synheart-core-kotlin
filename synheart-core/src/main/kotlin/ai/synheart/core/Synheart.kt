@@ -496,13 +496,22 @@ object Synheart {
             SynheartLogger.log("[Synheart] Initializing capability module...")
             capabilityModule = CapabilityModule()
             val resolvedConfig = config ?: SynheartConfig()
-            if (resolvedConfig.capabilityToken != null && resolvedConfig.capabilitySecret != null) {
+            if (resolvedConfig.deviceAuthConfig != null) {
+                // Registration and the verified consent token belong to the
+                // runtime and wait for cloudUpload consent. Defaults are the
+                // provisional SDK-side gates until then.
+                SynheartLogger.log("[Synheart] Device auth configured; it activates when cloudUpload consent is granted.")
+                capabilityModule!!.loadDefaults()
+            } else if (resolvedConfig.capabilityToken != null && resolvedConfig.capabilitySecret != null) {
                 capabilityModule!!.loadFromToken(resolvedConfig.capabilityToken, resolvedConfig.capabilitySecret)
             } else if (resolvedConfig.allowUnsignedCapabilities) {
                 SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
                 capabilityModule!!.loadDefaults()
             } else {
-                throw IllegalStateException("Capability token and secret are required. Set allowUnsignedCapabilities=true for debug/testing.")
+                throw IllegalStateException(
+                    "Capability token and secret are required. Provide deviceAuthConfig, " +
+                        "capabilityToken + capabilitySecret, or set allowUnsignedCapabilities=true for debug/testing.",
+                )
             }
 
             // 2. Initialize consent module

@@ -238,7 +238,11 @@ data class SynheartConfig(
     val capabilityToken: ai.synheart.core.modules.capabilities.CapabilityToken? = null,
     /** HMAC secret for verifying the capability token signature */
     val capabilitySecret: String? = null,
-    /** When true, allows SDK to run with default capabilities and no signed token (debug only) */
+    /**
+     * When true, allows SDK to run with default capabilities and no signed token
+     * (debug only). Not needed with [deviceAuthConfig], which loads the defaults
+     * itself until the runtime's consent token takes over.
+     */
     val allowUnsignedCapabilities: Boolean = false,
     /**
      * **Development only.** Attach a synthetic biosignal generator when no real

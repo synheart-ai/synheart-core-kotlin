@@ -455,9 +455,11 @@ private fun ConfigListing(c: SynheartController) {
         add("  deviceId = \"$device\",")
         add("  mode = SynheartMode.PERSONAL,")
         add("")
-        add("  // Development only — production gates on a verified consent token.")
-        add("  allowUnsignedCapabilities = true,")
-        add("")
+        if (!SynheartController.attestationConfigured) {
+            add("  // Development only, local-only. With deviceAuthConfig it is not needed.")
+            add("  allowUnsignedCapabilities = true,")
+            add("")
+        }
         add("  // Declaring a module config activates that feature.")
         add("  wearConfig = WearConfig(),")
         add("  // no phoneConfig — its collectors emit Random() values")

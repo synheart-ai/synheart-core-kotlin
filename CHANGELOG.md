@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Synheart.initialize()` no longer throws when `deviceAuthConfig` is set
+  without a capability token. It loads the default capabilities, as it does
+  on the other platforms, until the runtime's consent token takes over;
+  `allowUnsignedCapabilities` is no longer needed alongside device auth.
+
 ## [0.7.0] - 2026-10-30
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.6.0 does.
