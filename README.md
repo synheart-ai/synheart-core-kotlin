@@ -328,7 +328,7 @@ class MainActivity : AppCompatActivity() {
                 config = SynheartConfig(
                     appId = "com.example.app",
                     subjectId = "anon_user_123",
-                    allowUnsignedCapabilities = true  // Use capabilityToken + capabilitySecret in production
+                    allowUnsignedCapabilities = true  // Local-only development; use deviceAuthConfig in production
                 )
             )
 
@@ -378,7 +378,7 @@ operational = activated && consented && capability-allowed && session-running
 |---|---|---|
 | Activated | `Synheart.activate(feature)` | `isActivated(feature)` |
 | Consented | `grantConsent(type)` | `hasConsent(type)` |
-| Capability allowed | the capability token (or `allowUnsignedCapabilities`) | — |
+| Capability allowed | `deviceAuthConfig`, a capability token, or `allowUnsignedCapabilities` | — |
 | Session running | `Synheart.startSession()` | `isSessionRunning` |
 
 Miss any one and the feature stays silent — there is no error, because none of
@@ -726,7 +726,7 @@ try {
     // The vendored runtime's ABI or version does not fit this SDK.
     println("${e.message}\nFix: ${e.installCommand}")
 } catch (e: IllegalStateException) {
-    // e.g. no capability token and allowUnsignedCapabilities = false
+    // e.g. no deviceAuthConfig, no capability token and allowUnsignedCapabilities = false
     println("Not startable: ${e.message}")
 }
 ```
