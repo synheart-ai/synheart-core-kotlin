@@ -577,7 +577,8 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 |--------|-------------|
 | `subjectId` | The canonical subject, preferring the runtime's own resolution |
 | `rebindSubjectId(id)` | Re-point consent + cloud without a full reinit |
-| `ensureDeviceAuthRegistered()` / `reregisterDeviceAuth()` | Hardware-backed registration |
+| `ensureDeviceAuthRegistered()` / `ensureDeviceAuthRegisteredOrThrow()` | Hardware-backed registration (first run only) |
+| `reattestDeviceAuth()` | Refresh the attestation, keeping the same device id |
 | `coreDeviceAuthStatus()` / `coreSdkDeviceAuthAvailable` | Registration state |
 | `buildProofHeader(method, url)` | Sign a request the host makes itself |
 

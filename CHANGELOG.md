@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Synheart.reattestDeviceAuth()` refreshes the server attestation and keeps
+  the same device id, key and sync membership. A refusal throws
+  `SynheartNativeException`.
+- `Synheart.ensureDeviceAuthRegisteredOrThrow()`: a refusal throws
+  `SynheartNativeException` with the server's code instead of returning false.
+
 ### Changed
 
 - **Install hints now recommend runtime 0.46.0.** It reports each output no
@@ -17,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and history only as long as the schema's `retention` allows. No binding
   changes; runtimes from 0.45.0 up still initialise.
 
+### Deprecated
+
+- `reregisterDeviceAuth()` now calls `reattestDeviceAuth()`. The runtime
+  refuses to register a device that already has an identity.
+
 ### Fixed
 
 - **HSI reaches apps without biosignals consent.** Every completed window was
@@ -26,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collection category (biosignals, behavior, phone context) or research is
   granted, in the runtime's effective state or the SDK's snapshot. With
   nothing granted, windows are still dropped.
+- A successful registration is no longer reported as a failure: the runtime's
+  `{ok, data}` response is now unwrapped.
+- `ensureDeviceAuthRegistered()` recognises an already registered device
+  (`status: "registered"`) instead of registering it again, which the runtime
+  refuses.
+- Registration runs off the calling thread.
 
 ## [0.7.1] - 2026-11-02
 

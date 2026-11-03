@@ -825,6 +825,13 @@ interface CoreRuntimeNative : Library {
     /** Register this device under `client_id` (the subject id). Caller frees. */
     fun synheart_core_sdk_register_device(handle: Pointer?, client_id: String?): Pointer?
 
+    /**
+     * Refresh this device's server attestation, keeping its `device_id` and
+     * key (runtime 0.24+). Returns the `{ok, data|error}` envelope. Caller
+     * frees. Blocks on the attestation callback.
+     */
+    fun synheart_core_sdk_reattest_device(handle: Pointer?): Pointer?
+
     /** Device-auth status JSON. Caller frees. */
     fun synheart_core_sdk_device_auth_status(handle: Pointer?): Pointer?
 
