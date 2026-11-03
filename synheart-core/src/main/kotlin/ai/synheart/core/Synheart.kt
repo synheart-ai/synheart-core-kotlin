@@ -1859,7 +1859,12 @@ object Synheart {
      * own loop drained.
      */
     private fun deliverHsiWindow(hsiJson: String) {
-        if (consentModule?.current()?.biosignals != true) return
+        // Any collection consent, not biosignals alone: see [HsiConsentGate].
+        val allowed = ai.synheart.core.core.HsiConsentGate.allows(
+            consentEffectiveStateTyped(),
+            consentModule?.current(),
+        )
+        if (!allowed) return
         // A window completed by a per-event push arrives twice — once via the
         // native callback and once as an ingest/tick return value. Drop the
         // repeat so subscribers and the session buffer see it once.

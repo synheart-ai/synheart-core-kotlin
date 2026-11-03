@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and history only as long as the schema's `retention` allows. No binding
   changes; runtimes from 0.45.0 up still initialise.
 
+### Fixed
+
+- **HSI reaches apps without biosignals consent.** Every completed window was
+  dropped before `onHSIUpdate`, `onStateUpdate` and the session buffer unless
+  biosignals consent was granted, so an app collecting only behavior or phone
+  context never saw its digital axes. A window is now delivered when any
+  collection category (biosignals, behavior, phone context) or research is
+  granted, in the runtime's effective state or the SDK's snapshot. With
+  nothing granted, windows are still dropped.
+
 ## [0.7.1] - 2026-11-02
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.0 does.
