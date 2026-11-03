@@ -240,7 +240,8 @@ whichever of these happens first:
 | `consentSubmitFormTyped(form.copy(allowCloud = true))` | same, via the runtime consent form |
 | `startSession()` | preflight; skipped entirely when cloud consent is off |
 | `ensureDeviceAuthRegistered()` | explicit and idempotent |
-| `reregisterDeviceAuth()` | forced re-attestation |
+| `ensureDeviceAuthRegisteredOrThrow()` | same, but a refusal throws `SynheartNativeException` |
+| `reattestDeviceAuth()` | refreshes the attestation; never registers or changes the device id |
 
 The two consent paths deliberately **do not await** registration. The flow binds
 Play Integrity, mints a key, and performs an HTTPS round-trip; awaiting it on a

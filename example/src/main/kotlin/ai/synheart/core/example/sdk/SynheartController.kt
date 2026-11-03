@@ -12,6 +12,7 @@ import ai.synheart.core.config.DeviceAuthConfig
 import ai.synheart.core.config.SynheartConfig
 import ai.synheart.core.config.SynheartFeature
 import ai.synheart.core.config.SynheartMode
+import ai.synheart.core.config.SynheartNativeException
 import ai.synheart.core.config.WearConfig
 import ai.synheart.core.example.BuildConfig
 import ai.synheart.core.models.AggregatedTotals
@@ -1431,29 +1432,67 @@ class SynheartController : ViewModel() {
     /** The runtime's attestation status word, or null before the runtime loads. */
     val attestationStatusWord: String? get() = attestationStatus.field("status")
 
+    /** Outcome of the last Register now tap, shown under the button. */
+    var registerResult: String? by mutableStateOf(null)
+        private set
+
+    /** Outcome of the last Re-attest tap, shown under the button. */
+    var reattestResult: String? by mutableStateOf(null)
+        private set
+
     /**
      * Force a registration attempt without waiting for a consent change.
      * Idempotent — no-ops when already registered.
+     *
+     * Uses the throwing variant: `ensureDeviceAuthRegistered` returns false on
+     * a refusal, which hides why (attestation not admitted, account mismatch,
+     * dev mode off).
      */
     fun registerDevice() {
         viewModelScope.launch {
-            runCatching { Synheart.ensureDeviceAuthRegistered() }
+            registerResult = try {
+                if (Synheart.ensureDeviceAuthRegisteredOrThrow()) {
+                    "ok: registered"
+                } else {
+                    "not registered: device auth not configured, or the device " +
+                        "could not attest (see log)"
+                }
+            } catch (e: SynheartNativeException) {
+                describeRefusal(e)
+            } catch (e: Exception) {
+                "failed: $e"
+            }
+            SynheartLogger.log("[example] Register $registerResult")
             refreshAttestation()
             pollAttestation()
         }
     }
 
     /**
-     * Re-attest from scratch, bypassing a locally restored `registered` state.
-     * Use when the server has lost or revoked the device record.
+     * Refresh the server attestation without rotating the identity: same
+     * device id, key and sync membership.
      */
-    fun reregisterDevice() {
+    fun reattestDevice() {
         viewModelScope.launch {
-            runCatching { Synheart.reregisterDeviceAuth() }
+            reattestResult = try {
+                if (Synheart.reattestDeviceAuth()) {
+                    "ok: attestation refreshed, same device id"
+                } else {
+                    "not run: no runtime, or the runtime has no re-attest call"
+                }
+            } catch (e: SynheartNativeException) {
+                describeRefusal(e)
+            } catch (e: Exception) {
+                "failed: $e"
+            }
+            SynheartLogger.log("[example] Re-attest $reattestResult")
             refreshAttestation()
             pollAttestation()
         }
     }
+
+    private fun describeRefusal(e: SynheartNativeException): String =
+        "failed: ${e.code} — ${e.message}${if (e.retryable) " (retryable)" else ""}"
 
     // ── Cloud ingest ───────────────────────────────────────────────────────
     //
