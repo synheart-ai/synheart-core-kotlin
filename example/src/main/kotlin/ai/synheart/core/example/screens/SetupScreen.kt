@@ -272,15 +272,18 @@ fun SetupScreen(c: SynheartController, padding: PaddingValues) {
                                     enabled = c.isInitialized,
                                 ) { Text("Register now") }
                                 OutlinedButton(
-                                    onClick = { c.reregisterDevice() },
+                                    onClick = { c.reattestDevice() },
                                     enabled = c.isInitialized,
                                 ) { Text("Re-attest") }
                             }
+                            c.registerResult?.let { KeyValueRow("last register", it) }
+                            c.reattestResult?.let { KeyValueRow("last re-attest", it) }
                             Spacer(Modifier.height(6.dp))
                             Text(
                                 "Register now is idempotent — it no-ops when already " +
-                                    "registered. Re-attest forces a fresh registration, for " +
-                                    "when the server has lost or revoked the device record.",
+                                    "registered. Re-attest refreshes the server attestation " +
+                                    "and keeps the same device id, key and sync membership. " +
+                                    "A refusal (expired, revoked, account mismatch) is shown above.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

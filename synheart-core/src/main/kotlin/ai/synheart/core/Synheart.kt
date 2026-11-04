@@ -26,6 +26,7 @@ import ai.synheart.core.bridge.RuntimeCompat
 import ai.synheart.core.bridge.RuntimeCompatResult
 import ai.synheart.core.bridge.SynheartRuntimeException
 import ai.synheart.core.config.SynheartNativeError
+import ai.synheart.core.config.SynheartNativeException
 import ai.synheart.core.config.SynheartMode
 import ai.synheart.core.storage.SessionRecord
 import ai.synheart.core.modules.interfaces.WindowType
@@ -3170,20 +3171,68 @@ object Synheart {
      *
      * Safe to call repeatedly — an already-registered device short-circuits.
      */
-    suspend fun ensureDeviceAuthRegistered(): Boolean {
+    suspend fun ensureDeviceAuthRegistered(): Boolean = try {
+        ensureDeviceAuthRegisteredOrThrow()
+    } catch (e: SynheartNativeException) {
+        SynheartLogger.log("[Synheart] ensureDeviceAuthRegistered failed: $e")
+        false
+    }
+
+    /**
+     * [ensureDeviceAuthRegistered], but a refusal throws
+     * [SynheartNativeException] instead of returning false, so a host can tell
+     * "not configured" (false) from "the server said no" (the exception's
+     * `code`, e.g. `REGISTRATION_REJECTED` or `DEVICE_ACCOUNT_MISMATCH`).
+     */
+    suspend fun ensureDeviceAuthRegisteredOrThrow(): Boolean {
         val cr = coreRuntime ?: return false
         val status = runCatching { coreDeviceAuthStatus() }.getOrNull()
-        if (status?.optBoolean("registered", false) == true) {
+        if (isRegisteredStatus(status)) {
             deviceAuthUsedCoreRuntime = true
             return true
         }
         val clientId = subjectId ?: return false
-        val ok = registerDevice(cr, clientId).ok
-        if (ok) deviceAuthUsedCoreRuntime = true
-        return ok
+        val outcome = registerDevice(cr, clientId)
+        if (outcome.ok) {
+            deviceAuthUsedCoreRuntime = true
+            return true
+        }
+        outcome.nativeError?.let { throw SynheartNativeException(it) }
+        return false
     }
 
-    private data class RegisterOutcome(val ok: Boolean, val error: String? = null)
+    /**
+     * Refresh this device's server attestation without changing its identity:
+     * same `device_id`, hardware key and sync membership.
+     *
+     * The verb for a stale attestation. Registration is first-run only — the
+     * runtime refuses it while a usable identity exists.
+     *
+     * Returns false when there is no runtime or it predates the call. Throws
+     * [SynheartNativeException] when the server refuses; the device then keeps
+     * the verdict it had, so a failure is safe to retry later. The code
+     * `DEVICE_REGISTRATION_REQUIRED` means the server has no record of this
+     * device at all.
+     */
+    suspend fun reattestDeviceAuth(): Boolean {
+        val cr = coreRuntime ?: return false
+        if (!cr.reattestDeviceAvailable) return false
+        val data = onIo { cr.reattestDevice() } ?: return false
+        if (data.optString("device_id").isEmpty()) return false
+        deviceAuthUsedCoreRuntime = true
+        return true
+    }
+
+    /** A device-auth status reports a usable registration. */
+    private fun isRegisteredStatus(status: JSONObject?): Boolean =
+        status != null &&
+            (status.optString("status") == "registered" || status.optBoolean("registered", false))
+
+    private data class RegisterOutcome(
+        val ok: Boolean,
+        val error: String? = null,
+        val nativeError: SynheartNativeError? = null,
+    )
 
     /**
      * Set when registration last failed with `STORAGE_UNAVAILABLE`, so the
@@ -3211,18 +3260,28 @@ object Synheart {
         val waitsMs = longArrayOf(1_000, 3_000)
         var attempt = 0
         while (true) {
-            val raw = runCatching { cr.registerDevice(clientId) }.getOrNull()
+            // Blocks on the attestation callback (up to ~30 s on a cold Play
+            // Integrity bind), so never on the caller's thread.
+            val raw = onIo { runCatching { cr.registerDevice(clientId) }.getOrNull() }
             val reg = raw?.let { runCatching { JSONObject(it) }.getOrNull() }
-            if (reg != null && !reg.has("error") && reg.optString("device_id").isNotEmpty()) {
+            // The runtime returns the `{ok, data|error}` envelope; a bare
+            // payload is tolerated for an older runtime.
+            val data = reg?.optJSONObject("data") ?: reg
+            if (reg != null && reg.optBoolean("ok", true) && !reg.has("error") &&
+                data?.optString("device_id").orEmpty().isNotEmpty()
+            ) {
                 return RegisterOutcome(true)
             }
-            val code = registrationErrorCode(reg) ?: cr.lastError?.code
+            val nativeError = (reg?.opt("error") as? JSONObject)
+                ?.let { runCatching { SynheartNativeError.fromJson(it) }.getOrNull() }
+                ?: cr.lastError
+            val code = registrationErrorCode(reg) ?: nativeError?.code
             if (code != "STORAGE_UNAVAILABLE") {
-                return RegisterOutcome(false, code ?: reg?.opt("error")?.toString())
+                return RegisterOutcome(false, code ?: reg?.opt("error")?.toString(), nativeError)
             }
             if (attempt >= waitsMs.size) {
                 identityStoreWasUnavailable = true
-                return RegisterOutcome(false, code)
+                return RegisterOutcome(false, code, nativeError)
             }
             SynheartLogger.log(
                 "[Synheart] Credential store unavailable during registration; " +
@@ -3253,16 +3312,14 @@ object Synheart {
     }
 
     /**
-     * Force a fresh registration even when one already exists — for recovering
-     * from a server-side revocation or a key rotation.
+     * Formerly a forced fresh registration. The runtime now refuses to register
+     * a device that already has an identity, so this re-attests instead.
      */
-    suspend fun reregisterDeviceAuth(): Boolean {
-        val cr = coreRuntime ?: return false
-        val clientId = subjectId ?: return false
-        val ok = registerDevice(cr, clientId).ok
-        if (ok) deviceAuthUsedCoreRuntime = true
-        return ok
-    }
+    @Deprecated(
+        "Use reattestDeviceAuth; registration is first-run only.",
+        ReplaceWith("reattestDeviceAuth()"),
+    )
+    suspend fun reregisterDeviceAuth(): Boolean = reattestDeviceAuth()
 
     // ══════════════════════════════════════════════════════════════════ //
     // Vendor event store                                                  //

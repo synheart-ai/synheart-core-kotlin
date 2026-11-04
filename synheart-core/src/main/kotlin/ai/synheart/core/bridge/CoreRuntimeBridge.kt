@@ -1064,6 +1064,23 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
     fun registerDevice(clientId: String): String? =
         readAndFreeString(lib.synheart_core_sdk_register_device(requireHandle(), clientId))
 
+    /**
+     * Refresh the current identity's server attestation without rotating it.
+     *
+     * Returns the envelope's `data` (`device_id`, `subject_id`, `attestation`,
+     * `attestation_format`, `attested_at`), or null when the loaded runtime
+     * predates the call. Throws [ai.synheart.core.config.SyncNativeException]
+     * on a refusal; the device then keeps the verdict it already had. Blocks —
+     * call off the main thread.
+     */
+    fun reattestDevice(): JSONObject? = soft("sdk_reattest_device", null) {
+        syncEnvelope(readAndFreeString(lib.synheart_core_sdk_reattest_device(requireHandle())))
+    }
+
+    /** Whether the loaded runtime exports `synheart_core_sdk_reattest_device`. */
+    val reattestDeviceAvailable: Boolean
+        get() = hasSymbol("synheart_core_sdk_reattest_device")
+
     /** Device-auth status JSON, or null. */
     fun deviceAuthStatus(): String? =
         readAndFreeString(lib.synheart_core_sdk_device_auth_status(requireHandle()))
