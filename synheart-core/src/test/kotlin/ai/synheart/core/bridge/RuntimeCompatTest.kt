@@ -41,6 +41,13 @@ class RuntimeCompatTest {
     }
 
     @Test
+    fun `check accepts the minimum as OLDER`() {
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", RuntimeCompat.MINIMUM))
+        assertEquals(RuntimeCompatStatus.OLDER, r.status)
+        assertTrue(r.isAcceptable)
+    }
+
+    @Test
     fun `check is UNKNOWN without a version, still acceptable`() {
         assertEquals(RuntimeCompatStatus.UNKNOWN, RuntimeCompat.check(null).status)
         assertTrue(RuntimeCompat.check(JSONObject()).isAcceptable)
@@ -69,7 +76,7 @@ class RuntimeCompatTest {
 
     @Test
     fun `a malformed ABI falls back to the version checks`() {
-        val r = RuntimeCompat.check(JSONObject().put("core_runtime", "0.45.0").put("abi", "two"))
+        val r = RuntimeCompat.check(JSONObject().put("core_runtime", RuntimeCompat.WRITTEN_AGAINST).put("abi", "two"))
         assertEquals(RuntimeCompatStatus.OK, r.status)
         assertEquals(null, r.abi)
     }

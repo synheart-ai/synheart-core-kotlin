@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Install hints now recommend runtime 0.46.0.** It reports each output no
+  finer than the granularity your app's HSM Schema declares: a `band` output
+  carries the middle of its band (`0.17`, `0.5` or `0.83`) with the band named
+  in `meta.synheart.bands`, and a `directive` output is left out of the frame
+  and listed in `state_withheld`. It keeps stored windows, session summaries
+  and history only as long as the schema's `retention` allows. No binding
+  changes; runtimes from 0.45.0 up still initialise.
+
 ## [0.7.1] - 2026-11-02
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.0 does.

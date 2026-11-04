@@ -86,7 +86,7 @@ State is computed in a native runtime loaded over JNA. It is **not** bundled in
 the published AAR:
 
 ```bash
-synheart install runtime --version 0.45.0
+synheart install runtime --version 0.46.0
 ```
 
 That writes the binaries to

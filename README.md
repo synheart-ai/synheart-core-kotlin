@@ -586,7 +586,7 @@ directory, and attested device identity), use [`SynheartInstance`](#secondary-ru
 | Method | Description |
 |--------|-------------|
 | `runtimeVersion` / `buildInfo()` | The **native runtime's** version / build metadata |
-| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.45.0) and `MINIMUM` (0.45.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
+| `runtimeCompatibility` | Runtime gate result: the loaded runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `WRITTEN_AGAINST` (0.46.0) and `MINIMUM` (0.45.0); `initialize` throws `SynheartRuntimeException` when it is not acceptable |
 | `runtimeError` | Why the runtime is unavailable (not installed, wrong architecture, failed to load), or null; its `installCommand` is the fix |
 | `lastNativeError` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or null when it succeeded |
 | `SYNHEART_CORE_VERSION` | This Kotlin SDK's own version |
@@ -971,7 +971,7 @@ The SDK loads a native runtime (`libsynheart_core_runtime.so`) over JNA. It is
 provision it with the CLI:
 
 ```bash
-synheart install runtime --version 0.45.0
+synheart install runtime --version 0.46.0
 ```
 
 That writes the binaries to `<your-app-module>/synheart/vendor/runtime/android/jniLibs/<abi>/`.
