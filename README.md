@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -235,7 +235,7 @@ Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.7.1'
+    implementation 'ai.synheart:synheart-core:0.8.0'
 }
 ```
 
@@ -871,7 +871,7 @@ paths go untested locally unless you drop a desktop build of the runtime into
 
 - All processing is **on-device by default**
 - **No raw biosignals** are stored or transmitted
-- **HSI stream is consent-gated** — `onHSIUpdate` only emits frames when `biosignals` consent is granted
+- **HSI stream is consent-gated** — `onHSIUpdate` emits a window only when a collection consent (`biosignals`, `behavior`, `phone_context`) or `research` is granted
 - Cloud sync only for aggregated HSI (with user consent)
 - **SRM baseline persistence** — Learned baselines are encrypted and persisted to `EncryptedSharedPreferences`, restored automatically on next launch
 - Consent management via `ConsentModule`
