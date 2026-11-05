@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`status: "registered"`) instead of registering it again, which the runtime
   refuses.
 - Registration runs off the calling thread.
+- **Daily values are no longer dropped when no session is running.**
+  `srmPushWearableDaily` and `srmRefreshWearableReference` build the
+  pipeline first, so `HealthConnectRuntimeSink` and the SRM module store
+  their values too. Health Connect pulls and vendor syncs usually run with no
+  session open, and the runtime refused every value with `-1`.
 
 ## [0.7.1] - 2026-11-02
 

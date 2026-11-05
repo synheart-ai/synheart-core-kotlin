@@ -1396,6 +1396,10 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * `5002` for a value outside the metric's plausible bounds or a stream the
      * person has not permitted (not stored); `-1` with no running pipeline;
      * `null` when the symbol is absent.
+     *
+     * Builds the engine pipeline first (a no-op when one exists). Health
+     * Connect pulls and vendor syncs usually run with no session open, and
+     * without a pipeline the runtime refuses every daily value with `-1`.
      */
     fun srmPushWearableDaily(
         provider: String,
@@ -1406,6 +1410,7 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
         value: Double,
         vendorSummary: Boolean = true,
     ): Int? = soft("srm_push_wearable_daily", null) {
+        ensurePipeline()
         val rc = lib.synheart_core_srm_push_wearable_daily(
             requireHandle(),
             provider,
@@ -1425,10 +1430,12 @@ class CoreRuntimeBridge private constructor(private var handle: Pointer?) {
      * **before** [year]-[month]-[day], so a day never sits in its own baseline.
      * Call once a day after the day's values are pushed, with the date after
      * the last complete one. Returns `0`, `1004`, `1002` (busy), `-1` (no
-     * pipeline), or `null` when the symbol is absent.
+     * pipeline), or `null` when the symbol is absent. Builds the pipeline
+     * first, as [srmPushWearableDaily] does.
      */
     fun srmRefreshWearableReference(year: Int, month: Int, day: Int): Int? =
         soft("srm_refresh_wearable_reference", null) {
+            ensurePipeline()
             val rc = lib.synheart_core_srm_refresh_wearable_reference(requireHandle(), year, month, day)
             ok(rc)
             rc
