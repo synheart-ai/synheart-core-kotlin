@@ -2458,7 +2458,8 @@ object Synheart {
      *
      * Returns `0`; `1004` for an unknown metric; `5002` for a value outside the
      * metric's plausible bounds or a stream the person has not permitted (not
-     * stored); `-1` with no running pipeline or no runtime.
+     * stored); `-1` with no runtime. Builds the engine pipeline first, so a
+     * push with no session running is stored.
      */
     fun srmPushWearableDaily(
         provider: String,
