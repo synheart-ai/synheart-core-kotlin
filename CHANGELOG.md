@@ -23,6 +23,10 @@ Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.8.0 does.
   the resting-HR record, encrypts its session cache and needs `minSdk` 26,
   which this SDK already requires.
 - `compileSdk` raised to 36, which synheart-wear 0.4.4 and later need.
+- The backfill now reads `android.permission.health.READ_RESTING_HEART_RATE`.
+  synheart-wear 0.4.5 declares it in its manifest and requests it with heart
+  rate; an app that runs its own Health Connect permission flow must request it
+  too. Without it, resting HR falls back to the asleep mean.
 
 ## [0.8.0] - 2026-11-05
 
