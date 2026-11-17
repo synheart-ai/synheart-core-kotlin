@@ -161,15 +161,15 @@ class HealthConnectRuntimeSink(
 
             overnight[day]?.let { o ->
                 o.hrvRmssdMs?.takeIf { it > 0 }?.let { push(DailyMetric.OVERNIGHT_RMSSD_MS, it) }
-                // The reader's figure is the mean HR inside the night's sleep
-                // sessions, the night's only heart rate. It feeds both
-                // baselines: the Sleep Score's overnight HR, and the resting HR
-                // Recovery and Readiness read (the runtime's rule for a source
+                // Mean HR asleep feeds the Sleep Score's overnight-HR baseline.
+                val asleepHr = o.overnightHrBpm?.takeIf { it > 0 }
+                asleepHr?.let { push(DailyMetric.OVERNIGHT_HR_BPM, it) }
+                // Resting HR is Health Connect's resting-HR record. Without
+                // one, the asleep mean stands in so Recovery and Readiness
+                // keep a resting-HR baseline (the runtime's rule for a source
                 // with one overnight figure).
-                o.restingHrBpm?.takeIf { it > 0 }?.let {
-                    push(DailyMetric.OVERNIGHT_HR_BPM, it)
-                    push(DailyMetric.RESTING_HR_BPM, it)
-                }
+                (o.restingHrBpm?.takeIf { it > 0 } ?: asleepHr)
+                    ?.let { push(DailyMetric.RESTING_HR_BPM, it) }
             }
 
             if (dayDidPush) daysIngested++
