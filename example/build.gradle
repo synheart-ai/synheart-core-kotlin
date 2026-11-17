@@ -44,7 +44,7 @@ def credString = { String key -> (synheartCreds[key] ?: '').toString() }
 
 android {
     namespace 'ai.synheart.core.example'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'ai.synheart.core.example'
