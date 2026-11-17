@@ -17,7 +17,7 @@ description = 'Synheart Core SDK for Android - Unified HSI-compatible data colle
 
 android {
     namespace 'ai.synheart.core'
-    compileSdk 35
+    compileSdk 36
 
     lint {
         // CI runs `lint` separately; don't fail `build`/publishing on lint issues.
@@ -108,7 +108,7 @@ dependencies {
     // Synheart sibling SDKs
     // emotion and focus removed — now computed by synheart-engine
     // and accessed via CoreRuntimeBridge.
-    implementation 'ai.synheart:synheart-wear:0.4.1'
+    implementation 'ai.synheart:synheart-wear:0.4.5'
     implementation 'ai.synheart:synheart-behavior:0.4.1'
     // `api`, not `implementation`: session types are part of this SDK's public
     // signature — `startWatchSession(SessionConfig)`, `watchSessionEvents:

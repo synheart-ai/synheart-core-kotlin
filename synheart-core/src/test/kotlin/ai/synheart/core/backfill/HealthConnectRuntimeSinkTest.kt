@@ -136,6 +136,7 @@ class HealthConnectRuntimeSinkTest {
             overnight = mapOf(day to OvernightPhysiologySummary(
                 hrvRmssdMs = 55.0,
                 restingHrBpm = 58.0,
+                overnightHrBpm = 54.0,
             )),
         )
         val (s, r) = sink(reader)
@@ -161,8 +162,8 @@ class HealthConnectRuntimeSinkTest {
         assertEquals(90.0, dims.getValue("sleep.deep_min").value, 0.0001)
         assertEquals(110.0, dims.getValue("sleep.rem_min").value, 0.0001)
         assertEquals(55.0, dims.getValue("cardiac.overnight_rmssd_ms").value, 0.0001)
-        // The one overnight HR figure feeds both heart-rate baselines.
-        assertEquals(58.0, dims.getValue("cardiac.overnight_hr_bpm").value, 0.0001)
+        // Mean HR asleep and the resting-HR record go to separate baselines.
+        assertEquals(54.0, dims.getValue("cardiac.overnight_hr_bpm").value, 0.0001)
         assertEquals(58.0, dims.getValue("cardiac.resting_hr_bpm").value, 0.0001)
 
         // All pushes are Health Connect vendor summaries filed on the wake date.
@@ -223,6 +224,38 @@ class HealthConnectRuntimeSinkTest {
     }
 
     @Test
+    fun `without a resting record the asleep mean stands in for resting HR`() = runTest {
+        val reader = FakeReader(
+            overnight = mapOf(day to OvernightPhysiologySummary(
+                hrvRmssdMs = null,
+                restingHrBpm = null,
+                overnightHrBpm = 55.0,
+            )),
+        )
+        val (s, r) = sink(reader)
+        s.backfill(daysBack = 30)
+
+        val dims = r.pushes.associate { it.dimension to it.value }
+        assertEquals(55.0, dims.getValue("cardiac.overnight_hr_bpm"), 0.0001)
+        assertEquals(55.0, dims.getValue("cardiac.resting_hr_bpm"), 0.0001)
+    }
+
+    @Test
+    fun `a resting record without sleep pushes resting HR only`() = runTest {
+        val reader = FakeReader(
+            overnight = mapOf(day to OvernightPhysiologySummary(
+                hrvRmssdMs = null,
+                restingHrBpm = 61.0,
+            )),
+        )
+        val (s, r) = sink(reader)
+        val result = s.backfill(daysBack = 30)
+
+        assertEquals(1, result.dimensionsPushed)
+        assertEquals(mapOf("cardiac.resting_hr_bpm" to 61.0), r.pushes.associate { it.dimension to it.value })
+    }
+
+    @Test
     fun `multiple days are aggregated independently`() = runTest {
         val d1 = LocalDate.of(2026, 1, 10)
         val d2 = LocalDate.of(2026, 1, 11)
@@ -232,7 +265,7 @@ class HealthConnectRuntimeSinkTest {
                 d2 to SleepNightSummary(360.0, null, null),
             ),
             overnight = mapOf(
-                d1 to OvernightPhysiologySummary(52.0, 60.0),
+                d1 to OvernightPhysiologySummary(52.0, 60.0, overnightHrBpm = 56.0),
             ),
         )
         val (s, r) = sink(reader)

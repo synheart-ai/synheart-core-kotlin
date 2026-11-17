@@ -1,6 +1,6 @@
 # Synheart Core SDK — Kotlin
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
+[![Version](https://img.shields.io/badge/version-0.8.1-blue.svg)](https://github.com/synheart-ai/synheart-core-kotlin)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9%2B-7F52FF.svg)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -84,7 +84,7 @@ These ship in the same artifact and are wired through the runtime, but only beco
 | **Baselines** | Reactive snapshot of the user's wearable-baseline state — `Flow<BaselinesSnapshot>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night recent-scores ring. | `Baselines.shared` |
 | **Breathing** | 4-pillar breathing-compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge)` |
 | **Syni** | Consent-gated facade around the [`ai.synheart.syni`](https://github.com/synheart-ai/syni-kotlin) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `ConsentType.SYNI` check. | `SyniModule(context, consent)` |
-| **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `health_connect`. | `HealthConnectRuntimeSink(reader, bridge)` |
+| **Health Connect backfill** | Cold-start SRM seeding from Health Connect's sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.overnight_hr_bpm` / `cardiac.resting_hr_bpm` under each local wake date, provider `health_connect`. Resting HR is Health Connect's resting-HR record, or the mean HR asleep on a day without one. | `HealthConnectRuntimeSink(reader, bridge)` |
 | **Scoring models** | Typed input + result classes for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.kt` |
 | **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with the sibling platform SDKs. | `modules/cloud/UploadModels.kt` |
 
@@ -235,7 +235,7 @@ Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 
 ```gradle
 dependencies {
-    implementation 'ai.synheart:synheart-core:0.8.0'
+    implementation 'ai.synheart:synheart-core:0.8.1'
 }
 ```
 
@@ -252,7 +252,7 @@ dependencies {
 | | |
 |---|---|
 | **`minSdk`** | **26** — see the note below |
-| `compileSdk` | 35 |
+| `compileSdk` | 36 |
 | Java / Kotlin JVM target | 17 |
 | Core library desugaring | **required** |
 
@@ -297,6 +297,8 @@ Add required permissions to your `AndroidManifest.xml`:
 ```xml
 <!-- Health data permissions (if using Health Connect) -->
 <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+<!-- Resting HR for the backfill; without it resting HR falls back to the asleep mean -->
+<uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 <uses-permission android:name="android.permission.health.READ_STEPS" />
 
 <!-- Foreground service permission -->

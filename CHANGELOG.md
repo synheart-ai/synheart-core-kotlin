@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-17
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.8.0 does.
+
+### Fixed
+- **Health Connect backfill pushes the real resting heart rate.** It pushed the
+  mean heart rate asleep as both `cardiac.overnight_hr_bpm` and
+  `cardiac.resting_hr_bpm`. Resting HR now comes from Health Connect's
+  resting-HR record; the asleep mean is pushed as overnight HR, and stands in
+  for resting HR only on a day without a record.
+
+### Changed
+- Requires `ai.synheart:synheart-wear` 0.4.5 (was 0.4.1). That release reads
+  the resting-HR record, encrypts its session cache and needs `minSdk` 26,
+  which this SDK already requires.
+- `compileSdk` raised to 36, which synheart-wear 0.4.4 and later need.
+- The backfill now reads `android.permission.health.READ_RESTING_HEART_RATE`.
+  synheart-wear 0.4.5 declares it in its manifest and requests it with heart
+  rate; an app that runs its own Health Connect permission flow must request it
+  too. Without it, resting HR falls back to the asleep mean.
+
 ## [0.8.0] - 2026-11-05
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.x does; recommends 0.46.0.
