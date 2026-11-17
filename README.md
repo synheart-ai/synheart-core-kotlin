@@ -297,6 +297,8 @@ Add required permissions to your `AndroidManifest.xml`:
 ```xml
 <!-- Health data permissions (if using Health Connect) -->
 <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+<!-- Resting HR for the backfill; without it resting HR falls back to the asleep mean -->
+<uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 <uses-permission android:name="android.permission.health.READ_STEPS" />
 
 <!-- Foreground service permission -->
