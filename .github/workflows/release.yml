@@ -5,6 +5,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Read-only token: Maven publishing uses the Sonatype secrets, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and Validate Release
