@@ -1,8 +1,8 @@
 plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.plugin.serialization'
-    id 'org.jetbrains.dokka' version '2.0.0'
-    id 'org.jetbrains.dokka-javadoc' version '2.0.0'
+    id 'org.jetbrains.dokka' version '2.3.0'
+    id 'org.jetbrains.dokka-javadoc' version '2.3.0'
     id 'maven-publish'
     id 'signing'
 }
@@ -69,27 +69,27 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
 
     // Kotlin Coroutines
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0'
 
     // AndroidX Lifecycle
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
     implementation 'androidx.lifecycle:lifecycle-service:2.6.2'
 
     // Kotlinx Serialization
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0'
 
     // OkHttp for HTTP client (Cloud Connector)
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.1'
 
     // WorkManager
-    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    implementation 'androidx.work:work-runtime-ktx:2.12.0'
 
     // AndroidX Security (for encrypted storage)
-    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    implementation 'androidx.security:security-crypto:1.1.0'
 
     // JNA for the Synheart native runtime library
-    implementation 'net.java.dev.jna:jna:5.14.0@aar'
+    implementation 'net.java.dev.jna:jna:5.19.1@aar'
 
     // Wear Data Layer — for the OPT-IN phone-side edge-ingest transport adapter
     // (EdgeIngestService). Additive: the pure EdgeIngest core has no dependency
@@ -102,46 +102,46 @@ dependencies {
     // EdgeIngestService must add play-services-wearable to its own build (see
     // the "Edge ingest" section of README.md). The pure EdgeIngest core needs
     // neither dependency.
-    compileOnly 'com.google.android.gms:play-services-wearable:18.2.0'
-    compileOnly 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+    compileOnly 'com.google.android.gms:play-services-wearable:20.0.1'
+    compileOnly 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0'
 
     // Synheart sibling SDKs
     // emotion and focus removed — now computed by synheart-engine
     // and accessed via CoreRuntimeBridge.
     implementation 'ai.synheart:synheart-wear:0.4.5'
-    implementation 'ai.synheart:synheart-behavior:0.4.1'
+    implementation 'ai.synheart:synheart-behavior:0.6.0'
     // `api`, not `implementation`: session types are part of this SDK's public
     // signature — `startWatchSession(SessionConfig)`, `watchSessionEvents:
     // Flow<SessionEvent>`, `getWatchStatus(): WatchStatus?`. Behind
     // `implementation` those types are off a consumer's compile classpath and
     // the whole watch API is uncallable. The sibling platform SDKs re-export
     // their session package for the same reason.
-    api 'ai.synheart:synheart-session:0.3.0'
+    api 'ai.synheart:synheart-session:0.4.0'
 
     // synheart-session declares these `compileOnly` so a phone-only consumer is
     // not forced to ship Play Services. This SDK exposes the watch API, so it is
     // the layer that must actually provide them — without them at runtime
     // WatchSessionRelay throws NoClassDefFoundError on first use and every watch
     // call silently reports "unsupported".
-    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+    implementation 'com.google.android.gms:play-services-wearable:20.0.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0'
     implementation 'ai.synheart:synheart-auth:0.1.5'
 
     // Syni on-device agent SDK.
     implementation 'ai.synheart:syni:0.0.3'
 
     // JNA (non-Android JAR for host unit tests)
-    testImplementation 'net.java.dev.jna:jna:5.14.0'
+    testImplementation 'net.java.dev.jna:jna:5.19.1'
     // Real org.json for host unit tests (Android stubs throw at runtime)
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'org.json:json:20260814'
 
     // Testing
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
-    testImplementation 'io.mockk:mockk:1.13.8'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0'
+    testImplementation 'io.mockk:mockk:1.14.12'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }
 
 // Forward jna.library.path to the test JVM so host-side tests can load the native library.

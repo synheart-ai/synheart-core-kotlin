@@ -118,12 +118,12 @@ dependencies {
 
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     // Compose, this example's UI toolkit. The
     // BOM pins every artifact to one release so the compiler and the runtime
     // libraries cannot drift apart.
-    implementation platform('androidx.compose:compose-bom:2024.09.03')
+    implementation platform('androidx.compose:compose-bom:2026.11.01')
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material-icons-extended'
     implementation 'androidx.compose.ui:ui'
@@ -132,11 +132,11 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
     debugImplementation 'androidx.compose.ui:ui-tooling'
 
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 
     // Unit tests for the pure host-side classes (simulator, typing windows,
     // rest detector). org.json is on the classpath because the android.jar
     // stubs throw at runtime and TypingSessionData serialises through it.
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'org.json:json:20260814'
 }

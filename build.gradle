@@ -1,6 +1,6 @@
 // Top-level build file
 buildscript {
-    ext.kotlin_version = '2.3.0'
+    ext.kotlin_version = '2.4.21'
     repositories {
         google()
         mavenCentral()
@@ -8,7 +8,7 @@ buildscript {
     }
     dependencies {
         // Gradle 9.x requires a newer Android Gradle Plugin than 8.1.x
-        classpath 'com.android.tools.build:gradle:9.0.0-rc02'
+        classpath 'com.android.tools.build:gradle:9.6.0-alpha05'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "org.jetbrains.kotlin:kotlin-serialization:$kotlin_version"
         // Compose compiler for :example. Kotlin 2.x moved it out of AGP,

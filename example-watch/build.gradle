@@ -47,16 +47,16 @@ android {
 dependencies {
     // The session engine that actually runs the session on this device, plus
     // the Data Layer transport for talking back to the phone.
-    implementation 'ai.synheart:synheart-session:0.2.1'
-    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'ai.synheart:synheart-session:0.4.0'
+    implementation 'com.google.android.gms:play-services-wearable:20.0.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     implementation 'androidx.core:core-ktx:1.12.0'
-    implementation platform('androidx.compose:compose-bom:2024.09.03')
+    implementation platform('androidx.compose:compose-bom:2026.11.01')
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.activity:activity-compose:1.9.2'
     implementation 'androidx.wear.compose:compose-material:1.4.0'
 
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }
