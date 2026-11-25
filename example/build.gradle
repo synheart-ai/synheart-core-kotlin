@@ -118,7 +118,7 @@ dependencies {
 
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     // Compose, this example's UI toolkit. The
     // BOM pins every artifact to one release so the compiler and the runtime
@@ -132,7 +132,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
     debugImplementation 'androidx.compose.ui:ui-tooling'
 
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 
     // Unit tests for the pure host-side classes (simulator, typing windows,
     // rest detector). org.json is on the classpath because the android.jar
