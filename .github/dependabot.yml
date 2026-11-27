@@ -16,6 +16,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Compose BOM 2026.11.01 requires compileSdk 37.
+      - dependency-name: "androidx.compose:compose-bom"
+        versions: [">= 2026.11.01"]
 
   - package-ecosystem: github-actions
     directory: "/"
